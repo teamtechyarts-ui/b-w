@@ -183,4 +183,22 @@ describe('LoginScreen', () => {
     });
     expect(onNavigateToForgotPassword).toHaveBeenCalledTimes(1);
   });
+
+  it('navigates to Staff Login when Staff Login link is tapped', async () => {
+    const onNavigateToStaff = jest.fn();
+    const view = await render(
+      <LoginScreen
+        onSessionEstablished={jest.fn()}
+        onNavigateToSignUp={jest.fn()}
+        onNavigateToForgotPassword={jest.fn()}
+        onNavigateToDriverLogin={onNavigateToStaff}
+        onBack={jest.fn()}
+      />,
+    );
+
+    await act(async () => {
+      fireEvent.press(view.getByText('Staff Login →'));
+    });
+    expect(onNavigateToStaff).toHaveBeenCalledTimes(1);
+  });
 });
