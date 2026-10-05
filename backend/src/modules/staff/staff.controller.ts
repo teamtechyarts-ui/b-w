@@ -3,6 +3,7 @@ import { IsNotEmpty, IsString, IsUUID, MaxLength } from 'class-validator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { ProvisionStaffDto } from './dto/provision-staff.dto';
+import { ChangeDriverPinDto } from './dto/change-driver-pin.dto';
 import { StaffService } from './staff.service';
 
 class DriverNameDto {
@@ -19,6 +20,39 @@ export class StaffController {
   @Roles('admin')
   provision(@Req() req: any, @Body() body: ProvisionStaffDto) {
     return this.staff.provision(req.user.id, body);
+  }
+
+  @Patch('admin/staff/:profileId/driver-pin')
+  @Roles('admin')
+  changeDriverPin(
+    @Req() req: any,
+    @Param('profileId', ParseUUIDPipe) id: string,
+    @Body() body: ChangeDriverPinDto,
+  ) {
+    const pin = body.resolvedPin || body.newPin || body.pin || '';
+    return this.staff.changeStaffPin(req.user.id, id, pin);
+  }
+
+  @Patch('admin/staff/:profileId/facility-pin')
+  @Roles('admin')
+  changeFacilityPin(
+    @Req() req: any,
+    @Param('profileId', ParseUUIDPipe) id: string,
+    @Body() body: ChangeDriverPinDto,
+  ) {
+    const pin = body.resolvedPin || body.newPin || body.pin || '';
+    return this.staff.changeStaffPin(req.user.id, id, pin);
+  }
+
+  @Patch('admin/staff/:profileId/pin')
+  @Roles('admin')
+  changeStaffPin(
+    @Req() req: any,
+    @Param('profileId', ParseUUIDPipe) id: string,
+    @Body() body: ChangeDriverPinDto,
+  ) {
+    const pin = body.resolvedPin || body.newPin || body.pin || '';
+    return this.staff.changeStaffPin(req.user.id, id, pin);
   }
 
   @Get('admin/staff')
@@ -39,6 +73,12 @@ export class StaffController {
   @Roles('admin')
   reassignFacility(@Req() req: any, @Param('profileId', ParseUUIDPipe) id: string, @Body() body: ReassignFacilityDto) {
     return this.staff.reassignFacility(req.user.id, id, body.facilityId);
+  }
+
+  @Patch('admin/staff/:profileId/availability')
+  @Roles('admin')
+  updateAvailability(@Req() req: any, @Param('profileId', ParseUUIDPipe) id: string, @Body('isAvailable') isAvailable: boolean) {
+    return this.staff.updateDriverAvailability(req.user.id, id, Boolean(isAvailable));
   }
 
   @Patch('admin/staff/:profileId/revoke-access')

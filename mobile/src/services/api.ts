@@ -6,20 +6,46 @@ import {
 
 export {API_BASE_URL};
 
+export function getHttpStatusErrorMessage(status: number): string {
+  switch (status) {
+    case 400:
+      return 'Validation error. Please check your submission.';
+    case 401:
+      return 'Authentication required. Please sign in again.';
+    case 403:
+      return 'Insufficient permissions to perform this operation.';
+    case 404:
+      return 'Driver operation is not available.';
+    case 409:
+      return 'Conflict: record or resource already exists.';
+    case 429:
+      return 'Rate limit exceeded. Please wait and try again.';
+    case 500:
+      return 'Internal server error. Please try again.';
+    case 503:
+      return 'Service unavailable. Please try again later.';
+    default:
+      return `Request failed with status ${status}`;
+  }
+}
+
 export function getApiErrorMessage(
   data: unknown,
   fallback: string,
 ): string {
+  if (typeof data === 'string' && data.trim()) {
+    if (/^Cannot (GET|POST|PATCH|PUT|DELETE)\b/i.test(data)) {
+      return fallback;
+    }
+    return data.trim();
+  }
+
   if (
     typeof data === 'object' &&
-    data !== null &&
-    'message' in data
+    data !== null
   ) {
-    const message = (
-      data as {
-        message?: unknown;
-      }
-    ).message;
+    const obj = data as Record<string, unknown>;
+    const message = obj.message;
 
     if (Array.isArray(message)) {
       return message
@@ -31,7 +57,14 @@ export function getApiErrorMessage(
       typeof message === 'string' &&
       message.trim()
     ) {
-      return message;
+      if (/^Cannot (GET|POST|PATCH|PUT|DELETE)\b/i.test(message)) {
+        return fallback;
+      }
+      return message.trim();
+    }
+
+    if (typeof obj.error === 'string' && obj.error.trim()) {
+      return obj.error.trim();
     }
   }
 
@@ -64,7 +97,17 @@ async function fetchWithTimeout(url: string, init: RequestInit): Promise<Respons
     ]);
   } catch (error) {
     if (error instanceof Error && error.message.startsWith('Request timed out')) throw error;
-    if (error instanceof TypeError) throw new Error('Network unavailable. Check your connection and try again.');
+    if (
+      error instanceof TypeError ||
+      (error instanceof Error &&
+        (error.name === 'TypeError' ||
+          error.message.includes('Failed to fetch') ||
+          error.message.includes('fetch failed') ||
+          error.message.includes('NetworkError') ||
+          error.message.includes('network error')))
+    ) {
+      throw new Error('Network unavailable. Check your connection and try again.');
+    }
     throw error;
   } finally {
     if (timer) clearTimeout(timer);
@@ -151,10 +194,11 @@ export async function apiRequest<T>(
     await parseResponse(response);
 
   if (!response.ok) {
+    const fallback = getHttpStatusErrorMessage(response.status);
     throw new Error(
       getApiErrorMessage(
         data,
-        `Request failed with status ${response.status}`,
+        fallback,
       ),
     );
   }

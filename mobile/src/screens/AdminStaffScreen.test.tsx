@@ -11,11 +11,13 @@ test('Admin provisioning refreshes staff and shows success', async () => {
   const view = await render(<AdminStaffScreen accessToken="t" onBack={jest.fn()} onStaff={jest.fn()} />);
   await waitFor(() => expect(view.getByText('Fictional Driver')).toBeTruthy());
   await act(async () => {fireEvent.changeText(view.getByLabelText('Staff name'), 'Test Driver');});
-  await act(async () => {fireEvent.changeText(view.getByLabelText('Staff phone'), '+16505550177');});
+  await act(async () => {fireEvent.changeText(view.getByLabelText('Staff phone'), '9876543210');});
+  await act(async () => {fireEvent.changeText(view.getByLabelText('Driver PIN'), '123456');});
+  await act(async () => {fireEvent.changeText(view.getByLabelText('Confirm Driver PIN'), '123456');});
   await waitFor(() => expect(view.getByLabelText('Staff name').props.value).toBe('Test Driver'));
-  await waitFor(() => expect(view.getByLabelText('Staff phone').props.value).toBe('+16505550177'));
-  await act(async () => {fireEvent.press(view.getByText('Create staff'));});
-  expect(provision).toHaveBeenCalledWith('t', {phone: '+16505550177', fullName: 'Test Driver', role: 'driver', facilityId: ''});
-  await waitFor(() => expect(view.getByText('Staff account created. Login uses the Development OTP.')).toBeTruthy());
+  await waitFor(() => expect(view.getByLabelText('Staff phone').props.value).toBe('9876543210'));
+  await act(async () => {fireEvent.press(view.getByLabelText('Submit staff creation'));});
+  expect(provision).toHaveBeenCalledWith('t', {phone: '+919876543210', fullName: 'Test Driver', role: 'driver', facilityId: undefined, pin: '123456'});
+  await waitFor(() => expect(view.getByText('Driver account created successfully.')).toBeTruthy());
   view.unmount();
 });

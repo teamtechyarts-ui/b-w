@@ -85,7 +85,7 @@ describe('MapsService', () => {
   function fixture() {
     const provider: MapsProvider = {
       mode:
-        'mock',
+        'live',
 
       getRoute:
         jest
@@ -189,7 +189,7 @@ describe('MapsService', () => {
     expect(
       service.providerName,
     ).toBe(
-      'mock',
+      'google',
     );
   });
 

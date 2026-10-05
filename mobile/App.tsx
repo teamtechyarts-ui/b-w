@@ -21,6 +21,7 @@ import {
 import {
   NavigationContainer,
   createNavigationContainerRef,
+  LinkingOptions,
 } from '@react-navigation/native';
 
 import {
@@ -29,6 +30,10 @@ import {
 
 import WelcomeScreen from './src/screens/WelcomeScreen';
 import LoginScreen from './src/screens/LoginScreen';
+import DriverLoginScreen from './src/screens/DriverLoginScreen';
+import SignUpScreen from './src/screens/SignUpScreen';
+import ForgotPasswordScreen from './src/screens/ForgotPasswordScreen';
+import ResetPasswordScreen from './src/screens/ResetPasswordScreen';
 import OtpScreen from './src/screens/OtpScreen';
 import HomeScreen from './src/screens/HomeScreen';
 import CategoryScreen from './src/screens/CategoryScreen';
@@ -44,8 +49,6 @@ import OrdersScreen from './src/screens/OrdersScreen';
 import OrderDetailsScreen from './src/screens/OrderDetailsScreen';
 import NotificationsScreen from './src/screens/NotificationsScreen';
 import BenefitsScreen from './src/screens/BenefitsScreen';
-import PackagesScreen from './src/screens/PackagesScreen';
-import PackageDetailScreen from './src/screens/PackageDetailScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
 import DriverProfileScreen from './src/screens/DriverProfileScreen';
 import DriverDashboardScreen from './src/screens/DriverDashboardScreen';
@@ -63,6 +66,7 @@ import AdminStaffScreen from './src/screens/AdminStaffScreen';
 import AdminStaffDetailScreen from './src/screens/AdminStaffDetailScreen';
 import AdminAssignmentsScreen from './src/screens/AdminAssignmentsScreen';
 import AdminCatalogueScreen from './src/screens/AdminCatalogueScreen';
+import AdminLocationsScreen from './src/screens/AdminLocationsScreen';
 import FacilityIntakeScreen from './src/screens/FacilityIntakeScreen';
 import FacilityVerificationScreen from './src/screens/FacilityVerificationScreen';
 import DriverNotificationsScreen from './src/screens/DriverNotificationsScreen';
@@ -125,7 +129,6 @@ import {
 
 import {
   getAccessTokenFromVerification,
-  requestPhoneOtp,
   verifyPhoneOtp,
 } from './src/services/authApi';
 
@@ -141,7 +144,6 @@ import {
 import type {CreateOrderResponse} from './src/services/ordersApi';
 
 import {
-  completeExistingMockPayment,
   createPaymentOrder,
   verifyPayment,
 } from './src/services/paymentsApi';
@@ -163,6 +165,23 @@ const navigationRef =
     RootStackParamList
   >();
 
+const linking: LinkingOptions<any> = {
+  prefixes: [
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+    'brightwhite://',
+  ],
+  config: {
+    screens: {
+      ResetPassword: 'auth/reset-password',
+      ForgotPassword: 'auth/forgot-password',
+      Login: 'login',
+      SignUp: 'signup',
+      DriverLogin: 'driver/login',
+    },
+  },
+};
+
 const CATEGORY_ORDER = [
   'Wash & Fold',
   'Wash & Steam Iron',
@@ -182,7 +201,6 @@ export default function App() {
 
   const {
     phone,
-    setPhone,
 
     otp,
     setOtp,
@@ -358,6 +376,7 @@ export default function App() {
     resetOrderSuccess,
     resetCheckoutState,
   } = useCheckoutState();
+  const [paymentError, setPaymentError] = useState<string | null>(null);
   const placingOrderRef = useRef(false);
   const createdOrderRef = useRef<CreateOrderResponse | null>(null);
   const orderAttemptRef = useRef<{fingerprint: string; key: string} | null>(null);
@@ -881,6 +900,7 @@ const useSelectedLocation =
       }
 
       try {
+        setPaymentError(null);
         placingOrderRef.current = true;
         setPlacingOrder(
           true,
@@ -948,16 +968,9 @@ const useSelectedLocation =
               order.id,
             );
 
-          const verification =
-            paymentOrder.provider ===
-            'mock'
-              ? await completeExistingMockPayment(
-                  accessToken,
-                  paymentOrder.paymentOrderId,
-                )
-              : await verifyPayment(
-                  accessToken,
-                  await openRazorpayCheckout({
+          const verification = await verifyPayment(
+            accessToken,
+            await openRazorpayCheckout({
                     keyId: String(
                       paymentOrder.keyId ||
                       '',
@@ -1073,9 +1086,8 @@ const useSelectedLocation =
           error instanceof
           PaymentCheckoutCancelledError
         ) {
-          Alert.alert(
-            'Payment Cancelled',
-            error.message,
+          setPaymentError(
+            'Payment was cancelled. Your order is awaiting payment. You can try again or choose Cash on Delivery.',
           );
 
           return;
@@ -1084,10 +1096,9 @@ const useSelectedLocation =
         const message =
           error instanceof Error
             ? error.message
-            : 'Unable to complete your order.';
+            : 'Unable to complete online payment. Please try again or choose Cash on Delivery.';
 
-        Alert.alert(
-          'Order Error',
+        setPaymentError(
           message,
         );
       } finally {
@@ -1101,64 +1112,6 @@ const useSelectedLocation =
   /*
    * AUTH
    */
-
-  const sendOtp =
-    async () => {
-      if (
-        !phone.trim()
-      ) {
-        Alert.alert(
-          'Enter mobile number',
-        );
-
-        return;
-      }
-
-      try {
-        setLoading(
-          true,
-        );
-
-        const normalized =
-          normalizedPhone();
-
-        await requestPhoneOtp(
-          normalized,
-        );
-
-        setPhone(
-          normalized,
-        );
-
-        if (
-          navigationRef.isReady()
-        ) {
-          navigationRef.navigate(
-            'Otp',
-            {
-              phone:
-                normalized,
-            },
-          );
-        }
-      } catch (
-        error: unknown
-      ) {
-        const message =
-          error instanceof Error
-            ? error.message
-            : 'Unable to send OTP';
-
-        Alert.alert(
-          'OTP Error',
-          message,
-        );
-      } finally {
-        setLoading(
-          false,
-        );
-      }
-    };
 
   const verifyOtp =
     async () => {
@@ -1341,7 +1294,8 @@ const useSelectedLocation =
     <NavigationContainer
       ref={
         navigationRef
-      }>
+      }
+      linking={linking}>
       {authenticated && accessToken && !accountRoleFromProfile(profile) ? (
         <Stack.Navigator key="unresolved" screenOptions={{headerShown: false}}>
           <Stack.Screen name="DriverProfile">
@@ -1378,7 +1332,11 @@ const useSelectedLocation =
               onIssues={() => navigationRef.isReady() && navigationRef.navigate('AdminIssues')}
               onGrowth={() => navigationRef.isReady() && navigationRef.navigate('AdminGrowth')}
               onFacilities={() => navigationRef.isReady() && navigationRef.navigate('AdminFacilities')}
+              onLocations={() => navigationRef.isReady() && navigationRef.navigate('AdminLocations')}
               onReports={() => navigationRef.isReady() && navigationRef.navigate('AdminReports')} />}
+          </Stack.Screen>
+          <Stack.Screen name="AdminLocations">
+            {() => <AdminLocationsScreen accessToken={accessToken} onBack={goBack} />}
           </Stack.Screen>
           <Stack.Screen name="AdminCustomers">
             {() => <AdminCustomersScreen accessToken={accessToken} onBack={goBack}
@@ -1400,7 +1358,8 @@ const useSelectedLocation =
             {({route}) => <AdminStaffDetailScreen accessToken={accessToken} profileId={route.params.profileId} onBack={goBack} />}
           </Stack.Screen>
           <Stack.Screen name="AdminAssignments">
-            {() => <AdminAssignmentsScreen accessToken={accessToken} onBack={goBack} />}
+            {() => <AdminAssignmentsScreen accessToken={accessToken} onBack={goBack}
+              onOrder={orderId => navigationRef.isReady() && navigationRef.navigate('AdminOrderDetail', {orderId})} />}
           </Stack.Screen>
           <Stack.Screen name="AdminCatalogue">
             {() => <AdminCatalogueScreen accessToken={accessToken} onBack={goBack} />}
@@ -1466,8 +1425,10 @@ const useSelectedLocation =
           <Stack.Screen
             name="Home">
             {() => (
-              <CustomerTabFrame active="home" onHome={resetToHome} onOrders={openOrders} onPackages={() => navigationRef.isReady() && navigationRef.navigate('Packages')} onAccount={() => navigationRef.isReady() && navigationRef.navigate('Account')}><HomeScreen
+              <CustomerTabFrame active="home" onHome={resetToHome} onOrders={openOrders} onAccount={() => navigationRef.isReady() && navigationRef.navigate('Account')}><HomeScreen
                 customerName={customerNameFromProfile(profile)}
+                accessToken={accessToken}
+                onOpenOrder={openOrderDetails}
                 servicesLoading={
                   servicesLoading
                 }
@@ -1480,6 +1441,9 @@ const useSelectedLocation =
                 selectedAddressId={selectedAddressId}
                 cartItemCount={
                   cartItemCount
+                }
+                cartSubtotal={
+                  cartSubtotal
                 }
                 getQuantity={getQuantity}
                 onSelectAddress={setSelectedAddressId}
@@ -1496,6 +1460,12 @@ const useSelectedLocation =
                   }
                 }}
                 onOpenNotifications={() => navigationRef.isReady() && navigationRef.navigate('Notifications')}
+                onOpenCategory={categoryName => {
+                  setSelectedCategory(categoryName);
+                  if (navigationRef.isReady()) {
+                    navigationRef.navigate('Category', {categoryName});
+                  }
+                }}
               /></CustomerTabFrame>
             )}
           </Stack.Screen>
@@ -1503,23 +1473,17 @@ const useSelectedLocation =
           <Stack.Screen name="Benefits">
             {() => <BenefitsScreen accessToken={accessToken} onBack={goBack} />}
           </Stack.Screen>
-          <Stack.Screen name="Packages">
-            {() => <CustomerTabFrame active="packages" onHome={resetToHome} onOrders={openOrders} onPackages={() => {}} onAccount={() => navigationRef.isReady() && navigationRef.navigate('Account')}><PackagesScreen accessToken={accessToken} onBack={resetToHome} onOpenPackage={packageId => navigationRef.isReady() && navigationRef.navigate('PackageDetail', {packageId})} /></CustomerTabFrame>}
-          </Stack.Screen>
           <Stack.Screen name="Account">
-            {() => <CustomerTabFrame active="account" onHome={resetToHome} onOrders={openOrders} onPackages={() => navigationRef.isReady() && navigationRef.navigate('Packages')} onAccount={() => {}}><AccountScreen onLogout={logout} onOpen={destination => {
+            {() => <CustomerTabFrame active="account" onHome={resetToHome} onOrders={openOrders} onAccount={() => {}}><AccountScreen onLogout={logout} onOpen={destination => {
               if (!navigationRef.isReady()) return;
               if (destination === 'profile') navigationRef.navigate('Profile');
               else if (destination === 'addresses') navigationRef.navigate('Addresses', {mode: 'manage'});
-              else if (destination === 'loyalty' || destination === 'referrals' || destination === 'offers') navigationRef.navigate('Benefits');
+              else if (destination === 'offers') navigationRef.navigate('Benefits');
               else if (destination === 'claims') navigationRef.navigate('Orders');
               else if (destination === 'notifications') navigationRef.navigate('Notifications');
               else if (destination === 'terms') navigationRef.navigate('Support', {showTerms: true});
               else navigationRef.navigate('Support');
             }} /></CustomerTabFrame>}
-          </Stack.Screen>
-          <Stack.Screen name="PackageDetail">
-            {({route}) => <PackageDetailScreen services={services} accessToken={accessToken} packageId={route.params.packageId} onBack={goBack} />}
           </Stack.Screen>
           <Stack.Screen name="Profile">
             {() => <ProfileScreen accessToken={accessToken} onBack={goBack} onAddresses={() => navigationRef.isReady() && navigationRef.navigate('Addresses', {mode: 'manage'})} onLogout={logout} />}
@@ -1666,6 +1630,7 @@ const useSelectedLocation =
             name="AddressForm">
             {() => (
               <AddressFormScreen
+                accessToken={accessToken}
                 editing={
                   Boolean(
                     editingAddressId,
@@ -1689,7 +1654,7 @@ const useSelectedLocation =
                 onSave={
                   saveAddressAndReturn
                 }
-                            />
+              />
             )}
           </Stack.Screen>
 
@@ -1836,12 +1801,20 @@ const useSelectedLocation =
                 placingOrder={
                   placingOrder
                 }
-                onBack={
-                  goBack
+                errorMessage={
+                  paymentError
                 }
-                onSelectPaymentMethod={
-                  setSelectedPaymentMethod
-                }
+                onClearError={() => {
+                  setPaymentError(null);
+                }}
+                onBack={() => {
+                  setPaymentError(null);
+                  goBack();
+                }}
+                onSelectPaymentMethod={method => {
+                  setSelectedPaymentMethod(method);
+                  setPaymentError(null);
+                }}
                 onTermsAcceptedChange={
                   setTermsAccepted
                 }
@@ -1861,6 +1834,8 @@ const useSelectedLocation =
                 return (
                   <HomeScreen
                     customerName={customerNameFromProfile(profile)}
+                    accessToken={accessToken}
+                    onOpenOrder={openOrderDetails}
                     servicesLoading={
                       servicesLoading
                     }
@@ -1873,6 +1848,9 @@ const useSelectedLocation =
                     selectedAddressId={selectedAddressId}
                     cartItemCount={
                       cartItemCount
+                    }
+                    cartSubtotal={
+                      cartSubtotal
                     }
                     getQuantity={getQuantity}
                     onSelectAddress={setSelectedAddressId}
@@ -1889,6 +1867,12 @@ const useSelectedLocation =
                       }
                     }}
                     onOpenNotifications={() => navigationRef.isReady() && navigationRef.navigate('Notifications')}
+                    onOpenCategory={categoryName => {
+                      setSelectedCategory(categoryName);
+                      if (navigationRef.isReady()) {
+                        navigationRef.navigate('Category', {categoryName});
+                      }
+                    }}
                   />
                 );
               }
@@ -1932,7 +1916,7 @@ const useSelectedLocation =
           <Stack.Screen
             name="Orders">
             {() => (
-              <CustomerTabFrame active="orders" onHome={resetToHome} onOrders={() => {}} onPackages={() => navigationRef.isReady() && navigationRef.navigate('Packages')} onAccount={() => navigationRef.isReady() && navigationRef.navigate('Account')}><OrdersScreen
+              <CustomerTabFrame active="orders" onHome={resetToHome} onOrders={() => {}} onAccount={() => navigationRef.isReady() && navigationRef.navigate('Account')}><OrdersScreen
                 accessToken={
                   accessToken
                 }
@@ -1981,7 +1965,15 @@ const useSelectedLocation =
       ) : (
         <Stack.Navigator
           key="auth"
-          initialRouteName="Welcome"
+          initialRouteName={
+            typeof window !== 'undefined' &&
+            (window.location?.pathname?.includes('reset-password') ||
+              window.location?.hash?.includes('type=recovery') ||
+              window.location?.hash?.includes('otp_expired') ||
+              window.location?.search?.includes('otp_expired'))
+              ? 'ResetPassword'
+              : 'Welcome'
+          }
           screenOptions={{
             headerShown:
               false,
@@ -2007,20 +1999,114 @@ const useSelectedLocation =
               navigation,
             }) => (
               <LoginScreen
-                phone={
-                  phone
+                onSessionEstablished={
+                  saveSession
                 }
-                loading={
-                  loading
+                onNavigateToSignUp={() =>
+                  navigation.navigate(
+                    'SignUp',
+                  )
                 }
-                onPhoneChange={
-                  setPhone
+                onNavigateToForgotPassword={() =>
+                  navigation.navigate(
+                    'ForgotPassword',
+                  )
                 }
-                onSendOtp={
-                  sendOtp
+                onNavigateToDriverLogin={() =>
+                  navigation.navigate(
+                    'DriverLogin',
+                  )
                 }
                 onBack={() =>
                   navigation.goBack()
+                }
+              />
+            )}
+          </Stack.Screen>
+
+          <Stack.Screen
+            name="DriverLogin">
+            {({
+              navigation,
+            }) => (
+              <DriverLoginScreen
+                onSessionEstablished={
+                  saveSession
+                }
+                onNavigateToCustomerLogin={() =>
+                  navigation.navigate(
+                    'Login',
+                  )
+                }
+                onBack={() =>
+                  navigation.goBack()
+                }
+              />
+            )}
+          </Stack.Screen>
+
+          <Stack.Screen
+            name="SignUp">
+            {({
+              navigation,
+            }) => (
+              <SignUpScreen
+                onSessionEstablished={
+                  saveSession
+                }
+                onNavigateToLogin={() =>
+                  navigation.navigate(
+                    'Login',
+                  )
+                }
+                onBack={() =>
+                  navigation.goBack()
+                }
+              />
+            )}
+          </Stack.Screen>
+
+          <Stack.Screen
+            name="ForgotPassword">
+            {({
+              navigation,
+            }) => (
+              <ForgotPasswordScreen
+                onBackToLogin={() =>
+                  navigation.navigate(
+                    'Login',
+                  )
+                }
+                onBack={() =>
+                  navigation.goBack()
+                }
+              />
+            )}
+          </Stack.Screen>
+
+          <Stack.Screen
+            name="ResetPassword">
+            {({
+              navigation,
+              route,
+            }) => (
+              <ResetPasswordScreen
+                accessToken={
+                  route.params?.accessToken
+                }
+                onPasswordResetSuccess={() => {}}
+                onBackToLogin={() =>
+                  navigation.navigate(
+                    'Login',
+                  )
+                }
+                onBack={() =>
+                  navigation.goBack()
+                }
+                onNavigateToForgotPassword={() =>
+                  navigation.navigate(
+                    'ForgotPassword',
+                  )
                 }
               />
             )}

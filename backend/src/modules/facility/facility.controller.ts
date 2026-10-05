@@ -48,6 +48,15 @@ export class FacilityController {
     return this.facility.reassignDelivery(req.user.id, orderId, body.driverId);
   }
 
+  @Post("orders/:orderId/handover-to-driver")
+  handoverToDriver(
+    @Req() req: any,
+    @Param("orderId", ParseUUIDPipe) orderId: string,
+    @Body() body?: { driverId?: string },
+  ) {
+    return this.facility.handoverToDriver(req.user.id, orderId, body?.driverId);
+  }
+
   @Post("receive/qr")
   receive(
     @Req() req: any,

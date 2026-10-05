@@ -161,10 +161,7 @@ describe("PaymentsService", () => {
       },
       "profile-1",
     );
-    expect(logistics.assignBestDriver).toHaveBeenCalledWith(
-      "order-1",
-      "pickup",
-    );
+    expect(logistics.assignBestDriver).not.toHaveBeenCalled();
   });
 
   it("rejects a provider payment that does not match the payment order", async () => {
@@ -535,24 +532,5 @@ describe("PaymentsService", () => {
       p_refund_id: refundId,
       p_provider_refund_id: "rfnd_live1",
     });
-  });
-
-  it("keeps mock payment simulation unavailable in production", async () => {
-    process.env.NODE_ENV = "production";
-    const mockProvider = {
-      ...createProviderMock(),
-      mode: "mock" as const,
-      simulatePayment: jest.fn(),
-    };
-    service = new PaymentsService({ admin: {} } as any, mockProvider);
-
-    await expect(
-      service.simulateMockPayment(
-        "profile-1",
-        "00000000-0000-4000-8000-000000000001",
-        "captured",
-      ),
-    ).rejects.toThrow("Mock payment simulation is unavailable");
-    expect(mockProvider.simulatePayment).not.toHaveBeenCalled();
   });
 });

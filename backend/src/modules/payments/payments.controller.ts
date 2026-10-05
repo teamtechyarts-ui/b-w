@@ -35,22 +35,6 @@ export class PaymentsController {
     return this.payments.verifyPayment(req.user.id, body);
   }
 
-  @Post("mock/:paymentOrderId/capture")
-  captureMockPayment(
-    @Req() req: any,
-    @Param("paymentOrderId", ParseUUIDPipe) id: string,
-  ) {
-    return this.payments.simulateMockPayment(req.user.id, id, "captured");
-  }
-
-  @Post("mock/:paymentOrderId/fail")
-  failMockPayment(
-    @Req() req: any,
-    @Param("paymentOrderId", ParseUUIDPipe) id: string,
-  ) {
-    return this.payments.simulateMockPayment(req.user.id, id, "failed");
-  }
-
   @Public()
   @Post("webhook/razorpay")
   webhook(

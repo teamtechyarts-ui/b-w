@@ -3,6 +3,7 @@ module.exports = {
   extends: '@react-native',
 
   ignorePatterns: [
+    'dist/**',
     'ios/Pods/**',
     'ios/build/**',
     'android/.gradle/**',

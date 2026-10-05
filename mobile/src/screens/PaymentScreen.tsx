@@ -1,7 +1,4 @@
-import React, {
-  useState,
-} from 'react';
-
+import React, {useState} from 'react';
 import {
   ActivityIndicator,
   SafeAreaView,
@@ -13,47 +10,26 @@ import {
   View,
 } from 'react-native';
 
-import TermsAndConditionsModal
-  from '../components/TermsAndConditionsModal';
-
-import type {
-  PaymentMethod,
-} from '../types/payment';
-
-import type {
-  CheckoutPricing,
-} from '../utils/orderPricing';
-
-import {
-  formatMoney,
-} from '../utils/orderPricing';
+import AppIcon from '../components/AppIcon';
+import CheckoutProgressBar from '../components/CheckoutProgressBar';
+import TermsAndConditionsModal from '../components/TermsAndConditionsModal';
+import {borderRadius, colors, shadows, spacing, typography} from '../theme/designSystem';
+import type {PaymentMethod} from '../types/payment';
+import type {CheckoutPricing} from '../utils/orderPricing';
+import {formatMoney} from '../utils/orderPricing';
 
 type PaymentScreenProps = {
-  pricing:
-    CheckoutPricing;
+  pricing: CheckoutPricing;
+  selectedPaymentMethod: PaymentMethod | null;
+  termsAccepted: boolean;
+  placingOrder: boolean;
+  errorMessage?: string | null;
+  onClearError?: () => void;
 
-  selectedPaymentMethod:
-    PaymentMethod | null;
-
-  termsAccepted:
-    boolean;
-
-  placingOrder:
-    boolean;
-
-  onBack:
-    () => void;
-
-  onSelectPaymentMethod: (
-    method: PaymentMethod,
-  ) => void;
-
-  onTermsAcceptedChange: (
-    value: boolean,
-  ) => void;
-
-  onPlaceOrder:
-    () => void;
+  onBack: () => void;
+  onSelectPaymentMethod: (method: PaymentMethod) => void;
+  onTermsAcceptedChange: (value: boolean) => void;
+  onPlaceOrder: () => void;
 };
 
 export default function PaymentScreen({
@@ -61,912 +37,662 @@ export default function PaymentScreen({
   selectedPaymentMethod,
   termsAccepted,
   placingOrder,
+  errorMessage,
+  onClearError,
   onBack,
   onSelectPaymentMethod,
   onTermsAcceptedChange,
   onPlaceOrder,
 }: PaymentScreenProps) {
-  const [
-    termsVisible,
-    setTermsVisible,
-  ] =
-    useState(false);
+  const [termsVisible, setTermsVisible] = useState(false);
 
-  const disabled =
-    !selectedPaymentMethod ||
-    !termsAccepted ||
-    placingOrder;
+  const disabled = !selectedPaymentMethod || !termsAccepted || placingOrder;
 
   return (
-    <SafeAreaView
-      style={
-        styles.container
-      }>
-      <StatusBar
-        barStyle="dark-content"
-      />
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="dark-content" />
 
-      <View
-        style={
-          styles.screenContainer
-        }>
-        <View
-          style={
-            styles.pageHeader
-          }>
+      <View style={styles.screenContainer}>
+        {/* Header */}
+        <View style={styles.pageHeader}>
           <TouchableOpacity
-            disabled={
-              placingOrder
-            }
-            onPress={
-              onBack
-            }>
-            <Text
-              style={
-                styles.pageBack
-              }>
-              ← Back
-            </Text>
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+            disabled={placingOrder}
+            style={styles.headerBtn}
+            onPress={onBack}>
+            <View style={styles.backRow}>
+              <AppIcon name="arrow-left" size={16} color={colors.textPrimary} />
+              <Text style={styles.pageBack}>Back</Text>
+            </View>
           </TouchableOpacity>
 
-          <Text
-            style={
-              styles.pageHeaderTitle
-            }>
-            Payment
-          </Text>
+          <Text style={styles.pageHeaderTitle}>Payment</Text>
 
-          <View
-            style={
-              styles.headerSpacer
-            }
-          />
+          <View style={styles.headerSpacer} />
         </View>
 
+        {/* Progress Bar */}
+        <CheckoutProgressBar currentStep="payment" />
+
         <ScrollView
-          style={
-            styles.flex
-          }
-          contentContainerStyle={
-            styles.scrollContent
-          }
-          showsVerticalScrollIndicator={
-            false
-          }>
-          <Text
-            style={
-              styles.sectionTitle
-            }>
-            Price Summary
-          </Text>
-
-          <View
-            style={
-              styles.totalCard
-            }>
-            <View
-              style={
-                styles.summaryRow
-              }>
-              <Text
-                style={
-                  styles.summaryLabel
-                }>
-                Service Subtotal
-              </Text>
-
-              <Text
-                style={
-                  styles.summaryValue
-                }>
-                ₹
-                {formatMoney(
-                  pricing.subtotal,
-                )}
+          style={styles.flex}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}>
+          
+          {/* Price Summary Banner Card */}
+          <View style={styles.totalHeroCard}>
+            <View style={styles.totalHeroTop}>
+              <Text style={styles.totalHeroLabel}>GRAND TOTAL</Text>
+              <Text style={styles.totalHeroAmount}>
+                ₹{formatMoney(pricing.grandTotal)}
               </Text>
             </View>
 
-            <View
-              style={
-                styles.summaryRow
-              }>
-              <Text
-                style={
-                  styles.summaryLabel
-                }>
-                Pickup & Delivery
-              </Text>
+            <View style={styles.totalBreakdown}>
+              <View style={styles.breakdownRow}>
+                <Text style={styles.breakdownLabel}>Service Subtotal</Text>
+                <Text style={styles.breakdownValue}>
+                  ₹{formatMoney(pricing.subtotal)}
+                </Text>
+              </View>
 
-              <Text
-                style={
-                  styles.summaryValue
-                }>
-                {pricing.hasFreeDelivery
-                  ? 'FREE'
-                  : `₹${formatMoney(
-                      pricing.pickupDeliveryCharge,
-                    )}`}
-              </Text>
-            </View>
+              <View style={styles.breakdownRow}>
+                <Text style={styles.breakdownLabel}>Pickup & Delivery</Text>
+                <Text style={[styles.breakdownValue, pricing.hasFreeDelivery && styles.freeDeliveryValue]}>
+                  {pricing.hasFreeDelivery ? 'FREE' : `₹${formatMoney(pricing.pickupDeliveryCharge)}`}
+                </Text>
+              </View>
 
-            <View
-              style={
-                styles.summaryRow
-              }>
-              <Text
-                style={
-                  styles.summaryLabel
-                }>
-                GST @{' '}
-                {
-                  pricing.gstRate
-                }
-                %
-              </Text>
-
-              <Text
-                style={
-                  styles.summaryValue
-                }>
-                ₹
-                {formatMoney(
-                  pricing.gstAmount,
-                )}
-              </Text>
-            </View>
-
-            {pricing.discountAmount > 0 ? <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>Coupons & points discount</Text>
-              <Text style={styles.summaryValue}>−₹{formatMoney(pricing.discountAmount)}</Text>
-            </View> : null}
-
-            <View
-              style={
-                styles.summaryDivider
-              }
-            />
-
-            <View
-              style={
-                styles.summaryRow
-              }>
-              <Text
-                style={
-                  styles.grandTotalLabel
-                }>
-                Grand Total
-              </Text>
-
-              <Text
-                style={
-                  styles.grandTotalValue
-                }>
-                ₹
-                {formatMoney(
-                  pricing.grandTotal,
-                )}
-              </Text>
-            </View>
-          </View>
-
-          <Text
-            style={
-              styles.heading
-            }>
-            Select payment method
-          </Text>
-
-          <TouchableOpacity
-            disabled={
-              placingOrder
-            }
-            style={[
-              styles.paymentMethodCard,
-
-              selectedPaymentMethod ===
-                'cash_on_delivery' &&
-                styles.paymentMethodSelected,
-            ]}
-            onPress={() =>
-              onSelectPaymentMethod(
-                'cash_on_delivery',
-              )
-            }>
-            <View
-              style={
-                styles.radioOuter
-              }>
-              {selectedPaymentMethod ===
-              'cash_on_delivery' ? (
-                <View
-                  style={
-                    styles.radioInner
-                  }
-                />
+              {pricing.discountAmount > 0 ? (
+                <View style={styles.breakdownRow}>
+                  <Text style={styles.breakdownLabel}>Discount</Text>
+                  <Text style={styles.discountValue}>
+                    -₹{formatMoney(pricing.discountAmount)}
+                  </Text>
+                </View>
               ) : null}
-            </View>
 
-            <View
-              style={
-                styles.methodIcon
-              }>
-              <Text
-                style={
-                  styles.methodEmoji
-                }>
-                💵
-              </Text>
-            </View>
-
-            <View
-              style={
-                styles.flex
-              }>
-              <Text
-                style={
-                  styles.methodTitle
-                }>
-                Cash on Delivery
-              </Text>
-
-              <Text
-                style={
-                  styles.methodText
-                }>
-                Pay according to the supported cash-on-delivery workflow.
-              </Text>
-            </View>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            disabled={
-              placingOrder
-            }
-            style={[
-              styles.paymentMethodCard,
-
-              selectedPaymentMethod ===
-                'razorpay' &&
-                styles.paymentMethodSelected,
-            ]}
-            onPress={() =>
-              onSelectPaymentMethod(
-                'razorpay',
-              )
-            }>
-            <View
-              style={
-                styles.radioOuter
-              }>
-              {selectedPaymentMethod ===
-              'razorpay' ? (
-                <View
-                  style={
-                    styles.radioInner
-                  }
-                />
-              ) : null}
-            </View>
-
-            <View
-              style={
-                styles.methodIcon
-              }>
-              <Text
-                style={
-                  styles.methodEmoji
-                }>
-                💳
-              </Text>
-            </View>
-
-            <View
-              style={
-                styles.flex
-              }>
-              <Text
-                style={
-                  styles.methodTitle
-                }>
-                Online Payment
-              </Text>
-
-              <Text
-                style={
-                  styles.methodText
-                }>
-                Pay securely through the configured payment workflow.
-              </Text>
-
-              <View
-                style={
-                  styles.testModeBadge
-                }>
-                <Text
-                  style={
-                    styles.testModeBadgeText
-                  }>
-                  ONLINE PAYMENT
+              <View style={styles.breakdownRow}>
+                <Text style={styles.breakdownLabel}>GST ({pricing.gstRate}%)</Text>
+                <Text style={styles.breakdownValue}>
+                  ₹{formatMoney(pricing.gstAmount)}
                 </Text>
               </View>
             </View>
+          </View>
+
+          {/* Section: Payment Method */}
+          <View style={styles.sectionHeaderRow}>
+            <Text style={styles.sectionTitle}>SELECT PAYMENT METHOD</Text>
+          </View>
+
+          {/* Cash on Delivery Card */}
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel="Pay with Cash on Delivery"
+            accessibilityState={{selected: selectedPaymentMethod === 'cash_on_delivery'}}
+            disabled={placingOrder}
+            style={[
+              styles.paymentCard,
+              selectedPaymentMethod === 'cash_on_delivery' && styles.paymentCardSelected,
+            ]}
+            onPress={() => onSelectPaymentMethod('cash_on_delivery')}>
+            <View style={styles.radioOuter}>
+              {selectedPaymentMethod === 'cash_on_delivery' ? (
+                <View style={styles.radioInner} />
+              ) : null}
+            </View>
+
+            <View style={styles.methodIconBox}>
+              <AppIcon name="cash" size={20} color={colors.textPrimary} />
+            </View>
+
+            <View style={styles.methodTextCol}>
+              <Text style={styles.methodTitle}>Cash on Delivery</Text>
+              <Text style={styles.methodDesc}>
+                Pay when your order is delivered as per standard COD rules.
+              </Text>
+            </View>
           </TouchableOpacity>
 
-          <Text
-            style={
-              styles.termsHeading
-            }>
-            Customer Consent
-          </Text>
+          {/* Online Payment Card */}
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel="Pay Online via UPI, Cards, NetBanking"
+            accessibilityState={{selected: selectedPaymentMethod === 'razorpay'}}
+            disabled={placingOrder}
+            style={[
+              styles.paymentCard,
+              selectedPaymentMethod === 'razorpay' && styles.paymentCardSelected,
+            ]}
+            onPress={() => onSelectPaymentMethod('razorpay')}>
+            <View style={styles.radioOuter}>
+              {selectedPaymentMethod === 'razorpay' ? (
+                <View style={styles.radioInner} />
+              ) : null}
+            </View>
 
-          <View
-            style={
-              styles.consentContainer
-            }>
+            <View style={styles.methodIconBox}>
+              <AppIcon name="card" size={20} color={colors.textPrimary} />
+            </View>
+
+            <View style={styles.methodTextCol}>
+              <View style={styles.onlineHeaderRow}>
+                <Text style={styles.methodTitle}>Online Payment</Text>
+                <View style={styles.badgeOnline}>
+                  <Text style={styles.badgeOnlineText}>UPI / CARDS / NETBANKING</Text>
+                </View>
+              </View>
+              <Text style={styles.methodDesc}>
+                Pay securely online through Razorpay (UPI, Credit/Debit Cards, NetBanking).
+              </Text>
+            </View>
+          </TouchableOpacity>
+
+          {/* Section: Customer Consent */}
+          <View style={styles.sectionHeaderRow}>
+            <Text style={styles.sectionTitle}>CUSTOMER CONSENT</Text>
+          </View>
+
+          <View style={styles.consentCard}>
             <TouchableOpacity
-              disabled={
-                placingOrder
-              }
-              activeOpacity={
-                0.8
-              }
-              style={
-                styles.checkboxTouchArea
-              }
-              onPress={() =>
-                onTermsAcceptedChange(
-                  !termsAccepted,
-                )
-              }>
+              accessibilityRole="checkbox"
+              accessibilityState={{checked: termsAccepted}}
+              accessibilityLabel="I agree to Terms & Conditions and Service Policy"
+              disabled={placingOrder}
+              activeOpacity={0.8}
+              style={styles.consentRow}
+              onPress={() => onTermsAcceptedChange(!termsAccepted)}>
               <View
                 style={[
                   styles.checkbox,
-
-                  termsAccepted &&
-                    styles.checkboxChecked,
+                  termsAccepted && styles.checkboxChecked,
                 ]}>
                 {termsAccepted ? (
-                  <Text
-                    style={
-                      styles.checkmark
-                    }>
-                    ✓
-                  </Text>
+                  <AppIcon name="check" size={14} color={colors.textInverse} strokeWidth={3} />
                 ) : null}
+              </View>
+
+              <View style={styles.termsTextContainer}>
+                <Text style={styles.termsText}>
+                  I agree to the{' '}
+                  <Text
+                    style={styles.termsLink}
+                    onPress={() => setTermsVisible(true)}>
+                    Terms & Conditions
+                  </Text>
+                  {' '}and Service Policy.
+                </Text>
               </View>
             </TouchableOpacity>
 
-            <View
-              style={
-                styles.termsTextContainer
-              }>
-              <Text
-                style={
-                  styles.termsText
-                }>
-                I agree to the{' '}
+            {!termsAccepted ? (
+              <Text style={styles.consentWarning}>
+                Please check the box above to confirm your order agreement.
               </Text>
-
-              <TouchableOpacity
-                activeOpacity={
-                  0.7
-                }
-                onPress={() =>
-                  setTermsVisible(
-                    true,
-                  )
-                }>
-                <Text
-                  style={
-                    styles.termsLink
-                  }>
-                  Terms & Conditions
+            ) : (
+              <View style={styles.consentSuccessRow}>
+                <AppIcon name="check" size={14} color={colors.success} strokeWidth={2.5} />
+                <Text style={styles.consentSuccess}>
+                  Terms accepted for this order.
                 </Text>
-              </TouchableOpacity>
+              </View>
+            )}
+          </View>
 
-              <Text
-                style={
-                  styles.termsText
-                }>
-                {' '}and Service Policy.
+          {/* Inline Error Card */}
+          {errorMessage ? (
+            <View style={styles.errorCard} accessibilityRole="alert">
+              <View style={styles.errorCardHeader}>
+                <AppIcon name="alert" size={18} color={colors.danger} strokeWidth={2} />
+                <Text style={styles.errorCardTitle}>Online payment unavailable</Text>
+              </View>
+              <Text style={styles.errorCardMessage}>{errorMessage}</Text>
+              <View style={styles.errorActionRow}>
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  accessibilityLabel="Try payment again"
+                  style={styles.retryBtn}
+                  onPress={onPlaceOrder}>
+                  <Text style={styles.retryBtnText}>Try Again</Text>
+                </TouchableOpacity>
+                {selectedPaymentMethod === 'razorpay' ? (
+                  <TouchableOpacity
+                    accessibilityRole="button"
+                    accessibilityLabel="Switch to Cash on Delivery"
+                    style={styles.switchCodBtn}
+                    onPress={() => {
+                      onSelectPaymentMethod('cash_on_delivery');
+                      onClearError?.();
+                    }}>
+                    <Text style={styles.switchCodBtnText}>Pay with COD instead</Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+            </View>
+          ) : null}
+
+          {/* Trust / Security Reassurance */}
+          <View style={styles.securityBox}>
+            <AppIcon name="shield" size={18} color={colors.textPrimary} />
+            <View style={styles.securityTextCol}>
+              <Text style={styles.securityTitle}>Secure Laundry Booking</Text>
+              <Text style={styles.securityText}>
+                Your order is processed securely and final item inspection totals are verified by our facility.
               </Text>
             </View>
           </View>
-
-          <Text
-            style={
-              styles.termsHelpText
-            }>
-            Tap "Terms & Conditions" to read the full document. Opening it does not automatically accept it.
-          </Text>
-
-          {!termsAccepted ? (
-            <Text
-              style={
-                styles.termsRequired
-              }>
-              You must actively select the checkbox before placing the order.
-            </Text>
-          ) : (
-            <Text
-              style={
-                styles.termsAcceptedText
-              }>
-              ✓ Terms accepted for this order.
-            </Text>
-          )}
-
-          <View
-            style={
-              styles.infoCard
-            }>
-            <Text
-              style={
-                styles.infoTitle
-              }>
-              🔒 Secure checkout
-            </Text>
-
-            <Text
-              style={
-                styles.infoText
-              }>
-              The server recalculates and verifies the final order amount before creating your order.
-            </Text>
-          </View>
         </ScrollView>
 
-        <View
-          style={
-            styles.bottomArea
-          }>
+        {/* Sticky Bottom Place Order CTA */}
+        <View style={styles.bottomArea}>
           <TouchableOpacity
-            disabled={
-              disabled
+            accessibilityRole="button"
+            accessibilityLabel={
+              selectedPaymentMethod === 'razorpay'
+                ? `Pay ₹${formatMoney(pricing.grandTotal)}`
+                : `Place Order ₹${formatMoney(pricing.grandTotal)}`
             }
+            disabled={disabled}
             style={[
               styles.placeOrderButton,
-
-              disabled &&
-                styles.buttonDisabled,
+              disabled && styles.buttonDisabled,
             ]}
-            onPress={
-              onPlaceOrder
-            }>
+            onPress={onPlaceOrder}>
             {placingOrder ? (
-              <View
-                style={
-                  styles.loadingRow
-                }>
-                <ActivityIndicator
-                  color="#FFFFFF"
-                />
-
-                <Text
-                  style={
-                    styles.loadingText
-                  }>
-                  Processing...
-                </Text>
+              <View style={styles.loadingRow}>
+                <ActivityIndicator color={colors.textInverse} size="small" />
+                <Text style={styles.loadingText}>Processing order...</Text>
               </View>
             ) : (
-              <Text
-                style={
-                  styles.placeOrderButtonText
-                }>
-                {selectedPaymentMethod ===
-                'razorpay'
-                  ? `Pay ₹${formatMoney(
-                      pricing.grandTotal,
-                    )}`
-                  : `Place Order • ₹${formatMoney(
-                      pricing.grandTotal,
-                    )}`}
-              </Text>
+              <View style={styles.btnContentRow}>
+                <Text style={styles.placeOrderButtonText}>
+                  {selectedPaymentMethod === 'razorpay'
+                    ? `Pay ₹${formatMoney(pricing.grandTotal)}`
+                    : `Place Order • ₹${formatMoney(pricing.grandTotal)}`}
+                </Text>
+                <AppIcon name="arrow-right" size={18} color={colors.textInverse} strokeWidth={2.5} />
+              </View>
             )}
           </TouchableOpacity>
         </View>
 
+        {/* Terms Modal */}
         <TermsAndConditionsModal
-          visible={
-            termsVisible
-          }
-          onClose={() =>
-            setTermsVisible(
-              false,
-            )
-          }
+          visible={termsVisible}
+          onClose={() => setTermsVisible(false)}
         />
       </View>
     </SafeAreaView>
   );
 }
 
-const styles =
-  StyleSheet.create({
-    container: {
-      flex: 1,
-      backgroundColor:
-        '#FFFFFF',
-    },
-
-    flex: {
-      flex: 1,
-    },
-
-    screenContainer: {
-      flex: 1,
-      paddingHorizontal:
-        20,
-    },
-
-    pageHeader: {
-      height: 65,
-      flexDirection:
-        'row',
-      alignItems:
-        'center',
-      justifyContent:
-        'space-between',
-    },
-
-    pageBack: {
-      fontSize: 15,
-      fontWeight:
-        '600',
-      minWidth: 60,
-    },
-
-    pageHeaderTitle: {
-      flex: 1,
-      textAlign:
-        'center',
-      fontSize: 18,
-      fontWeight:
-        '700',
-      marginHorizontal:
-        8,
-    },
-
-    headerSpacer: {
-      width: 60,
-    },
-
-    scrollContent: {
-      paddingBottom:
-        160,
-    },
-
-    sectionTitle: {
-      fontSize: 16,
-      fontWeight:
-        '700',
-      marginBottom: 9,
-    },
-
-    totalCard: {
-      backgroundColor:
-        '#111111',
-      borderRadius: 18,
-      padding: 20,
-      marginBottom: 25,
-    },
-
-    summaryRow: {
-      flexDirection:
-        'row',
-      justifyContent:
-        'space-between',
-      alignItems:
-        'center',
-      marginBottom: 10,
-    },
-
-    summaryLabel: {
-      color:
-        '#CCCCCC',
-      fontSize: 13,
-    },
-
-    summaryValue: {
-      color:
-        '#FFFFFF',
-      fontSize: 14,
-      fontWeight:
-        '700',
-    },
-
-    summaryDivider: {
-      height: 1,
-      backgroundColor:
-        '#333333',
-      marginVertical: 8,
-    },
-
-    grandTotalLabel: {
-      color:
-        '#FFFFFF',
-      fontSize: 16,
-      fontWeight:
-        '800',
-    },
-
-    grandTotalValue: {
-      color:
-        '#FFFFFF',
-      fontSize: 24,
-      fontWeight:
-        '800',
-    },
-
-    heading: {
-      fontSize: 19,
-      fontWeight:
-        '700',
-      marginBottom: 15,
-    },
-
-    paymentMethodCard: {
-      borderWidth: 1,
-      borderColor:
-        '#E3E3E3',
-      borderRadius: 16,
-      padding: 16,
-      marginBottom: 12,
-      flexDirection:
-        'row',
-      alignItems:
-        'center',
-    },
-
-    paymentMethodSelected: {
-      borderWidth: 2,
-      borderColor:
-        '#111111',
-    },
-
-    radioOuter: {
-      width: 22,
-      height: 22,
-      borderRadius: 11,
-      borderWidth: 2,
-      borderColor:
-        '#111111',
-      alignItems:
-        'center',
-      justifyContent:
-        'center',
-      marginRight: 12,
-    },
-
-    radioInner: {
-      width: 10,
-      height: 10,
-      borderRadius: 5,
-      backgroundColor:
-        '#111111',
-    },
-
-    methodIcon: {
-      width: 42,
-      height: 42,
-      borderRadius: 12,
-      backgroundColor:
-        '#F4F4F4',
-      alignItems:
-        'center',
-      justifyContent:
-        'center',
-      marginRight: 12,
-    },
-
-    methodEmoji: {
-      fontSize: 21,
-    },
-
-    methodTitle: {
-      fontWeight:
-        '700',
-      fontSize: 15,
-    },
-
-    methodText: {
-      marginTop: 3,
-      fontSize: 12,
-      lineHeight: 17,
-      color:
-        '#666666',
-    },
-
-    testModeBadge: {
-      alignSelf:
-        'flex-start',
-      backgroundColor:
-        '#EEEEEE',
-      borderRadius: 6,
-      paddingHorizontal:
-        7,
-      paddingVertical:
-        4,
-      marginTop: 8,
-    },
-
-    testModeBadgeText: {
-      fontSize: 9,
-      fontWeight:
-        '700',
-    },
-
-    termsHeading: {
-      fontSize: 15,
-      fontWeight:
-        '700',
-      marginTop: 10,
-      marginBottom: 10,
-    },
-
-    consentContainer: {
-      flexDirection:
-        'row',
-      alignItems:
-        'flex-start',
-    },
-
-    checkboxTouchArea: {
-      paddingRight: 10,
-      paddingBottom: 8,
-    },
-
-    checkbox: {
-      width: 22,
-      height: 22,
-      borderWidth: 1.5,
-      borderColor:
-        '#111111',
-      borderRadius: 5,
-      alignItems:
-        'center',
-      justifyContent:
-        'center',
-    },
-
-    checkboxChecked: {
-      backgroundColor:
-        '#111111',
-    },
-
-    checkmark: {
-      color:
-        '#FFFFFF',
-      fontSize: 14,
-      fontWeight:
-        '800',
-    },
-
-    termsTextContainer: {
-      flex: 1,
-      flexDirection:
-        'row',
-      flexWrap:
-        'wrap',
-      paddingTop: 2,
-    },
-
-    termsText: {
-      fontSize: 12,
-      lineHeight: 18,
-      color:
-        '#444444',
-    },
-
-    termsLink: {
-      fontSize: 12,
-      lineHeight: 18,
-      color:
-        '#111111',
-      fontWeight:
-        '800',
-      textDecorationLine:
-        'underline',
-    },
-
-    termsHelpText: {
-      marginTop: 7,
-      marginLeft: 32,
-      fontSize: 10,
-      lineHeight: 15,
-      color:
-        '#777777',
-    },
-
-    termsRequired: {
-      marginTop: 6,
-      marginLeft: 32,
-      fontSize: 10,
-      lineHeight: 15,
-      color:
-        '#777777',
-    },
-
-    termsAcceptedText: {
-      marginTop: 6,
-      marginLeft: 32,
-      fontSize: 10,
-      lineHeight: 15,
-      color:
-        '#333333',
-      fontWeight:
-        '700',
-    },
-
-    infoCard: {
-      backgroundColor:
-        '#F7F7F7',
-      borderRadius: 14,
-      padding: 15,
-      marginTop: 20,
-    },
-
-    infoTitle: {
-      fontWeight:
-        '700',
-    },
-
-    infoText: {
-      marginTop: 5,
-      fontSize: 11,
-      lineHeight: 16,
-      color:
-        '#666666',
-    },
-
-    bottomArea: {
-      position:
-        'absolute',
-      left: 20,
-      right: 20,
-      bottom: 10,
-      paddingTop: 10,
-      backgroundColor:
-        '#FFFFFF',
-    },
-
-    placeOrderButton: {
-      minHeight: 52,
-      backgroundColor:
-        '#111111',
-      borderRadius: 13,
-      paddingVertical: 16,
-      alignItems:
-        'center',
-      justifyContent:
-        'center',
-    },
-
-    placeOrderButtonText: {
-      color:
-        '#FFFFFF',
-      fontSize: 16,
-      fontWeight:
-        '700',
-    },
-
-    buttonDisabled: {
-      opacity: 0.4,
-    },
-
-    loadingRow: {
-      flexDirection:
-        'row',
-      alignItems:
-        'center',
-    },
-
-    loadingText: {
-      color:
-        '#FFFFFF',
-      marginLeft: 10,
-      fontWeight:
-        '700',
-    },
-  });
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
+  flex: {
+    flex: 1,
+  },
+  screenContainer: {
+    flex: 1,
+    paddingHorizontal: spacing.lg,
+  },
+  pageHeader: {
+    height: 56,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  headerBtn: {
+    minWidth: 54,
+    minHeight: 44,
+    justifyContent: 'center',
+  },
+  backRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  pageBack: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.textPrimary,
+  },
+  pageHeaderTitle: {
+    flex: 1,
+    textAlign: 'center',
+    fontSize: 18,
+    fontWeight: '800',
+    color: colors.textPrimary,
+  },
+  headerSpacer: {
+    width: 54,
+  },
+  scrollContent: {
+    paddingBottom: 110,
+  },
+  totalHeroCard: {
+    backgroundColor: colors.primary,
+    borderRadius: borderRadius.lg,
+    padding: spacing.lg,
+    marginBottom: spacing.lg,
+    ...shadows.md,
+  },
+  totalHeroTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingBottom: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1F2937',
+  },
+  totalHeroLabel: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#9CA3AF',
+    letterSpacing: 0.5,
+  },
+  totalHeroAmount: {
+    fontSize: 22,
+    fontWeight: '900',
+    color: colors.textInverse,
+  },
+  totalBreakdown: {
+    paddingTop: spacing.sm,
+  },
+  breakdownRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.xs,
+  },
+  breakdownLabel: {
+    fontSize: 12,
+    color: '#9CA3AF',
+  },
+  breakdownValue: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#F3F4F6',
+  },
+  freeDeliveryValue: {
+    color: colors.success,
+  },
+  discountValue: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.success,
+  },
+  sectionHeaderRow: {
+    marginTop: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  sectionTitle: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: colors.textSecondary,
+    letterSpacing: 0.5,
+  },
+  paymentCard: {
+    backgroundColor: colors.surface,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    borderRadius: borderRadius.lg,
+    padding: spacing.lg,
+    marginBottom: spacing.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    ...shadows.sm,
+  },
+  paymentCardSelected: {
+    borderColor: colors.primary,
+    backgroundColor: colors.surface,
+    ...shadows.md,
+  },
+  radioOuter: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: spacing.md,
+  },
+  radioInner: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: colors.primary,
+  },
+  methodIconBox: {
+    width: 38,
+    height: 38,
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.surfaceSubtle,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  methodTextCol: {
+    flex: 1,
+  },
+  onlineHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: spacing.xs,
+  },
+  methodTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: colors.textPrimary,
+  },
+  methodDesc: {
+    fontSize: 11,
+    color: colors.textMuted,
+    marginTop: 2,
+    lineHeight: 15,
+  },
+  badgeOnline: {
+    backgroundColor: colors.infoSurface,
+    borderRadius: borderRadius.xs,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  badgeOnlineText: {
+    fontSize: 8,
+    fontWeight: '800',
+    color: colors.info,
+    letterSpacing: 0.5,
+  },
+  consentCard: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: borderRadius.lg,
+    padding: spacing.lg,
+    marginBottom: spacing.md,
+  },
+  consentRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderWidth: 2,
+    borderColor: colors.primary,
+    borderRadius: borderRadius.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: spacing.md,
+    marginTop: 1,
+  },
+  checkboxChecked: {
+    backgroundColor: colors.primary,
+  },
+  termsTextContainer: {
+    flex: 1,
+  },
+  termsText: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    lineHeight: 18,
+  },
+  termsLink: {
+    fontWeight: '800',
+    color: colors.textPrimary,
+    textDecorationLine: 'underline',
+  },
+  consentWarning: {
+    fontSize: 11,
+    color: colors.warningText,
+    marginTop: spacing.sm,
+    marginLeft: 32,
+  },
+  consentSuccessRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    marginTop: spacing.sm,
+    marginLeft: 32,
+  },
+  consentSuccess: {
+    fontSize: 11,
+    color: colors.success,
+    fontWeight: '700',
+  },
+  securityBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.surfaceSubtle,
+    borderRadius: borderRadius.md,
+    padding: spacing.md,
+    marginTop: spacing.xs,
+    borderWidth: 1,
+    borderColor: colors.border,
+    gap: spacing.md,
+  },
+  securityTextCol: {
+    flex: 1,
+  },
+  securityTitle: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: colors.textPrimary,
+  },
+  securityText: {
+    fontSize: 11,
+    color: colors.textMuted,
+    marginTop: 1,
+    lineHeight: 15,
+  },
+  errorCard: {
+    backgroundColor: '#FEF2F2',
+    borderRadius: borderRadius.md,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    marginBottom: spacing.sm,
+  },
+  errorCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    marginBottom: spacing.xs,
+  },
+  errorCardTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: colors.danger,
+  },
+  errorCardMessage: {
+    fontSize: 12,
+    color: colors.textPrimary,
+    lineHeight: 17,
+    marginBottom: spacing.sm,
+  },
+  errorActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    flexWrap: 'wrap',
+  },
+  retryBtn: {
+    backgroundColor: colors.danger,
+    borderRadius: borderRadius.sm,
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.md,
+    minHeight: 36,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  retryBtnText: {
+    color: colors.textInverse,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  switchCodBtn: {
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.sm,
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.md,
+    minHeight: 36,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  switchCodBtnText: {
+    color: colors.textPrimary,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  bottomArea: {
+    position: 'absolute',
+    left: spacing.lg,
+    right: spacing.lg,
+    bottom: spacing.md,
+    backgroundColor: 'transparent',
+  },
+  placeOrderButton: {
+    backgroundColor: colors.primary,
+    borderRadius: borderRadius.lg,
+    paddingVertical: spacing.lg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 52,
+    ...shadows.lg,
+  },
+  btnContentRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  placeOrderButtonText: {
+    color: colors.textInverse,
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  buttonDisabled: {
+    backgroundColor: colors.textSubtle,
+    shadowOpacity: 0,
+    elevation: 0,
+  },
+  loadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  loadingText: {
+    color: colors.textInverse,
+    fontSize: 15,
+    fontWeight: '700',
+  },
+});

@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "build": "nest build",
+    "dev": "nest start --watch",
     "start": "node dist/main",
     "start:dev": "nest start --watch",
     "lint": "eslint \"{src,test}/**/*.ts\"",
@@ -11,16 +12,13 @@
     "test:cov": "jest --coverage",
     "test:e2e": "jest --config test/jest-e2e.json",
     "test:phase2": "jest --runInBand src/modules/auth src/modules/rbac src/modules/customers src/modules/orders src/modules/qr src/modules/otp",
-    "test:providers": "jest --runInBand src/config/provider-config.spec.ts src/modules/maps src/modules/payments/providers",
+    "test:providers": "jest --runInBand src/config/provider-config.spec.ts src/modules/maps src/modules/payments",
     "test:providers:live": "node scripts/verify-provider-credentials.cjs",
-    "start:runtime-gates": "GOOGLE_MAPS_MODE=mock RAZORPAY_MODE=mock node dist/main",
-    "test:load": "k6 run tests/load/k6-order-flow.js",
-    "start:worker": "nest start --watch"
+    "test:load": "k6 run tests/load/k6-order-flow.js"
   },
   "dependencies": {
     "@fastify/helmet": "^13.0.0",
     "@fastify/static": "^10.1.3",
-    "@nestjs/bullmq": "^11.0.0",
     "@nestjs/common": "^11.0.0",
     "@nestjs/config": "^4.0.0",
     "@nestjs/core": "^11.0.0",
@@ -28,14 +26,11 @@
     "@nestjs/swagger": "^11.0.0",
     "@nestjs/throttler": "^6.4.0",
     "@sentry/node": "^9.0.0",
-    "@supabase/supabase-js": "^2.49.0",
-    "bullmq": "^5.34.0",
+    "@supabase/supabase-js": "2.49.1",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
     "firebase-admin": "^13.0.0",
-    "ioredis": "^5.4.2",
     "razorpay": "^2.9.8",
-    "redlock": "^5.0.0-beta.2",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
     "zod": "^3.24.0"

@@ -1,20 +1,39 @@
 import { AuthService } from './auth.service';
+import { hashDriverPin } from './driver-pin.util';
 
 function fixture(failure?: string, active = true, accountRole?: string, facilityActive = true) {
   const calls: string[] = [];
-  const db = { from: jest.fn((table: string) => {
-    calls.push(table);
-    const data = table === 'roles' ? { id: 'customer-role' }
-      : table === 'profile_roles' ? (accountRole ? [{ roles: { code: accountRole } }] : [])
-      : table === 'drivers' ? { id: 'staff-record', is_active: active }
-      : table === 'facility_employees' ? { id: 'staff-record', facility_id: 'facility-1', employee_role: accountRole, is_active: active }
-      : table === 'facilities' ? { id: 'facility-1', is_active: facilityActive }
-      : { id: 'verified-user', is_active: active };
-    const result = { data, error: table === failure ? { message: 'database failure' } : null };
-    const query: any = { then: (resolve: any) => Promise.resolve(result).then(resolve) };
-    for (const method of ['upsert', 'select', 'eq', 'single', 'maybeSingle']) query[method] = jest.fn(() => query);
-    return query;
-  }) };
+  const db = {
+    auth: {
+      admin: {
+        getUserById: jest.fn().mockResolvedValue({
+          data: {
+            user: {
+              id: 'verified-user',
+              app_metadata: {
+                driver_pin_hash: hashDriverPin('123456'),
+                employee_pin_hash: hashDriverPin('654321'),
+              },
+            },
+          },
+        }),
+        updateUserById: jest.fn().mockResolvedValue({ data: { user: { id: 'verified-user' } }, error: null }),
+      },
+    },
+    from: jest.fn((table: string) => {
+      calls.push(table);
+      const data = table === 'roles' ? { id: 'customer-role' }
+        : table === 'profile_roles' ? (accountRole ? [{ roles: { code: accountRole } }] : [])
+        : table === 'drivers' ? { id: 'staff-record', is_active: active, driver_pin_hash: hashDriverPin('123456') }
+        : table === 'facility_employees' ? { id: 'staff-record', facility_id: 'facility-1', employee_role: accountRole, is_active: active }
+        : table === 'facilities' ? { id: 'facility-1', name: 'Central Hub', is_active: facilityActive }
+        : { id: 'verified-user', is_active: active };
+      const result = { data, error: table === failure ? { message: 'database failure' } : null };
+      const query: any = { then: (resolve: any) => Promise.resolve(result).then(resolve) };
+      for (const method of ['upsert', 'select', 'eq', 'single', 'maybeSingle']) query[method] = jest.fn(() => query);
+      return query;
+    }),
+  };
   const user = { id: 'verified-user', phone: '16505550101' };
   const session = {
     access_token: 'test-access-token',
@@ -28,16 +47,40 @@ function fixture(failure?: string, active = true, accountRole?: string, facility
     data: { user, session },
     error: null,
   });
+  const signUp = jest.fn().mockResolvedValue({
+    data: { user, session },
+    error: null,
+  });
+  const signInWithPassword = jest.fn().mockResolvedValue({
+    data: { user, session },
+    error: null,
+  });
+  const resetPasswordForEmail = jest.fn().mockResolvedValue({
+    data: {},
+    error: null,
+  });
+  const updateUser = jest.fn().mockResolvedValue({
+    data: { user },
+    error: null,
+  });
   const createAuthClient = jest.fn(() => ({
-    auth: { verifyOtp, refreshSession },
+    auth: { verifyOtp, refreshSession, signUp, signInWithPassword, resetPasswordForEmail },
+  }));
+  const createUserClient = jest.fn(() => ({
+    auth: { updateUser },
   }));
   return {
-    service: new AuthService({ admin: db, createAuthClient } as any),
+    service: new AuthService({ admin: db, createAuthClient, createUserClient } as any),
     db,
     calls,
     createAuthClient,
+    createUserClient,
     verifyOtp,
     refreshSession,
+    signUp,
+    signInWithPassword,
+    resetPasswordForEmail,
+    updateUser,
     session,
     user,
   };
@@ -159,5 +202,165 @@ describe('AuthService provisioning', () => {
       'Invalid or expired refresh session',
     );
     expect(f.db.from).not.toHaveBeenCalled();
+  });
+
+  describe('Customer Email/Password Authentication', () => {
+    it('signs up customer with immediate session and provisions customer profile', async () => {
+      const f = fixture();
+      const result = await f.service.signUp('test@example.com', 'SecurePass123!', 'John Doe', '+16505550101');
+      expect(f.createAuthClient).toHaveBeenCalledTimes(1);
+      expect(f.signUp).toHaveBeenCalledWith({
+        email: 'test@example.com',
+        password: 'SecurePass123!',
+        options: {
+          data: {
+            full_name: 'John Doe',
+            phone: '+16505550101',
+          },
+        },
+      });
+      expect(result.requiresEmailConfirmation).toBe(false);
+      expect(result.session).toEqual(f.session);
+      expect(result.profile.accountRole).toBe('customer');
+      expect(f.calls).toContain('customers');
+    });
+
+    it('signs up customer when email confirmation is required', async () => {
+      const f = fixture();
+      f.signUp.mockResolvedValueOnce({
+        data: { user: { id: 'unconfirmed-user', email: 'pending@example.com' }, session: null },
+        error: null,
+      });
+      const result = await f.service.signUp('pending@example.com', 'SecurePass123!', 'Jane Doe');
+      expect(result.requiresEmailConfirmation).toBe(true);
+      expect(result.session).toBeNull();
+      expect(result.message).toContain('check your email to verify');
+      expect(f.calls).toHaveLength(0); // ensureProfile not called until verified
+    });
+
+    it('translates duplicate email error into friendly user-facing message', async () => {
+      const f = fixture();
+      f.signUp.mockResolvedValueOnce({
+        data: { user: null, session: null },
+        error: { message: 'User already registered' },
+      });
+      await expect(f.service.signUp('existing@example.com', 'SecurePass123!', 'John Doe'))
+        .rejects.toThrow('An account with this email already exists.');
+    });
+
+    it('signs in customer with valid credentials and establishes session', async () => {
+      const f = fixture();
+      const result = await f.service.signIn('test@example.com', 'SecurePass123!');
+      expect(f.createAuthClient).toHaveBeenCalledTimes(1);
+      expect(f.signInWithPassword).toHaveBeenCalledWith({
+        email: 'test@example.com',
+        password: 'SecurePass123!',
+      });
+      expect(result.session).toEqual(f.session);
+      expect(result.profile.accountRole).toBe('customer');
+    });
+
+    it('rejects sign in with invalid password using friendly message', async () => {
+      const f = fixture();
+      f.signInWithPassword.mockResolvedValueOnce({
+        data: { user: null, session: null },
+        error: { message: 'Invalid login credentials' },
+      });
+      await expect(f.service.signIn('test@example.com', 'WrongPass!'))
+        .rejects.toThrow('Invalid email or password.');
+    });
+
+    it('rejects sign in when email is not confirmed', async () => {
+      const f = fixture();
+      f.signInWithPassword.mockResolvedValueOnce({
+        data: { user: null, session: null },
+        error: { message: 'Email not confirmed' },
+      });
+      await expect(f.service.signIn('test@example.com', 'Pass123!'))
+        .rejects.toThrow('Please verify your email before signing in.');
+    });
+
+    it('handles forgot password request without exposing email existence', async () => {
+      const f = fixture();
+      const result = await f.service.forgotPassword('unknown@example.com');
+      expect(f.resetPasswordForEmail).toHaveBeenCalledWith('unknown@example.com', {
+        redirectTo: 'http://localhost:5173/auth/reset-password',
+      });
+      expect(result).toEqual({ sent: true });
+    });
+
+    it('resets password using user recovery access token', async () => {
+      const f = fixture();
+      const result = await f.service.resetPassword('recovery-token', 'NewSecurePass123!');
+      expect(f.createUserClient).toHaveBeenCalledWith('recovery-token');
+      expect(f.updateUser).toHaveBeenCalledWith({ password: 'NewSecurePass123!' });
+      expect(result).toEqual({ success: true });
+    });
+  });
+
+  describe('Staff PIN Authentication (Driver & Facility Employee)', () => {
+    it('authenticates driver with valid phone and 6-digit PIN', async () => {
+      const f = fixture(undefined, true, 'driver');
+      const result = await f.service.driverSignIn('+919876543210', '123456');
+      expect(result.session).toEqual(f.session);
+      expect(result.user.phone).toBe('+919876543210');
+      expect(f.signInWithPassword).toHaveBeenCalledWith({
+        email: 'driver.919876543210@brightwhite.internal',
+        password: '123456',
+      });
+    });
+
+    it('rejects driver sign in with wrong PIN', async () => {
+      const f = fixture(undefined, true, 'driver');
+      await expect(f.service.driverSignIn('+919876543210', '000000'))
+        .rejects.toThrow('Invalid phone number or PIN.');
+    });
+
+    it('rejects driver sign in for inactive profile', async () => {
+      const f = fixture(undefined, false, 'driver');
+      await expect(f.service.driverSignIn('+919876543210', '123456'))
+        .rejects.toThrow('Invalid phone number or PIN.');
+    });
+
+    it('authenticates facility employee with valid phone and 6-digit PIN', async () => {
+      const f = fixture(undefined, true, 'facility_employee');
+      const result = await f.service.facilitySignIn('+919876543210', '654321');
+      expect(result.session).toEqual(f.session);
+      expect(result.user.phone).toBe('+919876543210');
+      expect(result.facility).toEqual({ id: 'facility-1', name: 'Central Hub' });
+      expect(f.signInWithPassword).toHaveBeenCalledWith({
+        email: 'facility.919876543210@brightwhite.internal',
+        password: '654321',
+      });
+    });
+
+    it('rejects facility employee sign in when assigned facility is inactive', async () => {
+      const f = fixture(undefined, true, 'facility_employee', false);
+      await expect(f.service.facilitySignIn('+919876543210', '654321'))
+        .rejects.toThrow('Invalid phone number or PIN.');
+    });
+
+    it('rejects facility employee sign in with invalid phone format', async () => {
+      const f = fixture(undefined, true, 'facility_employee');
+      await expect(f.service.facilitySignIn('not-a-phone', '654321'))
+        .rejects.toThrow('Invalid phone number or PIN.');
+    });
+
+    it('rejects facility employee sign in for non-facility role', async () => {
+      const f = fixture(undefined, true, 'customer');
+      await expect(f.service.facilitySignIn('+919876543210', '654321'))
+        .rejects.toThrow('Invalid phone number or PIN.');
+    });
+
+    it('unified staffSignIn resolves driver and facility employee cleanly', async () => {
+      const fDriver = fixture(undefined, true, 'driver');
+      const resDriver = await fDriver.service.staffSignIn('+919876543210', '123456');
+      expect(resDriver.session).toEqual(fDriver.session);
+
+      const fEmp = fixture(undefined, true, 'facility_employee');
+      const resEmp: any = await fEmp.service.staffSignIn('+919876543210', '654321');
+      expect(resEmp.session).toEqual(fEmp.session);
+      expect(resEmp.facility?.name).toBe('Central Hub');
+    });
   });
 });

@@ -10,20 +10,36 @@ export class AdminManagementService {
   async customers(search = '') {
     const term = search.trim();
     if (term.length > 100) throw new BadRequestException('Search is too long');
+    let customerIdsFromOrders: string[] = [];
     let profiles: string[] | undefined;
     if (term) {
       const safe = term.replace(/[%_,()\\]/g, '');
       if (!safe) return [];
+      
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(safe);
+      const orderSearch = await this.db.from('orders').select('customer_id')
+        .or(`order_number.ilike.%${safe}%,id.eq.${isUuid ? safe : '00000000-0000-0000-0000-000000000000'}`)
+        .limit(20);
+      if (orderSearch.data?.length) {
+        customerIdsFromOrders = orderSearch.data.map(o => o.customer_id);
+      }
+
       const result = await this.db.from('profiles').select('id')
         .or(`full_name.ilike.%${safe}%,phone.ilike.%${safe}%`).limit(100);
       if (result.error) throw new BadRequestException('Unable to search customers');
       profiles = (result.data ?? []).map(row => row.id);
-      if (!profiles.length) return [];
+      if (!profiles.length && !customerIdsFromOrders.length) return [];
     }
     let query = this.db.from('customers')
       .select('id,profile_id,created_at,profiles(id,full_name,phone,is_active)')
       .order('created_at', {ascending: false}).limit(50);
-    if (profiles) query = query.in('profile_id', profiles);
+    if (profiles && customerIdsFromOrders.length) {
+      query = query.or(`profile_id.in.(${profiles.join(',')}),id.in.(${customerIdsFromOrders.join(',')})`);
+    } else if (profiles && profiles.length) {
+      query = query.in('profile_id', profiles);
+    } else if (customerIdsFromOrders.length) {
+      query = query.in('id', customerIdsFromOrders);
+    }
     const {data, error} = await query;
     if (error) throw new BadRequestException('Unable to load customers');
     return data ?? [];
@@ -46,11 +62,18 @@ export class AdminManagementService {
     return data ?? [];
   }
 
-  async order(orderId: string) {
-    const {data: order, error} = await this.db.from('orders')
-      .select('*,order_items(*),order_status_history(*),order_qr_codes(id,secure_token,is_active),customers(id,profile_id,profiles(id,full_name,phone)),pickup_address:customer_addresses!orders_pickup_address_id_fkey(*),delivery_address:customer_addresses!orders_delivery_address_id_fkey(*)')
-      .eq('id', orderId).maybeSingle();
+  async order(identifier: string) {
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(identifier);
+    let orderQuery = this.db.from('orders')
+      .select('*,order_items(*),order_status_history(*),order_qr_codes(id,secure_token,is_active),customers(id,profile_id,profiles(id,full_name,phone)),pickup_address:customer_addresses!orders_pickup_address_id_fkey(*),delivery_address:customer_addresses!orders_delivery_address_id_fkey(*),facilities:facilities!orders_facility_id_fkey(id,name,address),driver_assignments(*,drivers(*,profiles(full_name,phone)))');
+    if (isUuid) {
+      orderQuery = orderQuery.eq('id', identifier);
+    } else {
+      orderQuery = orderQuery.eq('order_number', identifier);
+    }
+    const {data: order, error} = await orderQuery.maybeSingle();
     if (error || !order) throw new NotFoundException('Order not found');
+    const orderId = order.id;
     const [paymentResult, claimResult] = await Promise.all([
       this.db.from('payment_orders').select('id,provider,amount,currency,status,paid_at,created_at,refund_requests(id,amount,reason,status,is_cancellation_refund,created_at,approved_at,processed_at)')
         .eq('order_id', orderId).order('created_at', {ascending: false}),

@@ -18,6 +18,7 @@ import {
 } from 'react-native';
 
 import type MapView from 'react-native-maps';
+import AppIcon from '../components/AppIcon';
 
 import {
   getPlaceDetails,
@@ -26,7 +27,7 @@ import {
 } from '../services/mapsApi';
 
 import {
-  getDevelopmentTestLocation,
+  getDefaultLocation,
 } from '../services/locationService';
 
 import {
@@ -42,15 +43,14 @@ import type {
   SelectedLocation,
 } from '../types/location';
 
-import {MAPS_PROVIDER} from '../config/environment';
-import DevelopmentMapView from '../components/DevelopmentMapView';
-
 type NativeMapsModule = typeof import('react-native-maps');
 
-const nativeMapsModule: NativeMapsModule | null =
-  !__DEV__ && MAPS_PROVIDER !== 'mock'
-    ? require('react-native-maps') as NativeMapsModule
-    : null;
+let nativeMapsModule: NativeMapsModule | null = null;
+try {
+  nativeMapsModule = require('react-native-maps') as NativeMapsModule;
+} catch {
+  nativeMapsModule = null;
+}
 
 const NativeMapView = nativeMapsModule?.default;
 const NativeMarker = nativeMapsModule?.Marker;
@@ -122,10 +122,10 @@ export default function LocationPickerScreen({
       null,
     );
 
-  const developmentLocation =
+  const initialLocation =
     useMemo(
       () =>
-        getDevelopmentTestLocation(),
+        getDefaultLocation(),
       [],
     );
 
@@ -134,7 +134,7 @@ export default function LocationPickerScreen({
     setSelectedLocation,
   ] =
     useState<SelectedLocation>(
-      developmentLocation,
+      initialLocation,
     );
 
   const [
@@ -660,17 +660,7 @@ export default function LocationPickerScreen({
             style={
               styles.mapContainer
             }>
-            {(__DEV__ ||
-            MAPS_PROVIDER === 'mock' ||
-            !NativeMapView ||
-            !NativeMarker) ? (
-              <DevelopmentMapView
-                coordinates={coordinates}
-                onSelect={(latitude, longitude) => {
-                  resolveCoordinates(latitude, longitude);
-                }}
-              />
-            ) : (
+            {NativeMapView && NativeMarker ? (
             <NativeMapView
               ref={
                 mapRef
@@ -739,6 +729,12 @@ export default function LocationPickerScreen({
                 }
               />
             </NativeMapView>
+            ) : (
+              <View style={styles.mapFallbackContainer}>
+                <Text style={styles.mapFallbackText}>
+                  Interactive map is unavailable on this platform. Search an address above or use Current Location.
+                </Text>
+              </View>
             )}
 
             {reverseGeocoding ? (
@@ -785,12 +781,7 @@ export default function LocationPickerScreen({
               style={
                 styles.locationIconContainer
               }>
-              <Text
-                style={
-                  styles.locationIcon
-                }>
-                📍
-              </Text>
+              <AppIcon name="location" size={20} color="#111827" />
             </View>
 
             <View
@@ -1196,6 +1187,21 @@ const styles =
 
     map: {
       ...StyleSheet.absoluteFill,
+    },
+
+    mapFallbackContainer: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: 24,
+      backgroundColor: '#F7F7F7',
+    },
+
+    mapFallbackText: {
+      fontSize: 13,
+      color: '#666666',
+      textAlign: 'center',
+      lineHeight: 18,
     },
 
     mapLoadingOverlay: {

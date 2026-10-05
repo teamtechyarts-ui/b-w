@@ -31,8 +31,6 @@ import { FacilityModule } from './modules/facility/facility.module';
 import { StaffModule } from './modules/staff/staff.module';
 import { ClaimsModule } from './modules/claims/claims.module';
 
-import { QueuesModule } from './queues/queues.module';
-
 import { SupabaseAuthGuard } from './common/guards/supabase-auth.guard';
 import { validateProviderConfiguration } from './config/provider-config';
 
@@ -69,7 +67,6 @@ import { validateProviderConfiguration } from './config/provider-config';
     GrowthModule,
     AnalyticsModule,
     AdminManagementModule,
-    QueuesModule,
     ProductionModule,
 
     LogisticsModule,

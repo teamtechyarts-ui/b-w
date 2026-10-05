@@ -642,10 +642,7 @@ describe("FacilityService sequence", () => {
       },
     );
     expect(fixture.insert).not.toHaveBeenCalled();
-    expect(logistics.assignBestDriver).toHaveBeenCalledWith(
-      "order-1",
-      "delivery",
-    );
+    expect(logistics.assignBestDriver).not.toHaveBeenCalled();
   });
 
   it("allows Staff QC and requires a defect and reason for failed QC", async () => {

@@ -10,6 +10,30 @@ export type CreateOrderResponse = CustomerOrder & {
   [key: string]: unknown;
 };
 
+export type ServiceabilityResponse = {
+  serviceable: boolean;
+  facilityId?: string;
+  facilityName?: string;
+  facilityAddress?: string | null;
+  pincode?: string;
+  distanceMeters?: number;
+  serviceRadiusMeters?: number;
+  reason?: 'INVALID_PINCODE' | 'MISSING_PINCODE' | 'OUTSIDE_SERVICE_AREA' | 'NO_ACTIVE_FACILITIES';
+  message?: string;
+};
+
+export async function checkOrderServiceability(
+  accessToken: string,
+  pickupAddressId: string,
+): Promise<ServiceabilityResponse> {
+  return apiRequest<ServiceabilityResponse>(
+    `/orders/serviceability?pickupAddressId=${encodeURIComponent(pickupAddressId)}`,
+    {
+      accessToken,
+    },
+  );
+}
+
 // A retry key is a deduplication identifier, never an authorization credential.
 export function newOrderAttemptKey(): string {
   const hex = '0123456789abcdef';

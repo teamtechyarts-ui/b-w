@@ -3,7 +3,6 @@ import {
 } from './api';
 
 export type MapsProviderName =
-  | 'mock'
   | 'google';
 
 export type MapCoordinate = {

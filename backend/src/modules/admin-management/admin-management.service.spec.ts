@@ -44,6 +44,34 @@ describe('Admin management read-only contract', () => {
     });
     await expect(f.service.cancel('admin-1', 'order-1', 'Again')).rejects.toBeInstanceOf(ConflictException);
   });
+  it('searches customers by order number matching an order', async () => {
+    const f = fixture({
+      orders: {data: [{customer_id: 'customer-1'}]},
+      profiles: {data: []},
+      customers: {data: [{id: 'customer-1'}]},
+    });
+    expect(await f.service.customers('BW-20261001-3F97A3B9')).toEqual([{id: 'customer-1'}]);
+    expect(f.from).toHaveBeenCalledWith('orders');
+    expect(f.from).toHaveBeenCalledWith('customers');
+  });
+  it('fetches order details by order number as well as uuid', async () => {
+    const f = fixture({
+      orders: {data: {id: 'order-1', order_number: 'BW-20261001-3F97A3B9', facility_id: 'facility-1', facilities: {id: 'facility-1', name: 'Central Facility', address: 'haythnagar'}}},
+      payment_orders: {data: [{id: 'payment-1', status: 'confirmed', amount: 942.82}]},
+      customer_order_claims: {data: []},
+    });
+    const result = await f.service.order('BW-20261001-3F97A3B9');
+    expect(result.order.order_number).toBe('BW-20261001-3F97A3B9');
+    expect(result.order.facilities).toEqual({id: 'facility-1', name: 'Central Facility', address: 'haythnagar'});
+    expect(result.payments).toEqual([{id: 'payment-1', status: 'confirmed', amount: 942.82}]);
+  });
+  it('returns customer orders list', async () => {
+    const f = fixture({
+      customers: {data: {id: 'customer-1', profile_id: 'profile-1'}},
+      orders: {data: [{id: 'order-1', order_number: 'BW-1', total_amount: 942.82}]},
+    });
+    expect(await f.service.orders('customer-1')).toEqual([{id: 'order-1', order_number: 'BW-1', total_amount: 942.82}]);
+  });
   it('rejects overlong search', async () => {
     const f = fixture({});
     await expect(f.service.customers('x'.repeat(101))).rejects.toBeInstanceOf(BadRequestException);

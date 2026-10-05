@@ -78,17 +78,68 @@ export class AdminAssignmentsService {
 
   async assign(actorId: string, orderId: string, driverId: string, type: string) {
     if (!driverId || !['pickup', 'delivery'].includes(type)) throw new BadRequestException('Driver and pickup or delivery type required');
-    const {data, error} = await this.db.rpc('admin_assign_driver_atomic', {
+    let data: any;
+    let error: any;
+
+    const rpcRes = await this.db.rpc('admin_assign_driver_atomic', {
       p_admin_profile_id: actorId, p_order_id: orderId, p_driver_id: driverId, p_assignment_type: type,
     });
+    if (!rpcRes.error) {
+      data = rpcRes.data;
+    } else if (rpcRes.error.code === 'PGRST202') {
+      const coreRes = await this.db.rpc('create_driver_assignment_atomic', {
+        p_order_id: orderId, p_driver_id: driverId, p_assignment_type: type, p_assignment_score: null,
+      });
+      data = coreRes.data;
+      error = coreRes.error;
+      if (!error && data?.assignment?.id) {
+        await this.db.from('admin_assignment_audit').insert({
+          actor_profile_id: actorId,
+          order_id: orderId,
+          new_assignment_id: data.assignment.id,
+          action: 'assign',
+        });
+      }
+    } else {
+      error = rpcRes.error;
+    }
     return this.result(data, error, 'assign');
   }
 
   async reassign(actorId: string, assignmentId: string, driverId: string) {
     if (!driverId) throw new BadRequestException('Replacement Driver required');
-    const {data, error} = await this.db.rpc('admin_reassign_driver_atomic', {
+    let data: any;
+    let error: any;
+
+    const rpcRes = await this.db.rpc('admin_reassign_driver_atomic', {
       p_admin_profile_id: actorId, p_assignment_id: assignmentId, p_new_driver_id: driverId,
     });
+    if (!rpcRes.error) {
+      data = rpcRes.data;
+    } else if (rpcRes.error.code === 'PGRST202') {
+      const { data: currentAss, error: assErr } = await this.db.from('driver_assignments')
+        .select('id,order_id,assignment_type').eq('id', assignmentId).maybeSingle();
+      if (assErr || !currentAss) throw new NotFoundException('Assignment not found');
+
+      await this.db.from('driver_assignments').update({ status: 'reassignment_required' }).eq('id', assignmentId);
+
+      const coreRes = await this.db.rpc('create_driver_assignment_atomic', {
+        p_order_id: currentAss.order_id, p_driver_id: driverId, p_assignment_type: currentAss.assignment_type, p_assignment_score: null,
+      });
+      data = coreRes.data;
+      error = coreRes.error;
+      if (!error && data?.assignment?.id) {
+        await this.db.from('admin_assignment_audit').insert({
+          actor_profile_id: actorId,
+          order_id: currentAss.order_id,
+          previous_assignment_id: assignmentId,
+          new_assignment_id: data.assignment.id,
+          action: 'reassign',
+        });
+      }
+    } else {
+      error = rpcRes.error;
+    }
     return this.result(data, error, 'reassign');
   }
 }

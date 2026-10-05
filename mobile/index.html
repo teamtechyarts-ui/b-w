@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta http-equiv="Content-Security-Policy" content="default-src * 'unsafe-inline' 'unsafe-eval' data: blob:; script-src * 'unsafe-inline' 'unsafe-eval'; script-src-elem * 'unsafe-inline' 'unsafe-eval'; connect-src * 'unsafe-inline'; style-src * 'unsafe-inline'; font-src * data:; img-src * data: blob:;" />
+    <title>Bright & White Laundry</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <style>
+      /* Ensure root and body fill the screen without unwanted rubber-band scrolling */
+      html, body {
+        height: 100%;
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+        background-color: #f8fafc;
+        font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+      }
+      #root {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        width: 100%;
+        max-width: 480px;
+        margin: 0 auto;
+        background-color: #ffffff;
+        box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
+        position: relative;
+        overflow: hidden;
+      }
+      /* If screen is desktop width, center mobile container with nice aesthetic */
+      @media (min-width: 768px) {
+        body {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: linear-gradient(135deg, #e2e8f0 0%, #cbd5e1 100%);
+        }
+        #root {
+          height: 92vh;
+          border-radius: 28px;
+          border: 8px solid #1e293b;
+          box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/index.web.tsx"></script>
+  </body>
+</html>

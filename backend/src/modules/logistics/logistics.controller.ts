@@ -122,6 +122,15 @@ export class LogisticsController {
     return this.logistics.startFacilityTransit(req.user.id, id);
   }
 
+  @Post("driver-assignments/:assignmentId/confirm-facility-handover")
+  confirmFacilityHandover(
+    @Req() req: any,
+    @Param("assignmentId", ParseUUIDPipe)
+    id: string,
+  ) {
+    return this.logistics.confirmFacilityHandover(req.user.id, id);
+  }
+
   @Get("drivers/me/nearby-jobs")
   nearby(
     @Req() req: any,

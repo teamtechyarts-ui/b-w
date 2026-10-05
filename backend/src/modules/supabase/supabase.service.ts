@@ -67,17 +67,45 @@ export class SupabaseService {
       error,
     } = await this.client.auth.getUser(accessToken);
 
-    if (error || !data.user) {
+    if (error || !data?.user) {
       return null;
     }
 
-    return data.user;
+    return data.user as User;
+  }
+
+  async updateUserPassword(
+    accessToken: string,
+    newPassword: string,
+  ): Promise<{ error: { message: string } | null }> {
+    try {
+      const res = await fetch(`${this.url}/auth/v1/user`, {
+        method: 'PUT',
+        headers: {
+          apikey: this.anonKey,
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ password: newPassword }),
+      });
+
+      if (!res.ok) {
+        const data: any = await res.json().catch(() => null);
+        const message =
+          data?.msg || data?.message || 'Unable to update password. Please try again.';
+        return { error: { message } };
+      }
+
+      return { error: null };
+    } catch (cause: any) {
+      return { error: { message: cause?.message || 'Network error updating password' } };
+    }
   }
 
   createUserClient(
     accessToken: string,
   ): SupabaseClient {
-    return createClient(
+    const client = createClient(
       this.url,
       this.anonKey,
       {
@@ -92,5 +120,20 @@ export class SupabaseService {
         },
       },
     );
+
+    const originalUpdateUser = client.auth.updateUser.bind(client.auth);
+    client.auth.updateUser = (async (attributes: any, options?: any) => {
+      if (attributes?.password) {
+        const updateResult = await this.updateUserPassword(accessToken, attributes.password);
+        if (updateResult.error) {
+          return { data: { user: null }, error: updateResult.error as any };
+        }
+        const user = await this.getUser(accessToken);
+        return { data: { user }, error: null };
+      }
+      return originalUpdateUser(attributes, options);
+    }) as any;
+
+    return client;
   }
 }

@@ -8,6 +8,7 @@ import {
 
 import { SupabaseService } from "../supabase/supabase.service";
 import { MapsService } from "../maps/maps.service";
+import { RouteResult } from "../maps/maps.types";
 
 type AssignmentType = "pickup" | "delivery";
 
@@ -363,20 +364,46 @@ export class LogisticsService {
     const scored: any[] = [];
 
     for (const candidate of candidates) {
-      const route = await this.maps.getRoute(
-        {
-          latitude: Number(candidate.driver_latitude),
-          longitude: Number(candidate.driver_longitude),
-        },
-        {
-          latitude: Number(candidate.target_latitude),
-          longitude: Number(candidate.target_longitude),
-        },
-      );
+      let distanceKm = 0;
+      let etaMinutes = 0;
 
-      const distanceKm = route.distanceMeters / 1000;
+      try {
+        const route = await this.maps.getRoute(
+          {
+            latitude: Number(candidate.driver_latitude),
+            longitude: Number(candidate.driver_longitude),
+          },
+          {
+            latitude: Number(candidate.target_latitude),
+            longitude: Number(candidate.target_longitude),
+          },
+        );
 
-      const etaMinutes = route.durationSeconds / 60;
+        distanceKm = route.distanceMeters / 1000;
+        etaMinutes = route.durationSeconds / 60;
+      } catch {
+        const dLat =
+          ((Number(candidate.target_latitude) -
+            Number(candidate.driver_latitude)) *
+            Math.PI) /
+          180;
+        const dLon =
+          ((Number(candidate.target_longitude) -
+            Number(candidate.driver_longitude)) *
+            Math.PI) /
+          180;
+        const lat1 = (Number(candidate.driver_latitude) * Math.PI) / 180;
+        const lat2 = (Number(candidate.target_latitude) * Math.PI) / 180;
+        const a =
+          Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+          Math.sin(dLon / 2) *
+            Math.sin(dLon / 2) *
+            Math.cos(lat1) *
+            Math.cos(lat2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        distanceKm = 6371 * c;
+        etaMinutes = distanceKm > 0 ? (distanceKm / 30) * 60 : 5;
+      }
 
       const workload = Number(candidate.active_workload ?? 0);
 
@@ -490,6 +517,44 @@ export class LogisticsService {
   async startNavigation(profileId: string, assignmentId: string) {
     const driverId = await this.driverId(profileId);
 
+    const { data: assignment, error: assignmentError } = await this.db()
+      .from("driver_assignments")
+      .select("id,order_id,assignment_type,status")
+      .eq("id", assignmentId)
+      .eq("driver_id", driverId)
+      .maybeSingle();
+
+    if (assignmentError || !assignment) {
+      throw new NotFoundException("Assignment not found");
+    }
+
+    if (assignment.assignment_type === "delivery") {
+      const { data: collectionOp } = await this.db()
+        .from("driver_navigation_events")
+        .select("id")
+        .eq("order_id", assignment.order_id)
+        .eq("event_type", "driver_collection_confirmed")
+        .maybeSingle();
+
+      if (!collectionOp) {
+        await this.db()
+          .from("driver_navigation_events")
+          .insert({
+            driver_id: driverId,
+            order_id: assignment.order_id,
+            event_type: "navigate_facility",
+          });
+
+        return {
+          assignmentId,
+          orderId: assignment.order_id,
+          provider: this.maps.providerName,
+          status: "en_route_facility",
+          destination: "facility",
+        };
+      }
+    }
+
     const { data, error } = await this.db().rpc(
       "transition_driver_assignment_atomic",
       {
@@ -521,6 +586,44 @@ export class LogisticsService {
   async arrive(profileId: string, assignmentId: string) {
     const driverId = await this.driverId(profileId);
 
+    const { data: assignment, error: assignmentError } = await this.db()
+      .from("driver_assignments")
+      .select("id,order_id,assignment_type,status")
+      .eq("id", assignmentId)
+      .eq("driver_id", driverId)
+      .maybeSingle();
+
+    if (assignmentError || !assignment) {
+      throw new NotFoundException("Assignment not found");
+    }
+
+    if (assignment.assignment_type === "delivery") {
+      const { data: collectionOp } = await this.db()
+        .from("driver_navigation_events")
+        .select("id")
+        .eq("order_id", assignment.order_id)
+        .eq("event_type", "driver_collection_confirmed")
+        .maybeSingle();
+
+      if (!collectionOp) {
+        await this.db()
+          .from("driver_navigation_events")
+          .insert({
+            driver_id: driverId,
+            order_id: assignment.order_id,
+            event_type: "arrived_at_facility",
+          });
+
+        return {
+          assignmentId,
+          orderId: assignment.order_id,
+          assignmentStatus: "arrived",
+          orderStatus: "delivery_accepted",
+          facilityArrival: true,
+        };
+      }
+    }
+
     const { data, error } = await this.db().rpc(
       "transition_driver_assignment_atomic",
       {
@@ -546,6 +649,95 @@ export class LogisticsService {
       orderId: data.orderId,
       assignmentStatus: data.assignmentStatus,
       orderStatus: data.orderStatus,
+    };
+  }
+
+  async confirmFacilityHandover(profileId: string, assignmentId: string) {
+    const driverId = await this.driverId(profileId);
+
+    const { data: assignment, error: assignmentError } = await this.db()
+      .from("driver_assignments")
+      .select("id,order_id,assignment_type,status,driver_id")
+      .eq("id", assignmentId)
+      .eq("driver_id", driverId)
+      .maybeSingle();
+
+    if (assignmentError || !assignment) {
+      throw new NotFoundException("Assignment not found");
+    }
+
+    if (assignment.assignment_type !== "delivery") {
+      throw new ConflictException(
+        "Only delivery assignments can confirm facility collection",
+      );
+    }
+
+    if (!["accepted", "arrived", "en_route"].includes(assignment.status)) {
+      throw new ConflictException(
+        "Assignment is not in a valid state for facility collection",
+      );
+    }
+
+    const { data: order, error: orderError } = await this.db()
+      .from("orders")
+      .select("id,facility_id,current_status")
+      .eq("id", assignment.order_id)
+      .maybeSingle();
+
+    if (orderError || !order) {
+      throw new NotFoundException("Order not found");
+    }
+
+    const { data: dispatchOp, error: dispatchError } = await this.db()
+      .from("driver_navigation_events")
+      .select("id,created_at")
+      .eq("order_id", assignment.order_id)
+      .eq("event_type", "facility_dispatch")
+      .maybeSingle();
+
+    if (dispatchError || !dispatchOp) {
+      throw new ConflictException(
+        "Facility employee must hand over the order before driver confirmation",
+      );
+    }
+
+    const { data: existingCollection } = await this.db()
+      .from("driver_navigation_events")
+      .select("id,created_at")
+      .eq("order_id", assignment.order_id)
+      .eq("event_type", "driver_collection_confirmed")
+      .maybeSingle();
+
+    if (existingCollection) {
+      return {
+        assignmentId,
+        orderId: assignment.order_id,
+        facilityCollected: true,
+        collected: true,
+        confirmedAt: existingCollection.created_at,
+        message: "Facility collection already confirmed",
+      };
+    }
+
+    const now = new Date().toISOString();
+    const { error: insertError } = await this.db()
+      .from("driver_navigation_events")
+      .insert({
+        driver_id: driverId,
+        order_id: assignment.order_id,
+        event_type: "driver_collection_confirmed",
+      });
+
+    if (insertError) {
+      throw new BadRequestException(insertError.message);
+    }
+
+    return {
+      assignmentId,
+      orderId: assignment.order_id,
+      facilityCollected: true,
+      collected: true,
+      confirmedAt: now,
     };
   }
 
@@ -636,7 +828,13 @@ export class LogisticsService {
       latitude: Number(facility.latitude),
       longitude: Number(facility.longitude),
     };
-    const route = await this.maps.getRoute(origin, destination);
+    let route: RouteResult | null = null;
+    try {
+      route = await this.maps.getRoute(origin, destination);
+    } catch {
+      // Maps route calculation is optional and must not block facility transit
+      route = null;
+    }
 
     const { data: committed, error: statusError } = await this.db().rpc(
       "start_facility_transit_atomic",
@@ -657,7 +855,7 @@ export class LogisticsService {
       orderId: committed.orderId,
       assignmentStatus: committed.assignmentStatus,
       orderStatus: committed.orderStatus,
-      provider: route.provider,
+      provider: route?.provider ?? this.maps.providerName,
       route,
     };
   }

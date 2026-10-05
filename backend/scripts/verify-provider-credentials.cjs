@@ -6,10 +6,6 @@ dotenv.config({ quiet: true });
 const Razorpay = RazorpayModule.default || RazorpayModule;
 
 async function verifyGoogleMaps() {
-  if (process.env.GOOGLE_MAPS_MODE !== "live") {
-    throw new Error("GOOGLE_MAPS_MODE must be live for the credential check");
-  }
-
   const key = process.env.GOOGLE_MAPS_SERVER_KEY;
   if (!key || key === "REPLACE_ME") {
     throw new Error("GOOGLE_MAPS_SERVER_KEY is missing");
@@ -59,10 +55,6 @@ async function verifyGoogleMaps() {
 }
 
 async function verifyRazorpay() {
-  if (process.env.RAZORPAY_MODE !== "live") {
-    throw new Error("RAZORPAY_MODE must be live for the credential check");
-  }
-
   const keyId = process.env.RAZORPAY_KEY_ID;
   const keySecret = process.env.RAZORPAY_KEY_SECRET;
 

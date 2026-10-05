@@ -82,4 +82,65 @@ describe('NotificationsService', () => {
       service.deactivateDevice('profile-1', 'inactive-token'),
     ).resolves.toEqual({ deactivated: false });
   });
+
+  it('marks all unread notifications read for the calling profile', async () => {
+    const query: any = {
+      update: jest.fn(() => query),
+      eq: jest.fn(() => query),
+      select: jest.fn().mockResolvedValue({ data: [{ id: 'n-1' }, { id: 'n-2' }], error: null }),
+    };
+    const service = new NotificationsService({
+      admin: { from: jest.fn(() => query) },
+    } as any);
+
+    const result = await service.markAllRead('profile-1');
+    expect(result).toEqual({ updatedCount: 2 });
+    expect(query.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        is_read: true,
+        read_at: expect.any(String),
+      }),
+    );
+    expect(query.eq).toHaveBeenCalledWith('profile_id', 'profile-1');
+    expect(query.eq).toHaveBeenCalledWith('is_read', false);
+  });
+
+  it('creates an authoritative order-specific notification', async () => {
+    const insertedRow = {
+      id: 'n-123',
+      profile_id: 'profile-1',
+      order_id: 'order-123',
+      notification_type: 'order.confirmed',
+      event_type: 'order.confirmed',
+      title: 'Order confirmed',
+      body: 'Order BW-20261003-7CB85C51 has been placed and confirmed.',
+      data: { orderId: 'order-123', orderNumber: 'BW-20261003-7CB85C51' },
+      status: 'queued',
+    };
+    const query: any = {
+      insert: jest.fn(() => query),
+      select: jest.fn(() => query),
+      single: jest.fn().mockResolvedValue({ data: insertedRow, error: null }),
+    };
+    const service = new NotificationsService({
+      admin: { from: jest.fn(() => query) },
+    } as any);
+
+    const result = await service.create(
+      'profile-1',
+      'order.confirmed',
+      'Order confirmed',
+      'Order BW-20261003-7CB85C51 has been placed and confirmed.',
+      { orderId: 'order-123', orderNumber: 'BW-20261003-7CB85C51' },
+    );
+    expect(result).toEqual(insertedRow);
+    expect(query.insert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        profile_id: 'profile-1',
+        order_id: 'order-123',
+        notification_type: 'order.confirmed',
+        title: 'Order confirmed',
+      }),
+    );
+  });
 });

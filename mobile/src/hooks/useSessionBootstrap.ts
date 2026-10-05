@@ -3,7 +3,10 @@ import {getMyProfile} from '../services/authApi';
 import {accountRoleFromProfile} from '../services/driverProfileApi';
 
 type Options = {
-  hydrating: boolean; authenticated: boolean; accessToken: string; profile: unknown;
+  hydrating: boolean;
+  authenticated: boolean;
+  accessToken: string;
+  profile: unknown;
   setProfile: (profile: unknown) => Promise<void>;
   loadServices: (token: string) => Promise<void>;
   loadAddresses: () => Promise<void>;
@@ -12,16 +15,30 @@ type Options = {
 export function useSessionBootstrap(options: Options) {
   const {hydrating, authenticated, accessToken} = options;
   const [resolved, setResolved] = useState(false);
+  const bootstrappedRef = useRef(false);
+
   // Profile persistence and address selection change these callbacks/state.
   // They must not cancel the bootstrap for the same authenticated session.
   const latest = useRef(options);
   latest.current = options;
+
   useEffect(() => {
     if (hydrating) return;
-    if (!authenticated || !accessToken) {setResolved(true); return;}
+    if (!authenticated || !accessToken) {
+      bootstrappedRef.current = false;
+      setResolved(true);
+      return;
+    }
+
     let active = true;
     const session = latest.current;
-    setResolved(false);
+
+    // Only set resolved to false on initial cold boot.
+    // Subsequent token refreshes must NOT unmount NavigationContainer.
+    if (!bootstrappedRef.current) {
+      setResolved(false);
+    }
+
     async function restore() {
       let role = accountRoleFromProfile(session.profile);
       try {
@@ -34,14 +51,20 @@ export function useSessionBootstrap(options: Options) {
         // lets an offline customer reach the catalogue's explicit retry state.
       }
       if (!active) return;
-      const loads = role === 'customer'
-        ? Promise.all([session.loadServices(accessToken), session.loadAddresses()])
-        : Promise.resolve();
+      const loads =
+        role === 'customer'
+          ? Promise.all([session.loadServices(accessToken), session.loadAddresses()])
+          : Promise.resolve();
+      bootstrappedRef.current = true;
       setResolved(true);
       await loads;
     }
+
     restore();
-    return () => {active = false;};
+    return () => {
+      active = false;
+    };
   }, [accessToken, authenticated, hydrating]);
+
   return resolved;
 }

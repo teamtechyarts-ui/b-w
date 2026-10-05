@@ -19,7 +19,7 @@ describe('checkout coupons', () => {
     await waitFor(() => expect(validate).toHaveBeenCalledWith('token', 'SAVE10', 100));
     expect(change).toHaveBeenCalledWith({offerId: 'offer-1', code: 'SAVE10', discount: 10});
     await view.rerender(<CouponSection accessToken="token" subtotal={100} applied={{offerId: 'offer-1', code: 'SAVE10', discount: 10}} onChange={change} />);
-    await fireEvent.press(view.getByText('Remove coupon'));
+    await fireEvent.press(view.getByLabelText('Remove coupon'));
     expect(change).toHaveBeenCalledWith(null);
   });
   it('shows backend eligibility errors and does not apply invalid codes', async () => {

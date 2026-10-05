@@ -9,8 +9,10 @@ import {
   View,
 } from 'react-native';
 
+import AppIcon from '../components/AppIcon';
+import CheckoutProgressBar from '../components/CheckoutProgressBar';
+import {borderRadius, colors, shadows, spacing, typography} from '../theme/designSystem';
 import type {AddressItem} from '../types/address';
-
 import type {
   PickupDateChoice,
   PickupSlot,
@@ -56,239 +58,211 @@ export default function PickupSlotScreen({
   onContinue,
   isSlotUnavailable,
 }: PickupSlotScreenProps) {
+  const isContinueEnabled = Boolean(pickupScheduledAt && pickupSlotLabel);
+
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" />
 
       <View style={styles.screenContainer}>
+        {/* Header */}
         <View style={styles.pageHeader}>
-          <TouchableOpacity onPress={onBack}>
-            <Text style={styles.pageBack}>
-              ← Back
-            </Text>
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+            style={styles.headerBtn}
+            onPress={onBack}>
+            <View style={styles.backRow}>
+              <AppIcon name="arrow-left" size={16} color={colors.textPrimary} />
+              <Text style={styles.pageBack}>Back</Text>
+            </View>
           </TouchableOpacity>
 
-          <Text style={styles.pageHeaderTitle}>
-            Pickup Date & Time
-          </Text>
+          <Text style={styles.pageHeaderTitle}>Pickup Schedule</Text>
 
           <View style={styles.headerSpacer} />
         </View>
 
+        {/* Progress Bar */}
+        <CheckoutProgressBar currentStep="schedule" />
+
         <ScrollView
           style={styles.flex}
-          contentContainerStyle={
-            styles.scrollContent
-          }>
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}>
+          
+          {/* Selected Address Compact Summary */}
           {selectedAddress ? (
-            <View style={styles.addressSummary}>
-              <View style={styles.addressTop}>
-                <Text style={styles.addressIcon}>
-                  📍
-                </Text>
-
-                <View style={styles.flex}>
-                  <Text style={styles.summaryLabel}>
-                    Pickup from
+            <View style={styles.addressSummaryCard}>
+              <View style={styles.addressSummaryLeft}>
+                <View style={styles.locationPinBox}>
+                  <AppIcon name="location" size={18} color={colors.textPrimary} />
+                </View>
+                <View style={styles.addressTextCol}>
+                  <Text style={styles.addressEyebrow}>PICKUP FROM</Text>
+                  <Text numberOfLines={1} style={styles.addressLabelName}>
+                    {selectedAddress.label || 'Selected Address'}
                   </Text>
-
-                  <Text style={styles.addressName}>
-                    {selectedAddress.label ||
-                      'Selected Address'}
-                  </Text>
-
-                  <Text style={styles.addressText}>
+                  <Text numberOfLines={1} style={styles.addressLineText}>
                     {selectedAddress.address_line1}
-                  </Text>
-
-                  {selectedAddress.address_line2 ? (
-                    <Text style={styles.addressText}>
-                      {selectedAddress.address_line2}
-                    </Text>
-                  ) : null}
-
-                  <Text style={styles.addressText}>
-                    {[
-                      selectedAddress.city,
-                      selectedAddress.state,
-                      selectedAddress.postal_code,
-                    ]
-                      .filter(Boolean)
-                      .join(', ')}
+                    {selectedAddress.postal_code ? ` · ${selectedAddress.postal_code}` : ''}
                   </Text>
                 </View>
               </View>
             </View>
           ) : null}
 
-          <Text style={styles.sectionTitle}>
-            Select pickup date
-          </Text>
+          {/* Section: Select Date */}
+          <View style={styles.sectionHeaderRow}>
+            <Text style={styles.sectionTitle}>Select pickup date</Text>
+            <Text style={styles.sectionSubtitle}>
+              Choose your preferred day for garment collection.
+            </Text>
+          </View>
 
-          <Text style={styles.sectionSubtitle}>
-            Choose when you would like us to collect your laundry.
-          </Text>
-
+          {/* Horizontal Date Picker */}
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.dateRow}>
             {pickupDateChoices.map(date => {
-              const selected =
-                date.key ===
-                selectedPickupDateKey;
+              const selected = date.key === selectedPickupDateKey;
 
               return (
                 <TouchableOpacity
                   key={date.key}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Pickup on ${date.dayName} ${date.dateLabel}`}
+                  accessibilityState={{selected}}
                   style={[
                     styles.dateCard,
-                    selected &&
-                      styles.dateCardSelected,
+                    selected && styles.dateCardSelected,
                   ]}
-                  onPress={() =>
-                    onChoosePickupDate(date.key)
-                  }>
+                  onPress={() => onChoosePickupDate(date.key)}>
                   <Text
                     style={[
                       styles.dateDay,
-                      selected &&
-                        styles.dateTextSelected,
+                      selected && styles.dateTextSelected,
                     ]}>
-                    {date.dayName}
+                    {date.dayName.toUpperCase()}
                   </Text>
 
                   <Text
                     style={[
                       styles.dateNumber,
-                      selected &&
-                        styles.dateTextSelected,
+                      selected && styles.dateTextSelected,
                     ]}>
                     {date.dateLabel}
                   </Text>
+
+                  {selected ? (
+                    <View style={styles.dateActiveDot} />
+                  ) : (
+                    <View style={styles.dateDotPlaceholder} />
+                  )}
                 </TouchableOpacity>
               );
             })}
           </ScrollView>
 
-          <Text style={styles.sectionTitle}>
-            Select pickup time
-          </Text>
+          {/* Section: Select Time Slot */}
+          <View style={styles.sectionHeaderRow}>
+            <Text style={styles.sectionTitle}>Select pickup time</Text>
+            <Text style={styles.selectedDateBadge}>
+              {selectedPickupDate?.fullLabel || 'Select a date above first'}
+            </Text>
+          </View>
 
-          <Text style={styles.selectedDateText}>
-            {selectedPickupDate?.fullLabel ||
-              'Select a date first'}
-          </Text>
-
+          {/* Time Slots 2-Column Grid */}
           <View style={styles.slotGrid}>
             {pickupSlots.map(slot => {
-              const selected =
-                slot.id ===
-                selectedPickupSlotId;
-
+              const selected = slot.id === selectedPickupSlotId;
               const unavailable =
                 !selectedPickupDateKey ||
-                isSlotUnavailable(
-                  selectedPickupDateKey,
-                  slot,
-                );
+                isSlotUnavailable(selectedPickupDateKey, slot);
 
               return (
                 <TouchableOpacity
                   key={slot.id}
                   disabled={unavailable}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Pickup slot ${slot.label}${
+                    unavailable ? ' (Unavailable)' : selected ? ' (Selected)' : ''
+                  }`}
+                  accessibilityState={{selected, disabled: unavailable}}
                   style={[
                     styles.slotCard,
-                    selected &&
-                      styles.slotCardSelected,
-                    unavailable &&
-                      styles.slotCardDisabled,
+                    selected && styles.slotCardSelected,
+                    unavailable && styles.slotCardDisabled,
                   ]}
-                  onPress={() =>
-                    onChoosePickupSlot(slot)
-                  }>
+                  onPress={() => onChoosePickupSlot(slot)}>
+                  <View style={styles.slotTopRow}>
+                    <AppIcon
+                      name="clock"
+                      size={16}
+                      color={selected ? colors.textInverse : colors.textMuted}
+                    />
+                    {selected ? (
+                      <View style={styles.slotSelectedBadge}>
+                        <AppIcon name="check" size={12} color={colors.primary} strokeWidth={3} />
+                      </View>
+                    ) : null}
+                  </View>
+
                   <Text
                     style={[
                       styles.slotTime,
-                      selected &&
-                        styles.slotTextSelected,
-                      unavailable &&
-                        styles.slotTextDisabled,
+                      selected && styles.slotTextSelected,
+                      unavailable && styles.slotTextDisabled,
                     ]}>
                     {slot.label}
                   </Text>
 
                   {unavailable ? (
-                    <Text
-                      style={
-                        styles.unavailableText
-                      }>
-                      Unavailable
-                    </Text>
+                    <Text style={styles.unavailableText}>Unavailable</Text>
                   ) : selected ? (
-                    <Text
-                      style={
-                        styles.selectedSlotText
-                      }>
-                      Selected ✓
-                    </Text>
+                    <Text style={styles.selectedSlotStatusText}>Selected slot</Text>
                   ) : (
-                    <Text style={styles.availableText}>
-                      Available
-                    </Text>
+                    <Text style={styles.availableText}>Available</Text>
                   )}
                 </TouchableOpacity>
               );
             })}
           </View>
 
-          {pickupScheduledAt &&
-          pickupSlotLabel ? (
-            <View
-              style={styles.selectedSlotSummary}>
-              <Text
-                style={
-                  styles.selectedSlotSummaryTitle
-                }>
-                ✓ Pickup selected
-              </Text>
-
-              <Text
-                style={
-                  styles.selectedSlotSummaryDate
-                }>
-                {selectedPickupDate?.fullLabel}
-              </Text>
-
-              <Text
-                style={
-                  styles.selectedSlotSummaryTime
-                }>
-                {pickupSlotLabel}
-              </Text>
+          {/* Selected Confirmation Banner */}
+          {pickupScheduledAt && pickupSlotLabel ? (
+            <View style={styles.selectedScheduleBanner}>
+              <View style={styles.bannerCheckCircle}>
+                <AppIcon name="check" size={16} color={colors.textInverse} strokeWidth={2.5} />
+              </View>
+              <View style={styles.bannerTextCol}>
+                <Text style={styles.bannerTitle}>Pickup Slot Confirmed</Text>
+                <Text style={styles.bannerSubtitle}>
+                  {selectedPickupDate?.fullLabel} · {pickupSlotLabel}
+                </Text>
+              </View>
             </View>
           ) : null}
         </ScrollView>
 
+        {/* Sticky Bottom CTA */}
         <View style={styles.bottomArea}>
           <TouchableOpacity
-            disabled={
-              !pickupScheduledAt ||
-              !pickupSlotLabel
-            }
+            accessibilityRole="button"
+            accessibilityLabel="Continue to Order Review"
+            disabled={!isContinueEnabled}
             style={[
               styles.continueButton,
-              (!pickupScheduledAt ||
-                !pickupSlotLabel) &&
-                styles.buttonDisabled,
+              !isContinueEnabled && styles.buttonDisabled,
             ]}
             onPress={onContinue}>
-            <Text
-              style={
-                styles.continueButtonText
-              }>
-              Continue to Order Review
-            </Text>
+            <View style={styles.btnContentRow}>
+              <Text style={styles.continueButtonText}>
+                Continue to Order Review
+              </Text>
+              <AppIcon name="arrow-right" size={18} color={colors.textInverse} strokeWidth={2.5} />
+            </View>
           </TouchableOpacity>
         </View>
       </View>
@@ -299,234 +273,294 @@ export default function PickupSlotScreen({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.background,
   },
-
   flex: {
     flex: 1,
   },
-
   screenContainer: {
     flex: 1,
-    paddingHorizontal: 20,
+    paddingHorizontal: spacing.lg,
   },
-
   pageHeader: {
-    height: 65,
+    height: 56,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-
+  headerBtn: {
+    minWidth: 54,
+    minHeight: 44,
+    justifyContent: 'center',
+  },
+  backRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
   pageBack: {
     fontSize: 15,
-    fontWeight: '600',
-    minWidth: 60,
+    fontWeight: '700',
+    color: colors.textPrimary,
   },
-
   pageHeaderTitle: {
     flex: 1,
     textAlign: 'center',
     fontSize: 18,
-    fontWeight: '700',
-    marginHorizontal: 8,
+    fontWeight: '800',
+    color: colors.textPrimary,
   },
-
   headerSpacer: {
-    width: 60,
+    width: 54,
   },
-
   scrollContent: {
-    paddingBottom: 130,
+    paddingBottom: 110,
   },
-
-  addressSummary: {
+  addressSummaryCard: {
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.lg,
     borderWidth: 1,
-    borderColor: '#E5E5E5',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 25,
+    borderColor: colors.border,
+    padding: spacing.md,
+    marginBottom: spacing.lg,
+    ...shadows.sm,
   },
-
-  addressTop: {
+  addressSummaryLeft: {
     flexDirection: 'row',
+    alignItems: 'center',
   },
-
-  addressIcon: {
-    fontSize: 24,
-    marginRight: 11,
-  },
-
-  summaryLabel: {
-    fontSize: 11,
-    color: '#777777',
-  },
-
-  addressName: {
-    marginTop: 2,
-    fontWeight: '700',
-  },
-
-  addressText: {
-    marginTop: 2,
-    fontSize: 12,
-    color: '#666666',
-  },
-
-  sectionTitle: {
-    fontSize: 19,
-    fontWeight: '700',
-  },
-
-  sectionSubtitle: {
-    fontSize: 13,
-    color: '#666666',
-    marginTop: 4,
-    marginBottom: 15,
-  },
-
-  dateRow: {
-    paddingBottom: 25,
-  },
-
-  dateCard: {
-    width: 92,
-    height: 82,
+  locationPinBox: {
+    width: 36,
+    height: 36,
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.surfaceSubtle,
     borderWidth: 1,
-    borderColor: '#DEDEDE',
-    borderRadius: 14,
-    marginRight: 10,
+    borderColor: colors.border,
     alignItems: 'center',
     justifyContent: 'center',
+    marginRight: spacing.md,
   },
-
-  dateCardSelected: {
-    backgroundColor: '#111111',
-    borderColor: '#111111',
+  addressTextCol: {
+    flex: 1,
   },
-
-  dateDay: {
-    fontSize: 13,
+  addressEyebrow: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: colors.textMuted,
+    letterSpacing: 0.5,
+  },
+  addressLabelName: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: colors.textPrimary,
+    marginTop: 1,
+  },
+  addressLineText: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginTop: 1,
+  },
+  sectionHeaderRow: {
+    marginBottom: spacing.sm,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: colors.textPrimary,
+  },
+  sectionSubtitle: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginTop: 2,
+  },
+  selectedDateBadge: {
+    fontSize: 12,
     fontWeight: '600',
+    color: colors.textSecondary,
+    marginTop: 2,
   },
-
-  dateNumber: {
-    marginTop: 5,
-    fontSize: 15,
+  dateRow: {
+    paddingBottom: spacing.lg,
+    paddingTop: spacing.xs,
+  },
+  dateCard: {
+    width: 88,
+    minHeight: 86,
+    backgroundColor: colors.surface,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    borderRadius: borderRadius.lg,
+    marginRight: spacing.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: spacing.md,
+    ...shadows.sm,
+  },
+  dateCardSelected: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+    ...shadows.md,
+  },
+  dateDay: {
+    fontSize: 11,
     fontWeight: '700',
+    color: colors.textMuted,
+    letterSpacing: 0.5,
   },
-
-  dateTextSelected: {
-    color: '#FFFFFF',
-  },
-
-  selectedDateText: {
+  dateNumber: {
     marginTop: 4,
-    marginBottom: 15,
-    color: '#666666',
+    fontSize: 15,
+    fontWeight: '800',
+    color: colors.textPrimary,
   },
-
+  dateTextSelected: {
+    color: colors.textInverse,
+  },
+  dateActiveDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+    backgroundColor: colors.textInverse,
+    marginTop: 6,
+  },
+  dateDotPlaceholder: {
+    height: 5,
+    marginTop: 6,
+  },
   slotGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'space-between',
+    marginBottom: spacing.lg,
   },
-
   slotCard: {
     width: '48%',
-    minHeight: 82,
-    borderWidth: 1,
-    borderColor: '#DEDEDE',
-    borderRadius: 14,
-    padding: 13,
-    marginBottom: 12,
+    minHeight: 90,
+    backgroundColor: colors.surface,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    borderRadius: borderRadius.lg,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+    justifyContent: 'space-between',
+    ...shadows.sm,
   },
-
   slotCardSelected: {
-    backgroundColor: '#111111',
-    borderColor: '#111111',
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+    ...shadows.md,
   },
-
   slotCardDisabled: {
-    backgroundColor: '#F4F4F4',
+    backgroundColor: colors.surfaceSubtle,
+    borderColor: colors.border,
+    opacity: 0.6,
   },
-
-  slotTime: {
-    fontWeight: '700',
+  slotTopRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
   },
-
-  slotTextSelected: {
-    color: '#FFFFFF',
-  },
-
-  slotTextDisabled: {
-    color: '#AAAAAA',
-  },
-
-  availableText: {
-    marginTop: 6,
-    fontSize: 11,
-    color: '#777777',
-  },
-
-  unavailableText: {
-    marginTop: 6,
-    fontSize: 11,
-    color: '#AAAAAA',
-  },
-
-  selectedSlotText: {
-    marginTop: 6,
-    fontSize: 11,
-    color: '#DDDDDD',
-  },
-
-  selectedSlotSummary: {
-    backgroundColor: '#F7F7F7',
-    borderRadius: 16,
-    padding: 17,
-    marginTop: 8,
-  },
-
-  selectedSlotSummaryTitle: {
-    fontWeight: '700',
-  },
-
-  selectedSlotSummaryDate: {
-    marginTop: 6,
-    fontWeight: '600',
-  },
-
-  selectedSlotSummaryTime: {
-    marginTop: 3,
-    color: '#555555',
-  },
-
-  bottomArea: {
-    position: 'absolute',
-    left: 20,
-    right: 20,
-    bottom: 10,
-    paddingTop: 10,
-    backgroundColor: '#FFFFFF',
-  },
-
-  continueButton: {
-    minHeight: 52,
-    backgroundColor: '#111111',
-    borderRadius: 13,
-    paddingVertical: 16,
+  slotSelectedBadge: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
   },
-
-  continueButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
+  slotTime: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: colors.textPrimary,
+    lineHeight: 18,
+  },
+  slotTextSelected: {
+    color: colors.textInverse,
+  },
+  slotTextDisabled: {
+    color: colors.textSubtle,
+  },
+  availableText: {
+    marginTop: 4,
+    fontSize: 11,
+    color: colors.success,
+    fontWeight: '600',
+  },
+  unavailableText: {
+    marginTop: 4,
+    fontSize: 11,
+    color: colors.textSubtle,
+    fontWeight: '500',
+  },
+  selectedSlotStatusText: {
+    marginTop: 4,
+    fontSize: 11,
+    color: '#A7F3D0',
     fontWeight: '700',
   },
-
+  selectedScheduleBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.successSurface,
+    borderWidth: 1,
+    borderColor: colors.successBorder,
+    borderRadius: borderRadius.lg,
+    padding: spacing.lg,
+    marginTop: spacing.xs,
+  },
+  bannerCheckCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: colors.success,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: spacing.md,
+  },
+  bannerTextCol: {
+    flex: 1,
+  },
+  bannerTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: colors.successText,
+  },
+  bannerSubtitle: {
+    fontSize: 12,
+    color: colors.success,
+    marginTop: 1,
+    fontWeight: '600',
+  },
+  bottomArea: {
+    position: 'absolute',
+    left: spacing.lg,
+    right: spacing.lg,
+    bottom: spacing.md,
+    backgroundColor: 'transparent',
+  },
+  continueButton: {
+    backgroundColor: colors.primary,
+    borderRadius: borderRadius.lg,
+    paddingVertical: spacing.lg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 52,
+    ...shadows.lg,
+  },
+  btnContentRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  continueButtonText: {
+    color: colors.textInverse,
+    fontSize: 16,
+    fontWeight: '800',
+  },
   buttonDisabled: {
-    opacity: 0.4,
+    backgroundColor: colors.textSubtle,
+    shadowOpacity: 0,
+    elevation: 0,
   },
 });

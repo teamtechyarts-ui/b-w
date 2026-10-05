@@ -106,6 +106,22 @@ export default function FacilityPackingPanel({
       setBusy(false);
     }
   };
+function formatTimestamp(isoString?: string | null): string {
+  if (!isoString) return '';
+  try {
+    const d = new Date(isoString);
+    if (isNaN(d.getTime())) return isoString;
+    return d.toLocaleString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch {
+    return isoString;
+  }
+}
+
   return (
     <View style={styles.panel}>
       <Text style={styles.heading}>
@@ -131,7 +147,7 @@ export default function FacilityPackingPanel({
           <Text style={styles.recordTitle}>
             Cycle {record.cycle_number} · Packing confirmed
           </Text>
-          <Text>Packed: {new Date(record.packed_at).toLocaleString()}</Text>
+          <Text>Packed: {formatTimestamp(record.packed_at)}</Text>
           <Text>
             Items:{' '}
             {record.items.reduce((sum, item) => sum + item.packed_quantity, 0)}
@@ -140,7 +156,19 @@ export default function FacilityPackingPanel({
         </View>
       ))}
       {details && !details.history.length ? (
-        <Text>No final packing recorded yet.</Text>
+        <Text style={styles.mutedText}>
+          {[
+            'ready_for_delivery',
+            'delivery_assigned',
+            'delivery_accepted',
+            'en_route_delivery',
+            'delivery_otp_pending',
+            'delivered',
+            'claim_period_active',
+          ].includes(details.orderStatus)
+            ? 'Packing verified and sealed for delivery dispatch.'
+            : 'No final packing recorded yet.'}
+        </Text>
       ) : null}
       {details?.canPack ? (
         <>
@@ -206,4 +234,5 @@ const styles = StyleSheet.create({
     gap: 5,
   },
   recordTitle: { fontWeight: '800' },
+  mutedText: { color: '#67635B', fontSize: 13 },
 });

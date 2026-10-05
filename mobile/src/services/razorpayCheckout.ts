@@ -43,10 +43,6 @@ export async function openRazorpayCheckout(input: {
   currency: string;
   orderNumber: string;
 }) {
-  if (__DEV__) {
-    throw new Error('Razorpay checkout is disabled in Development.');
-  }
-
   if (!input.keyId || !input.orderId || input.amount <= 0) {
     throw new Error('Razorpay checkout details are incomplete.');
   }
@@ -60,7 +56,7 @@ export async function openRazorpayCheckout(input: {
       name: 'Bright & White',
       description: `Order ${input.orderNumber}`,
       theme: {
-        color: '#111111',
+        color: '#111827',
       },
     });
 

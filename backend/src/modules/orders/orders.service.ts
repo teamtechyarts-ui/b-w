@@ -14,6 +14,18 @@ import { CreateOrderDto } from "./dto/create-order.dto";
 import { calculateOrderPricing } from "./order-pricing";
 import { CUSTOMER_TERMS_VERSION } from "./order-terms";
 
+export interface ServiceabilityResult {
+  serviceable: boolean;
+  facilityId?: string;
+  facilityName?: string;
+  facilityAddress?: string | null;
+  pincode?: string;
+  distanceMeters?: number;
+  serviceRadiusMeters?: number;
+  reason?: 'INVALID_PINCODE' | 'OUTSIDE_SERVICE_AREA' | 'NO_ACTIVE_FACILITIES';
+  message?: string;
+}
+
 @Injectable()
 export class OrdersService {
   constructor(
@@ -40,25 +52,92 @@ export class OrdersService {
     return data.id;
   }
 
-  private async facilityId(requestedFacilityId?: string): Promise<string> {
-    let query = this.db()
-      .from("facilities")
-      .select("id")
-      .eq("is_active", true)
-      .not("latitude", "is", null)
-      .not("longitude", "is", null);
+  async checkServiceability(
+    profileId: string,
+    pickupAddressId: string,
+  ): Promise<ServiceabilityResult> {
+    const customerId = await this.customerId(profileId);
+    return this.resolveServiceability(customerId, pickupAddressId);
+  }
 
-    if (requestedFacilityId) {
-      query = query.eq("id", requestedFacilityId);
-    } else {
-      query = query.order("created_at", { ascending: true }).limit(1);
+  private async resolveServiceability(
+    customerId: string,
+    pickupAddressId: string,
+  ): Promise<ServiceabilityResult> {
+    const { data: address, error: addressError } = await this.db()
+      .from('customer_addresses')
+      .select('id, postal_code, label, address_line1, address_line2, city, state')
+      .eq('id', pickupAddressId)
+      .eq('customer_id', customerId)
+      .maybeSingle();
+
+    if (addressError || !address) {
+      throw new BadRequestException('Pickup address does not belong to customer');
     }
 
-    const { data, error } = await query.maybeSingle();
-    if (error || !data) {
-      throw new BadRequestException("No active service facility is available");
+    const rawPincode = address.postal_code ? String(address.postal_code).trim() : '';
+
+    if (!rawPincode || !/^\d{6}$/.test(rawPincode)) {
+      return {
+        serviceable: false,
+        reason: 'INVALID_PINCODE',
+        message: 'Please enter a valid 6-digit pincode.',
+      };
     }
-    return data.id;
+
+    // Lookup serviceable active facilities for this pincode
+    const { data: pincodeRows, error: pinErr } = await this.db()
+      .from('facility_service_pincodes')
+      .select('facility_id, pincode')
+      .eq('pincode', rawPincode);
+
+    if (pinErr) {
+      throw new BadRequestException(pinErr.message || 'Unable to verify serviceability for this pincode');
+    }
+
+    if (!pincodeRows || pincodeRows.length === 0) {
+      return {
+        serviceable: false,
+        pincode: rawPincode,
+        reason: 'OUTSIDE_SERVICE_AREA',
+        message: 'We currently do not provide pickup and delivery service in your pincode.',
+      };
+    }
+
+    const facilityIds = pincodeRows.map((r: any) => r.facility_id);
+    const { data: activeFacilities, error: facErr } = await this.db()
+      .from('facilities')
+      .select('id, name, address, is_active')
+      .in('id', facilityIds)
+      .eq('is_active', true);
+
+    if (facErr) {
+      throw new BadRequestException(facErr.message || 'Unable to verify facility availability');
+    }
+
+    if (!activeFacilities || activeFacilities.length === 0) {
+      return {
+        serviceable: false,
+        pincode: rawPincode,
+        reason: 'OUTSIDE_SERVICE_AREA',
+        message: 'We currently do not provide pickup and delivery service in your pincode.',
+      };
+    }
+
+    // Deterministic selection: sort by name ASC, id ASC
+    activeFacilities.sort((a: any, b: any) =>
+      a.name.localeCompare(b.name) || a.id.localeCompare(b.id),
+    );
+
+    const selected = activeFacilities[0];
+
+    return {
+      serviceable: true,
+      facilityId: selected.id,
+      facilityName: selected.name,
+      facilityAddress: selected.address,
+      pincode: rawPincode,
+    };
   }
 
   async create(profileId: string, dto: CreateOrderDto) {
@@ -119,23 +198,31 @@ export class OrdersService {
     }
 
     /*
-     * Verify both pickup and delivery
-     * addresses belong to this customer.
+     * Verify delivery address belongs to this customer.
      */
-    for (const addressId of [dto.pickupAddressId, dto.deliveryAddressId]) {
-      const { data: address, error: addressError } = await this.db()
-        .from("customer_addresses")
-        .select("id")
-        .eq("id", addressId)
-        .eq("customer_id", customerId)
-        .maybeSingle();
+    const { data: delAddress, error: delAddressError } = await this.db()
+      .from("customer_addresses")
+      .select("id")
+      .eq("id", dto.deliveryAddressId)
+      .eq("customer_id", customerId)
+      .maybeSingle();
 
-      if (addressError || !address) {
-        throw new BadRequestException("Address does not belong to customer");
-      }
+    if (delAddressError || !delAddress) {
+      throw new BadRequestException("Address does not belong to customer");
     }
 
-    const assignedFacilityId = await this.facilityId(dto.facilityId);
+    /*
+     * Authoritative Serviceability Check:
+     * Resolves the nearest active facility within its service radius.
+     */
+    const serviceability = await this.resolveServiceability(customerId, dto.pickupAddressId);
+    if (!serviceability.serviceable) {
+      throw new BadRequestException(
+        serviceability.message || "Your pickup location is outside our service area."
+      );
+    }
+
+    const assignedFacilityId = serviceability.facilityId!;
 
     let subtotal = 0;
     const seenServices = new Set<string>();

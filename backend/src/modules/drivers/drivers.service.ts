@@ -72,16 +72,19 @@ export class DriversService {
   private async requireActiveDriver(profileId: string) {
     const { data, error } = await this.supabase.admin
       .from("drivers")
-      .select("id,is_active")
+      .select("id,is_active,is_available,max_concurrent_jobs")
       .eq("profile_id", profileId)
       .maybeSingle();
     if (error || !data?.is_active)
       throw new NotFoundException("Active driver profile not found");
-    return data.id as string;
+    return data;
   }
 
   async dashboard(profileId: string) {
-    const driverId = await this.requireActiveDriver(profileId);
+    const driver = await this.requireActiveDriver(profileId);
+    const driverId = driver.id;
+    const isAvailable = Boolean(driver.is_available);
+    const maxConcurrent = driver.max_concurrent_jobs ?? 3;
     const { today, start, end } = todayWindow();
     const fields =
       "id,order_id,driver_id,assignment_type,status,assigned_at,accepted_at,completed_at";
@@ -128,16 +131,149 @@ export class DriversService {
         item.status === "completed",
     );
     const orderIds = [...new Set(assignments.map((item) => item.order_id))];
+
+    // Load available open jobs if driver is available and within capacity
+    let availablePickups: any[] = [];
+    let availableDeliveries: any[] = [];
+
+    const activeCount = assignments.filter((item) =>
+      ACTIVE_ASSIGNMENT_STATUSES.includes(item.status),
+    ).length;
+
+    if (isAvailable && activeCount < maxConcurrent) {
+      const [pickupOrdersRes, deliveryOrdersRes, activeAssignmentsRes] =
+        await Promise.all([
+          this.supabase.admin
+            .from("orders")
+            .select(
+              "id,order_number,current_status,pickup_scheduled_at,pickup_slot_label,pickup_address_id,delivery_address_id,facility_id",
+            )
+            .in("current_status", ["confirmed", "pickup_failed"])
+            .order("created_at", { ascending: false })
+            .limit(20),
+          this.supabase.admin
+            .from("orders")
+            .select(
+              "id,order_number,current_status,pickup_scheduled_at,pickup_slot_label,pickup_address_id,delivery_address_id,facility_id",
+            )
+            .in("current_status", ["ready_for_delivery", "delivery_failed"])
+            .order("updated_at", { ascending: false })
+            .limit(20),
+          this.supabase.admin
+            .from("driver_assignments")
+            .select("order_id,assignment_type,status")
+            .in("status", ACTIVE_ASSIGNMENT_STATUSES),
+        ]);
+
+      if (!pickupOrdersRes.error && !deliveryOrdersRes.error) {
+        const activeAssignedOrderMap = new Set<string>();
+        for (const da of activeAssignmentsRes.data ?? []) {
+          activeAssignedOrderMap.add(`${da.order_id}:${da.assignment_type}`);
+        }
+
+        const candidatePickups = (pickupOrdersRes.data ?? []).filter(
+          (o) => !activeAssignedOrderMap.has(`${o.id}:pickup`),
+        );
+        const candidateDeliveries = (deliveryOrdersRes.data ?? []).filter(
+          (o) => !activeAssignedOrderMap.has(`${o.id}:delivery`),
+        );
+
+        const openOrderIds = [
+          ...candidatePickups.map((o) => o.id),
+          ...candidateDeliveries.map((o) => o.id),
+        ];
+
+        if (openOrderIds.length > 0) {
+          const openAddressIds = [
+            ...new Set(
+              [...candidatePickups, ...candidateDeliveries].flatMap((o) =>
+                [o.pickup_address_id, o.delivery_address_id].filter(Boolean),
+              ),
+            ),
+          ];
+          const openFacilityIds = [
+            ...new Set(
+              [...candidatePickups, ...candidateDeliveries]
+                .map((o) => o.facility_id)
+                .filter(Boolean),
+            ),
+          ];
+
+          const [openAddressesRes, openFacilitiesRes] = await Promise.all([
+            openAddressIds.length
+              ? this.supabase.admin
+                  .from("customer_addresses")
+                  .select(
+                    "id,label,address_line1,address_line2,city,state,postal_code,latitude,longitude",
+                  )
+                  .in("id", openAddressIds)
+              : Promise.resolve({ data: [], error: null }),
+            openFacilityIds.length
+              ? this.supabase.admin
+                  .from("facilities")
+                  .select("id,name,address,latitude,longitude")
+                  .in("id", openFacilityIds)
+              : Promise.resolve({ data: [], error: null }),
+          ]);
+
+          const openAddresses = new Map(
+            (openAddressesRes.data ?? []).map((row) => [row.id, row]),
+          );
+          const openFacilities = new Map(
+            (openFacilitiesRes.data ?? []).map((row) => [row.id, row]),
+          );
+
+          availablePickups = candidatePickups.map((order) => ({
+            id: order.id,
+            orderId: order.id,
+            orderNumber: order.order_number,
+            type: "pickup",
+            assignmentStatus: "available",
+            orderStatus: order.current_status,
+            pickupScheduledAt: order.pickup_scheduled_at,
+            pickupSlotLabel: order.pickup_slot_label,
+            address: order.pickup_address_id
+              ? openAddresses.get(order.pickup_address_id) ?? null
+              : null,
+            facility: order.facility_id
+              ? openFacilities.get(order.facility_id) ?? null
+              : null,
+          }));
+
+          availableDeliveries = candidateDeliveries.map((order) => ({
+            id: order.id,
+            orderId: order.id,
+            orderNumber: order.order_number,
+            type: "delivery",
+            assignmentStatus: "available",
+            orderStatus: order.current_status,
+            pickupScheduledAt: order.pickup_scheduled_at,
+            pickupSlotLabel: order.pickup_slot_label,
+            address: order.delivery_address_id
+              ? openAddresses.get(order.delivery_address_id) ?? null
+              : null,
+            facility: order.facility_id
+              ? openFacilities.get(order.facility_id) ?? null
+              : null,
+          }));
+        }
+      }
+    }
+
     if (!orderIds.length) {
       return {
         date: today,
         summary: {
           pickups: 0,
           deliveries: 0,
+          availablePickups: availablePickups.length,
+          availableDeliveries: availableDeliveries.length,
           pending: 0,
           inProgress: 0,
           completed: 0,
         },
+        availablePickups,
+        availableDeliveries,
         pickups: [],
         deliveries: [],
       };
@@ -232,6 +368,8 @@ export class DriversService {
       summary: {
         pickups: activeJobs.filter((job) => job.type === "pickup").length,
         deliveries: activeJobs.filter((job) => job.type === "delivery").length,
+        availablePickups: availablePickups.length,
+        availableDeliveries: availableDeliveries.length,
         pending: jobs.filter((job) => job.assignmentStatus === "assigned")
           .length,
         inProgress: jobs.filter((job) =>
@@ -240,13 +378,106 @@ export class DriversService {
         completed: jobs.filter((job) => job.assignmentStatus === "completed")
           .length,
       },
+      availablePickups,
+      availableDeliveries,
       pickups: activeJobs.filter((job) => job.type === "pickup"),
       deliveries: activeJobs.filter((job) => job.type === "delivery"),
     };
   }
 
+  async claimJob(
+    profileId: string,
+    orderId: string,
+    jobType: "pickup" | "delivery",
+  ) {
+    const driver = await this.requireActiveDriver(profileId);
+    if (!driver.is_available) {
+      throw new ConflictException("Driver is currently marked as unavailable");
+    }
+
+    // 1. Attempt direct claim RPC if present
+    const { data: directData, error: directError } =
+      await this.supabase.admin.rpc("claim_driver_job_atomic", {
+        p_order_id: orderId,
+        p_driver_id: driver.id,
+        p_job_type: jobType,
+      });
+
+    if (!directError && directData?.assignment) {
+      return {
+        success: true,
+        assignment: directData.assignment,
+        orderStatus: directData.orderStatus,
+      };
+    }
+
+    if (directError && directError.code !== "PGRST202" && !directError.message?.includes("schema cache")) {
+      if (directError.code === "P0002") {
+        throw new NotFoundException("Order not found");
+      }
+      if (directError.code === "23505") {
+        throw new ConflictException(
+          "This job has already been claimed by another driver.",
+        );
+      }
+      throw new ConflictException(
+        directError.message || "Job is no longer available",
+      );
+    }
+
+    // 2. Authoritative atomic claim using existing Postgres RPCs
+    const { data: created, error: createError } =
+      await this.supabase.admin.rpc("create_driver_assignment_atomic", {
+        p_order_id: orderId,
+        p_driver_id: driver.id,
+        p_assignment_type: jobType,
+        p_assignment_score: 1.0,
+      });
+
+    if (createError) {
+      if (createError.code === "P0002") {
+        throw new NotFoundException("Order not found");
+      }
+      if (createError.code === "23505") {
+        throw new ConflictException(
+          "This job has already been claimed by another driver.",
+        );
+      }
+      throw new ConflictException(
+        createError.message || "Job is no longer available",
+      );
+    }
+
+    if (!created?.assignment?.id) {
+      throw new ConflictException("Unable to claim job");
+    }
+
+    const { data: accepted, error: acceptError } =
+      await this.supabase.admin.rpc("transition_driver_assignment_atomic", {
+        p_assignment_id: created.assignment.id,
+        p_driver_id: driver.id,
+        p_action: "accept",
+        p_rejection_reason: null,
+      });
+
+    if (acceptError) {
+      throw new ConflictException(
+        acceptError.message || "Unable to complete job acceptance",
+      );
+    }
+
+    return {
+      success: true,
+      assignment: accepted?.assignment ?? created.assignment,
+      orderStatus:
+        accepted?.orderStatus ??
+        (jobType === "pickup" ? "pickup_accepted" : "delivery_accepted"),
+    };
+  }
+
   async lookupOrder(profileId: string, rawCode: string) {
-    const driverId = await this.requireActiveDriver(profileId);
+    const driver = await this.requireActiveDriver(profileId);
+    const driverId = driver.id;
     const code = rawCode.trim();
     let order: {
       id: string;
@@ -328,7 +559,8 @@ export class DriversService {
   }
 
   async assignment(profileId: string, assignmentId: string) {
-    const driverId = await this.requireActiveDriver(profileId);
+    const driver = await this.requireActiveDriver(profileId);
+    const driverId = driver.id;
     const { data: assignment, error } = await this.supabase.admin
       .from("driver_assignments")
       .select(
@@ -385,6 +617,30 @@ export class DriversService {
     ]);
     if (addressResult.error || facilityResult.error || itemsResult.error)
       throw new BadRequestException("Unable to load job details");
+
+    let facilityHandedOver = false;
+    let facilityCollected = false;
+    let facilityHandedOverAt: string | null = null;
+    let facilityCollectedAt: string | null = null;
+
+    if (assignment.assignment_type === "delivery") {
+      const { data: ops } = await this.supabase.admin
+        .from("driver_navigation_events")
+        .select("event_type,created_at")
+        .eq("order_id", order.id)
+        .in("event_type", ["facility_dispatch", "driver_collection_confirmed"]);
+
+      for (const op of ops ?? []) {
+        if (op.event_type === "facility_dispatch") {
+          facilityHandedOver = true;
+          facilityHandedOverAt = op.created_at;
+        } else if (op.event_type === "driver_collection_confirmed") {
+          facilityCollected = true;
+          facilityCollectedAt = op.created_at;
+        }
+      }
+    }
+
     let customer: { name: string | null; phone: string | null } | null = null;
     if (
       operationallyRelevant(
@@ -426,11 +682,16 @@ export class DriversService {
       facility: facilityResult.data,
       customer,
       items: itemsResult.data ?? [],
+      facilityHandedOver,
+      facilityCollected,
+      facilityHandedOverAt,
+      facilityCollectedAt,
     };
   }
 
   async handoffQr(profileId: string, assignmentId: string) {
-    const driverId = await this.requireActiveDriver(profileId);
+    const driver = await this.requireActiveDriver(profileId);
+    const driverId = driver.id;
     const { data: assignment, error } = await this.supabase.admin
       .from("driver_assignments")
       .select("id,order_id,assignment_type,status")

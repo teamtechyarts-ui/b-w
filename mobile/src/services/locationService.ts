@@ -3,15 +3,9 @@ import type {
 } from '../types/location';
 
 /**
- * Development-only location.
- *
- * This prevents local development from accidentally
- * calling live Google Maps / Places / Geocoding APIs.
- *
- * Google Maps support will be added behind the same
- * interface for Testing/UAT and Production.
+ * Default location center (Hyderabad) used as initial fallback before GPS resolution.
  */
-const DEVELOPMENT_TEST_LOCATION: SelectedLocation = {
+const DEFAULT_LOCATION: SelectedLocation = {
   coordinates: {
     latitude: 17.385,
     longitude: 78.4867,
@@ -39,16 +33,16 @@ const DEVELOPMENT_TEST_LOCATION: SelectedLocation = {
     null,
 
   source:
-    'development_mock',
+    'default',
 };
 
-export function getDevelopmentTestLocation():
+export function getDefaultLocation():
   SelectedLocation {
   return {
-    ...DEVELOPMENT_TEST_LOCATION,
+    ...DEFAULT_LOCATION,
 
     coordinates: {
-      ...DEVELOPMENT_TEST_LOCATION.coordinates,
+      ...DEFAULT_LOCATION.coordinates,
     },
   };
 }

@@ -1,6 +1,7 @@
 export type LocationCoordinates = {
   latitude: number;
   longitude: number;
+  accuracy?: number;
 };
 
 export type SelectedLocation = {
@@ -18,7 +19,7 @@ export type SelectedLocation = {
   placeId: string | null;
 
   source:
-    | 'development_mock'
+    | 'default'
     | 'google_maps'
     | 'device_location';
 };

@@ -28,3 +28,40 @@ test('stalled read requests give connection guidance rather than order-submissio
   ]);
   expect(globalThis.fetch).toHaveBeenCalledTimes(1);
 });
+
+test('HTTP 404 does not throw network unavailable and provides meaningful error', async () => {
+  globalThis.fetch = jest.fn().mockResolvedValue({
+    ok: false,
+    status: 404,
+    json: async () => ({
+      message: 'Cannot GET /v1/admin/staff/3167f33a-89a6-4e39-960a-db47327304cb/driver-pin',
+      error: 'Not Found',
+      statusCode: 404,
+    }),
+  } as Response);
+  await expect(apiRequest('/admin/staff/123/driver-pin')).rejects.toThrow('Driver operation is not available.');
+});
+
+test('HTTP errors preserve backend error messages for 400, 401, 403, 409, 429, 500', async () => {
+  globalThis.fetch = jest.fn().mockResolvedValue({
+    ok: false,
+    status: 400,
+    json: async () => ({ message: 'Driver PIN must be exactly 6 digits' }),
+  } as Response);
+  await expect(apiRequest('/test')).rejects.toThrow('Driver PIN must be exactly 6 digits');
+
+  globalThis.fetch = jest.fn().mockResolvedValue({
+    ok: false,
+    status: 403,
+    json: async () => null,
+  } as Response);
+  await expect(apiRequest('/test')).rejects.toThrow('Insufficient permissions to perform this operation.');
+
+  globalThis.fetch = jest.fn().mockResolvedValue({
+    ok: false,
+    status: 500,
+    json: async () => null,
+  } as Response);
+  await expect(apiRequest('/test')).rejects.toThrow('Internal server error. Please try again.');
+});
+

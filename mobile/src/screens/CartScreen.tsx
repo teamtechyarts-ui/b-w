@@ -1,7 +1,4 @@
-import React, {
-  useMemo,
-} from 'react';
-
+import React, {useMemo} from 'react';
 import {
   SafeAreaView,
   ScrollView,
@@ -12,6 +9,10 @@ import {
   View,
 } from 'react-native';
 
+import AppIcon from '../components/AppIcon';
+import CheckoutProgressBar from '../components/CheckoutProgressBar';
+import StateView from '../components/StateView';
+import {borderRadius, colors, shadows, spacing, typography} from '../theme/designSystem';
 import {
   calculateCheckoutPricing,
   formatMoney,
@@ -58,409 +59,181 @@ export default function CartScreen({
   onContinue,
   onUpdateQuantity,
 }: CartScreenProps) {
-  const pricing =
-    useMemo(
-      () =>
-        calculateCheckoutPricing(
-          subtotal,
-          0,
-          pricingPolicy,
-        ),
-      [
-        subtotal,
-        pricingPolicy,
-      ],
-    );
+  const pricing = useMemo(
+    () => calculateCheckoutPricing(subtotal, 0, pricingPolicy),
+    [subtotal, pricingPolicy],
+  );
 
   return (
-    <SafeAreaView
-      style={
-        styles.container
-      }>
-      <StatusBar
-        barStyle="dark-content"
-      />
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="dark-content" />
 
-      <View
-        style={
-          styles.screenContainer
-        }>
-        <View
-          style={
-            styles.pageHeader
-          }>
+      <View style={styles.screenContainer}>
+        {/* Header */}
+        <View style={styles.pageHeader}>
           <TouchableOpacity
-            onPress={
-              onBack
-            }>
-            <Text
-              style={
-                styles.pageBack
-              }>
-              ← Back
-            </Text>
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+            style={styles.headerBtn}
+            onPress={onBack}>
+            <View style={styles.backRow}>
+              <AppIcon name="arrow-left" size={16} color={colors.textPrimary} />
+              <Text style={styles.pageBack}>Back</Text>
+            </View>
           </TouchableOpacity>
 
-          <Text
-            style={
-              styles.pageHeaderTitle
-            }>
-            Your Cart
-          </Text>
+          <Text style={styles.pageHeaderTitle}>Your Cart</Text>
 
           <TouchableOpacity
-            onPress={
-              onHome
-            }>
-            <Text
-              style={
-                styles.homeLink
-              }>
-              Home
-            </Text>
+            accessibilityRole="button"
+            accessibilityLabel="Go to home"
+            style={styles.headerBtn}
+            onPress={onHome}>
+            <Text style={styles.homeLink}>Home</Text>
           </TouchableOpacity>
         </View>
 
-        {items.length ===
-        0 ? (
-          <View
-            style={
-              styles.emptyContainer
-            }>
-            <Text
-              style={
-                styles.emptyEmoji
-              }>
-              🛒
-            </Text>
+        {items.length > 0 ? (
+          <CheckoutProgressBar currentStep="cart" />
+        ) : null}
 
-            <Text
-              style={
-                styles.emptyTitle
-              }>
-              Your cart is empty
-            </Text>
-
-            <Text
-              style={
-                styles.emptyText
-              }>
-              Add laundry services to continue.
-            </Text>
-
-            <TouchableOpacity
-              style={
-                styles.button
-              }
-              onPress={
-                onBrowseServices
-              }>
-              <Text
-                style={
-                  styles.buttonText
-                }>
-                Browse Services
-              </Text>
-            </TouchableOpacity>
+        {items.length === 0 ? (
+          <View style={styles.emptyWrap}>
+            <StateView
+              type="empty"
+              icon="cart"
+              title="Your cart is empty"
+              message="Explore our laundry and garment care services to add items and schedule a pickup."
+              actionLabel="Browse Services"
+              onAction={onBrowseServices}
+            />
           </View>
         ) : (
           <>
             <ScrollView
-              style={
-                styles.flex
-              }
-              contentContainerStyle={
-                styles.scrollContent
-              }>
-              <Text
-                style={
-                  styles.summaryTitle
-                }>
-                {itemCount}{' '}
-                {itemCount ===
-                1
-                  ? 'item'
-                  : 'items'}
-              </Text>
+              style={styles.flex}
+              contentContainerStyle={styles.scrollContent}
+              showsVerticalScrollIndicator={false}>
+              <View style={styles.cartMetaRow}>
+                <Text style={styles.summaryTitle}>
+                  {itemCount} {itemCount === 1 ? 'service item' : 'service items'}
+                </Text>
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  accessibilityLabel="Add more services"
+                  onPress={onBrowseServices}>
+                  <View style={styles.addMoreRow}>
+                    <AppIcon name="plus" size={14} color={colors.primary} strokeWidth={2.5} />
+                    <Text style={styles.addMoreLink}>Add More</Text>
+                  </View>
+                </TouchableOpacity>
+              </View>
 
-              {items.map(
-                item => (
-                  <View
-                    key={
-                      item.id
-                    }
-                    style={
-                      styles.itemCard
-                    }>
-                    <View
-                      style={
-                        styles.itemTop
-                      }>
-                      <View
-                        style={
-                          styles.itemInfo
-                        }>
-                        <Text
-                          style={
-                            styles.category
-                          }>
-                          {
-                            item.categoryName
-                          }
-                        </Text>
+              {items.map(item => (
+                <View key={item.id} style={styles.itemCard}>
+                  <View style={styles.itemTop}>
+                    <View style={styles.itemInfo}>
+                      {item.categoryName ? (
+                        <View style={styles.categoryBadgeContainer}>
+                          <Text style={styles.categoryBadge}>
+                            {item.categoryName.toUpperCase()}
+                          </Text>
+                        </View>
+                      ) : null}
 
-                        <Text
-                          style={
-                            styles.itemName
-                          }>
-                          {
-                            item.name
-                          }
-                        </Text>
+                      <Text style={styles.itemName}>{item.name}</Text>
 
-                        <Text
-                          style={
-                            styles.itemUnit
-                          }>
-                          ₹
-                          {formatMoney(
-                            item.price ??
-                              0,
-                          )}{' '}
-                          per{' '}
-                          {
-                            item.pricingUnit
-                          }
-                        </Text>
-                      </View>
-
-                      <Text
-                        style={
-                          styles.lineTotal
-                        }>
-                        ₹
-                        {formatMoney(
-                          (item.price ??
-                            0) *
-                            item.quantity,
-                        )}
+                      <Text style={styles.itemUnit}>
+                        ₹{formatMoney(item.price ?? 0)} / {item.pricingUnit}
                       </Text>
                     </View>
 
-                    <View
-                      style={
-                        styles.quantityRow
-                      }>
+                    <Text style={styles.lineTotal}>
+                      ₹{formatMoney((item.price ?? 0) * item.quantity)}
+                    </Text>
+                  </View>
+
+                  <View style={styles.itemBottomRow}>
+                    <View style={styles.stepperBox}>
                       <TouchableOpacity
-                        style={
-                          styles.quantityButton
-                        }
-                        onPress={() =>
-                          onUpdateQuantity(
-                            item,
-                            -1,
-                          )
-                        }>
-                        <Text
-                          style={
-                            styles.quantityButtonText
-                          }>
-                          −
-                        </Text>
+                        accessibilityRole="button"
+                        accessibilityLabel={`Decrease ${item.name} quantity`}
+                        style={styles.stepperBtn}
+                        onPress={() => onUpdateQuantity(item, -1)}>
+                        <AppIcon name="minus" size={12} color={colors.textPrimary} strokeWidth={2.5} />
                       </TouchableOpacity>
 
-                      <Text
-                        style={
-                          styles.quantityValue
-                        }>
-                        {
-                          item.quantity
-                        }
-                      </Text>
+                      <Text style={styles.stepperQtyText}>{item.quantity}</Text>
 
                       <TouchableOpacity
-                        style={
-                          styles.quantityButton
-                        }
-                        onPress={() =>
-                          onUpdateQuantity(
-                            item,
-                            1,
-                          )
-                        }>
-                        <Text
-                          style={
-                            styles.quantityButtonText
-                          }>
-                          +
-                        </Text>
+                        accessibilityRole="button"
+                        accessibilityLabel={`Increase ${item.name} quantity`}
+                        style={styles.stepperBtn}
+                        onPress={() => onUpdateQuantity(item, 1)}>
+                        <AppIcon name="plus" size={12} color={colors.textPrimary} strokeWidth={2.5} />
                       </TouchableOpacity>
                     </View>
                   </View>
-                ),
-              )}
+                </View>
+              ))}
+
+              {/* Price Summary */}
+              <View style={styles.priceSummaryCard}>
+                <Text style={styles.priceSectionTitle}>Estimated Summary</Text>
+
+                <View style={styles.priceRow}>
+                  <Text style={styles.priceLabel}>Service Subtotal</Text>
+                  <Text style={styles.priceValue}>
+                    ₹{formatMoney(pricing.subtotal)}
+                  </Text>
+                </View>
+
+                <View style={styles.priceRow}>
+                  <Text style={styles.priceLabel}>Estimated Pickup & Delivery</Text>
+                  <Text
+                    style={[
+                      styles.priceValue,
+                      pricing.hasFreeDelivery && styles.freeDeliveryValue,
+                    ]}>
+                    {pricing.hasFreeDelivery
+                      ? 'FREE'
+                      : `₹${formatMoney(pricing.pickupDeliveryCharge)}`}
+                  </Text>
+                </View>
+
+                <View style={styles.priceRow}>
+                  <Text style={styles.priceLabel}>
+                    GST ({pricing.gstRate}%)
+                  </Text>
+                  <Text style={styles.priceValue}>
+                    ₹{formatMoney(pricing.gstAmount)}
+                  </Text>
+                </View>
+
+                <View style={styles.priceDivider} />
+
+                <View style={styles.totalRow}>
+                  <Text style={styles.totalLabel}>Estimated Total</Text>
+                  <Text style={styles.totalValue}>
+                    ₹{formatMoney(pricing.grandTotal)}
+                  </Text>
+                </View>
+              </View>
             </ScrollView>
 
-            <View
-              style={
-                styles.checkoutCard
-              }>
-              {!pricing.hasFreeDelivery ? (
-                <View
-                  style={
-                    styles.deliveryBanner
-                  }>
-                  <Text
-                    style={
-                      styles.deliveryBannerTitle
-                    }>
-                    Add ₹
-                    {formatMoney(
-                      pricing.amountUntilFreeDelivery,
-                    )}{' '}
-                    more for FREE pickup & delivery
-                  </Text>
-                </View>
-              ) : (
-                <View
-                  style={
-                    styles.freeDeliveryBanner
-                  }>
-                  <Text
-                    style={
-                      styles.freeDeliveryText
-                    }>
-                    ✓ FREE pickup & delivery
-                  </Text>
-                </View>
-              )}
-
-              <View
-                style={
-                  styles.summaryRow
-                }>
-                <Text
-                  style={
-                    styles.checkoutLabel
-                  }>
-                  Service Subtotal
-                </Text>
-
-                <Text
-                  style={
-                    styles.checkoutValue
-                  }>
-                  ₹
-                  {formatMoney(
-                    pricing.subtotal,
-                  )}
-                </Text>
-              </View>
-
-              <View
-                style={
-                  styles.summaryRow
-                }>
-                <Text
-                  style={
-                    styles.checkoutLabel
-                  }>
-                  Pickup & Delivery
-                </Text>
-
-                <Text
-                  style={
-                    styles.checkoutValue
-                  }>
-                  {pricing.hasFreeDelivery
-                    ? 'FREE'
-                    : `₹${formatMoney(
-                        pricing.pickupDeliveryCharge,
-                      )}`}
-                </Text>
-              </View>
-
-              <View
-                style={
-                  styles.summaryRow
-                }>
-                <Text
-                  style={
-                    styles.checkoutLabel
-                  }>
-                  GST @{' '}
-                  {
-                    pricing.gstRate
-                  }
-                  %
-                </Text>
-
-                <Text
-                  style={
-                    styles.checkoutValue
-                  }>
-                  ₹
-                  {formatMoney(
-                    pricing.gstAmount,
-                  )}
-                </Text>
-              </View>
-
-              <View
-                style={
-                  styles.totalDivider
-                }
-              />
-
-              <View
-                style={
-                  styles.summaryRow
-                }>
-                <Text
-                  style={
-                    styles.grandTotalLabel
-                  }>
-                  Grand Total
-                </Text>
-
-                <Text
-                  style={
-                    styles.checkoutTotal
-                  }>
-                  ₹
-                  {formatMoney(
-                    pricing.grandTotal,
-                  )}
-                </Text>
-              </View>
-
-              <Text
-                style={
-                  styles.checkoutNote
-                }>
-                Estimated checkout pricing. Final prices and totals are recalculated by the server when the order is created.
-              </Text>
-              {subtotal < (pricingPolicy?.minimumOrderAmount ?? 0) ? <Text accessibilityRole="alert">
-                Minimum order ₹{formatMoney(pricingPolicy!.minimumOrderAmount)}. Add more services to continue.
-              </Text> : null}
-
+            {/* Sticky Bottom Checkout CTA */}
+            <View style={styles.bottomArea}>
               <TouchableOpacity
-                disabled={subtotal < (pricingPolicy?.minimumOrderAmount ?? 0)}
-                style={
-                  styles.checkoutButton
-                }
-                onPress={
-                  onContinue
-                }>
-                <Text
-                  style={
-                    styles.checkoutButtonText
-                  }>
-                  Continue • ₹
-                  {formatMoney(
-                    pricing.grandTotal,
-                  )}
-                </Text>
+                accessibilityRole="button"
+                accessibilityLabel={`Select Address • ₹${formatMoney(pricing.grandTotal)}`}
+                style={styles.checkoutButton}
+                onPress={onContinue}>
+                <View style={styles.btnContentRow}>
+                  <Text style={styles.checkoutButtonText}>
+                    Select Pickup Address
+                  </Text>
+                  <AppIcon name="arrow-right" size={18} color={colors.textInverse} strokeWidth={2.5} />
+                </View>
               </TouchableOpacity>
             </View>
           </>
@@ -470,299 +243,235 @@ export default function CartScreen({
   );
 }
 
-const styles =
-  StyleSheet.create({
-    container: {
-      flex: 1,
-      backgroundColor:
-        '#FFFFFF',
-    },
-
-    flex: {
-      flex: 1,
-    },
-
-    screenContainer: {
-      flex: 1,
-      paddingHorizontal:
-        20,
-    },
-
-    pageHeader: {
-      height: 65,
-      flexDirection:
-        'row',
-      alignItems:
-        'center',
-      justifyContent:
-        'space-between',
-    },
-
-    pageBack: {
-      fontSize: 15,
-      fontWeight:
-        '600',
-      minWidth: 60,
-    },
-
-    pageHeaderTitle: {
-      flex: 1,
-      textAlign:
-        'center',
-      fontSize: 18,
-      fontWeight:
-        '700',
-      marginHorizontal:
-        8,
-    },
-
-    homeLink: {
-      fontSize: 15,
-      fontWeight:
-        '600',
-      minWidth: 60,
-      textAlign:
-        'right',
-    },
-
-    scrollContent: {
-      paddingBottom:
-        20,
-    },
-
-    summaryTitle: {
-      fontSize: 14,
-      color:
-        '#666666',
-      marginBottom:
-        15,
-    },
-
-    itemCard: {
-      borderBottomWidth:
-        1,
-      borderBottomColor:
-        '#EEEEEE',
-      paddingVertical:
-        17,
-    },
-
-    itemTop: {
-      flexDirection:
-        'row',
-      justifyContent:
-        'space-between',
-    },
-
-    itemInfo: {
-      flex: 1,
-    },
-
-    category: {
-      color:
-        '#888888',
-      fontSize: 11,
-    },
-
-    itemName: {
-      fontSize: 16,
-      fontWeight:
-        '600',
-    },
-
-    itemUnit: {
-      color:
-        '#777777',
-      fontSize: 12,
-    },
-
-    lineTotal: {
-      fontSize: 17,
-      fontWeight:
-        '700',
-    },
-
-    quantityRow: {
-      flexDirection:
-        'row',
-      alignItems:
-        'center',
-      marginTop: 14,
-    },
-
-    quantityButton: {
-      width: 34,
-      height: 34,
-      borderRadius: 10,
-      borderWidth: 1,
-      borderColor:
-        '#D7D7D7',
-      alignItems:
-        'center',
-      justifyContent:
-        'center',
-    },
-
-    quantityButtonText: {
-      fontSize: 20,
-    },
-
-    quantityValue: {
-      minWidth: 36,
-      textAlign:
-        'center',
-      fontSize: 16,
-      fontWeight:
-        '700',
-    },
-
-    checkoutCard: {
-      paddingTop: 12,
-      paddingBottom: 10,
-    },
-
-    deliveryBanner: {
-      backgroundColor:
-        '#F4F4F4',
-      borderRadius: 10,
-      paddingHorizontal: 12,
-      paddingVertical: 9,
-      marginBottom: 12,
-    },
-
-    deliveryBannerTitle: {
-      fontSize: 11,
-      lineHeight: 16,
-      fontWeight:
-        '700',
-      color:
-        '#333333',
-    },
-
-    freeDeliveryBanner: {
-      backgroundColor:
-        '#F4F4F4',
-      borderRadius: 10,
-      paddingHorizontal: 12,
-      paddingVertical: 9,
-      marginBottom: 12,
-    },
-
-    freeDeliveryText: {
-      fontSize: 11,
-      fontWeight:
-        '700',
-      color:
-        '#222222',
-    },
-
-    summaryRow: {
-      flexDirection:
-        'row',
-      justifyContent:
-        'space-between',
-      alignItems:
-        'center',
-      marginBottom: 7,
-    },
-
-    checkoutLabel: {
-      fontSize: 13,
-      color:
-        '#666666',
-    },
-
-    checkoutValue: {
-      fontSize: 13,
-      fontWeight:
-        '700',
-    },
-
-    totalDivider: {
-      height: 1,
-      backgroundColor:
-        '#E8E8E8',
-      marginVertical: 5,
-    },
-
-    grandTotalLabel: {
-      fontSize: 16,
-      fontWeight:
-        '800',
-    },
-
-    checkoutTotal: {
-      fontSize: 22,
-      fontWeight:
-        '800',
-    },
-
-    checkoutNote: {
-      fontSize: 10,
-      lineHeight: 15,
-      color:
-        '#777777',
-      marginVertical: 9,
-    },
-
-    checkoutButton: {
-      backgroundColor:
-        '#111111',
-      borderRadius: 13,
-      paddingVertical: 16,
-      alignItems:
-        'center',
-    },
-
-    checkoutButtonText: {
-      color:
-        '#FFFFFF',
-      fontSize: 16,
-      fontWeight:
-        '700',
-    },
-
-    emptyContainer: {
-      flex: 1,
-      justifyContent:
-        'center',
-      alignItems:
-        'center',
-      paddingHorizontal:
-        30,
-    },
-
-    emptyEmoji: {
-      fontSize: 48,
-    },
-
-    emptyTitle: {
-      fontSize: 22,
-      fontWeight:
-        '700',
-    },
-
-    emptyText: {
-      color:
-        '#666666',
-      marginBottom: 25,
-    },
-
-    button: {
-      width: '100%',
-      paddingVertical: 16,
-      borderRadius: 12,
-      alignItems:
-        'center',
-      backgroundColor:
-        '#111111',
-    },
-
-    buttonText: {
-      color:
-        '#FFFFFF',
-      fontSize: 17,
-      fontWeight:
-        '600',
-    },
-  });
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
+  flex: {
+    flex: 1,
+  },
+  screenContainer: {
+    flex: 1,
+    paddingHorizontal: spacing.lg,
+  },
+  pageHeader: {
+    height: 56,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  headerBtn: {
+    minWidth: 54,
+    minHeight: 44,
+    justifyContent: 'center',
+  },
+  backRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  pageBack: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.textPrimary,
+  },
+  pageHeaderTitle: {
+    flex: 1,
+    textAlign: 'center',
+    fontSize: 18,
+    fontWeight: '800',
+    color: colors.textPrimary,
+  },
+  homeLink: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.textPrimary,
+    textAlign: 'right',
+  },
+  emptyWrap: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  scrollContent: {
+    paddingBottom: 110,
+  },
+  cartMetaRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.md,
+    marginTop: spacing.xs,
+  },
+  summaryTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.textSecondary,
+  },
+  addMoreRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  addMoreLink: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.primary,
+  },
+  itemCard: {
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.lg,
+    marginBottom: spacing.md,
+    ...shadows.sm,
+  },
+  itemTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
+  itemInfo: {
+    flex: 1,
+    paddingRight: spacing.md,
+  },
+  categoryBadgeContainer: {
+    backgroundColor: colors.surfaceSubtle,
+    borderRadius: borderRadius.xs,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    alignSelf: 'flex-start',
+    marginBottom: 4,
+  },
+  categoryBadge: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: colors.textMuted,
+    letterSpacing: 0.5,
+  },
+  itemName: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: colors.textPrimary,
+  },
+  itemUnit: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginTop: 2,
+  },
+  lineTotal: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: colors.textPrimary,
+  },
+  itemBottomRow: {
+    marginTop: spacing.md,
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+  },
+  stepperBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.surfaceSubtle,
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 2,
+  },
+  stepperBtn: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: borderRadius.xs,
+    backgroundColor: colors.surface,
+  },
+  stepperQtyText: {
+    minWidth: 28,
+    textAlign: 'center',
+    fontSize: 13,
+    fontWeight: '800',
+    color: colors.textPrimary,
+  },
+  priceSummaryCard: {
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.lg,
+    marginTop: spacing.sm,
+    ...shadows.sm,
+  },
+  priceSectionTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: colors.textPrimary,
+    marginBottom: spacing.md,
+  },
+  priceRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.sm,
+  },
+  priceLabel: {
+    fontSize: 13,
+    color: colors.textSecondary,
+  },
+  priceValue: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.textPrimary,
+  },
+  freeDeliveryValue: {
+    color: colors.success,
+  },
+  priceDivider: {
+    height: 1,
+    backgroundColor: colors.border,
+    marginVertical: spacing.md,
+  },
+  totalRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  totalLabel: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: colors.textPrimary,
+  },
+  totalValue: {
+    fontSize: 18,
+    fontWeight: '900',
+    color: colors.textPrimary,
+  },
+  bottomArea: {
+    position: 'absolute',
+    left: spacing.lg,
+    right: spacing.lg,
+    bottom: spacing.md,
+    backgroundColor: 'transparent',
+  },
+  checkoutButton: {
+    backgroundColor: colors.primary,
+    borderRadius: borderRadius.lg,
+    paddingVertical: spacing.lg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 52,
+    ...shadows.lg,
+  },
+  btnContentRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  checkoutButtonText: {
+    color: colors.textInverse,
+    fontSize: 16,
+    fontWeight: '800',
+  },
+});

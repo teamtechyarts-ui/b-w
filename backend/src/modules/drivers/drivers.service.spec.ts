@@ -5,7 +5,7 @@ const own = {id: 'assignment-own', order_id: 'order-own', driver_id: 'driver-own
   assignment_type: 'pickup', status: 'assigned', assigned_at: new Date().toISOString(),
   accepted_at: null, completed_at: null};
 
-function fixture(data: Record<string, unknown[]>) {
+function fixture(data: Record<string, unknown[]>, rpcHandler?: (name: string, args: any) => Promise<any>) {
   const filters: Array<{table: string; method: string; args: unknown[]}> = [];
   const counters: Record<string, number> = {};
   const from = jest.fn((table: string) => {
@@ -23,7 +23,11 @@ function fixture(data: Record<string, unknown[]>) {
     query.then = (resolve: any) => Promise.resolve({data: value, error: null}).then(resolve);
     return query;
   });
-  return {service: new DriversService({admin: {from}} as any), from, filters};
+  const rpc = jest.fn((name: string, args: any) => {
+    if (rpcHandler) return rpcHandler(name, args);
+    return Promise.resolve({data: null, error: null});
+  });
+  return {service: new DriversService({admin: {from, rpc}} as any), from, rpc, filters};
 }
 
 describe('Driver dashboard assignment isolation', () => {
@@ -239,5 +243,93 @@ describe('Driver dashboard assignment isolation', () => {
     });
     await expect(cancelled.service.handoffQr('profile-own', own.id)).rejects.toBeInstanceOf(ConflictException);
     expect(cancelled.from).not.toHaveBeenCalledWith('order_qr_codes');
+  });
+
+  describe('claimJob availability dispatch', () => {
+    it('successfully claims an available pickup job atomically', async () => {
+      const f = fixture(
+        { drivers: [{ id: 'driver-own', is_active: true, is_available: true }] },
+        async (name, args) => {
+          expect(name).toBe('claim_driver_job_atomic');
+          expect(args).toEqual({
+            p_order_id: 'order-1',
+            p_driver_id: 'driver-own',
+            p_job_type: 'pickup',
+          });
+          return {
+            data: {
+              assignment: { id: 'assignment-new', order_id: 'order-1', status: 'accepted' },
+              orderStatus: 'pickup_accepted',
+            },
+            error: null,
+          };
+        },
+      );
+      const res = await f.service.claimJob('profile-own', 'order-1', 'pickup');
+      expect(res).toEqual({
+        success: true,
+        assignment: { id: 'assignment-new', order_id: 'order-1', status: 'accepted' },
+        orderStatus: 'pickup_accepted',
+      });
+    });
+
+    it('successfully claims an available delivery job atomically', async () => {
+      const f = fixture(
+        { drivers: [{ id: 'driver-own', is_active: true, is_available: true }] },
+        async (name, args) => {
+          expect(name).toBe('claim_driver_job_atomic');
+          expect(args).toEqual({
+            p_order_id: 'order-2',
+            p_driver_id: 'driver-own',
+            p_job_type: 'delivery',
+          });
+          return {
+            data: {
+              assignment: { id: 'assignment-deliv', order_id: 'order-2', status: 'accepted' },
+              orderStatus: 'delivery_accepted',
+            },
+            error: null,
+          };
+        },
+      );
+      const res = await f.service.claimJob('profile-own', 'order-2', 'delivery');
+      expect(res.orderStatus).toBe('delivery_accepted');
+    });
+
+    it('rejects claim when driver is marked unavailable', async () => {
+      const f = fixture({
+        drivers: [{ id: 'driver-own', is_active: true, is_available: false }],
+      });
+      await expect(f.service.claimJob('profile-own', 'order-1', 'pickup')).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect(f.rpc).not.toHaveBeenCalled();
+    });
+
+    it('returns conflict error when job is already claimed by another driver (code 23505)', async () => {
+      const f = fixture(
+        { drivers: [{ id: 'driver-own', is_active: true, is_available: true }] },
+        async () => ({
+          data: null,
+          error: { code: '23505', message: 'Job has already been claimed by another driver' },
+        }),
+      );
+      await expect(f.service.claimJob('profile-own', 'order-1', 'pickup')).rejects.toThrow(
+        'This job has already been claimed by another driver.',
+      );
+    });
+
+    it('returns not found when order does not exist (code P0002)', async () => {
+      const f = fixture(
+        { drivers: [{ id: 'driver-own', is_active: true, is_available: true }] },
+        async () => ({
+          data: null,
+          error: { code: 'P0002', message: 'Order not found' },
+        }),
+      );
+      await expect(f.service.claimJob('profile-own', 'order-missing', 'pickup')).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+    });
   });
 });

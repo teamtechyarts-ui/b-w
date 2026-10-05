@@ -6,13 +6,10 @@ import {
   RouteResult,
 } from './maps.types';
 
-export const MAPS_PROVIDER =
-  Symbol('MAPS_PROVIDER');
+export const MAPS_PROVIDER = Symbol('MAPS_PROVIDER');
 
 export interface MapsProvider {
-  readonly mode:
-    | 'mock'
-    | 'live';
+  readonly mode: 'live' | 'development';
 
   getRoute(
     origin: Coordinate,

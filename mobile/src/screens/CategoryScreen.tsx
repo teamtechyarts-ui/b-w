@@ -1,14 +1,19 @@
-import React from 'react';
+import React, {useMemo, useState} from 'react';
 import {
-  Alert,
+  FlatList,
+  Modal,
   SafeAreaView,
-  ScrollView,
   StatusBar,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
+
+import AppIcon, {IconName} from '../components/AppIcon';
+import StateView from '../components/StateView';
+import {borderRadius, colors, shadows, spacing, typography} from '../theme/designSystem';
 
 type ServiceItem = {
   id: string;
@@ -35,81 +40,55 @@ type CategoryScreenProps = {
   ) => void;
 };
 
-function formatMoney(
-  value: number,
-) {
-  return Number.isInteger(value)
-    ? value.toFixed(0)
-    : value.toFixed(2);
+function formatMoney(value: number) {
+  return Number.isInteger(value) ? value.toFixed(0) : value.toFixed(2);
 }
 
-function categoryEmoji(
-  name: string,
-) {
+function categoryIconName(name: string): IconName {
   switch (name) {
     case 'Wash & Fold':
-      return '🧺';
-
+      return 'fold';
     case 'Wash & Steam Iron':
-      return '♨️';
-
+      return 'iron';
     case 'Premium Laundry':
-      return '✨';
-
+      return 'sparkles';
     case 'Wash & Iron':
-      return '👔';
-
+      return 'iron';
     case 'Steam Ironing':
-      return '🔥';
-
+      return 'iron';
     case 'Dry Cleaning':
-      return '🧥';
-
+      return 'sparkles';
     case 'Household & Linen Care':
-      return '🛏️';
-
+      return 'box';
     case 'Shoe Cleaning':
-      return '👟';
-
+      return 'sparkles';
     case 'Add-On Services':
-      return '➕';
-
+      return 'plus';
     default:
-      return '🧼';
+      return 'wash';
   }
 }
 
-function categoryDescription(
-  name: string,
-) {
+function categoryDescription(name: string) {
   switch (name) {
     case 'Wash & Fold':
-      return 'Everyday laundry by weight';
-
+      return 'Everyday laundry washed, dried, and neatly folded';
     case 'Wash & Steam Iron':
-      return 'Clean, steam ironed and ready';
-
+      return 'Deep cleaned, sanitised, and steam ironed';
     case 'Premium Laundry':
-      return 'Premium garment care';
-
+      return 'Specialised care for delicate and luxury garments';
     case 'Wash & Iron':
-      return 'Wash and professional ironing';
-
+      return 'Washed and crisply ironed for daily wear';
     case 'Steam Ironing':
-      return 'Crisp professional finishing';
-
+      return 'Wrinkle-free steam pressing on hangers';
     case 'Dry Cleaning':
-      return 'Special care for premium garments';
-
+      return 'Chemical-free gentle dry cleaning for suits & silks';
     case 'Household & Linen Care':
-      return 'Bedsheets, curtains, blankets & more';
-
+      return 'Curtains, bedsheets, blankets, and towels';
     case 'Shoe Cleaning':
-      return 'Professional shoe care';
-
+      return 'Deep cleaning, sanitisation, and buffing';
     case 'Add-On Services':
-      return 'Extra care and finishing options';
-
+      return 'Antimicrobial rinse, stain removal & custom care';
     default:
       return 'Professional laundry care';
   }
@@ -125,210 +104,239 @@ export default function CategoryScreen({
   onOpenCart,
   onUpdateQuantity,
 }: CategoryScreenProps) {
+  const [searchQuery, setSearchQuery] = useState('');
+  const [inspectionItem, setInspectionItem] = useState<ServiceItem | null>(null);
+
+  const filteredServices = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) return services;
+    return services.filter(
+      s =>
+        s.name.toLowerCase().includes(query) ||
+        (s.description && s.description.toLowerCase().includes(query)),
+    );
+  }, [services, searchQuery]);
+
+  const renderServiceCard = ({item: service}: {item: ServiceItem}) => {
+    const quantity = getQuantity(service.id);
+    const unitPrice = service.price ?? 0;
+
+    return (
+      <View style={styles.serviceCard}>
+        <View style={styles.cardInfoCol}>
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel={`${service.name}, ₹${formatMoney(unitPrice)} per ${service.pricingUnit}. Tap for details.`}
+            activeOpacity={0.7}
+            onPress={() => setInspectionItem(service)}>
+            <Text style={styles.serviceName}>{service.name}</Text>
+            {service.description ? (
+              <Text style={styles.serviceDesc} numberOfLines={2}>
+                {service.description}
+              </Text>
+            ) : null}
+            <Text style={styles.servicePrice}>
+              ₹{formatMoney(unitPrice)}{' '}
+              <Text style={styles.pricingUnit}>/ {service.pricingUnit}</Text>
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.cardActionCol}>
+          {quantity > 0 ? (
+            <View style={styles.quantityControl}>
+              <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel={`Decrease quantity for ${service.name}`}
+                style={styles.qtyBtn}
+                onPress={() => onUpdateQuantity(service, -1)}>
+                <AppIcon name="minus" size={14} color={colors.textPrimary} strokeWidth={2.5} />
+              </TouchableOpacity>
+              <Text style={styles.qtyCount}>{quantity}</Text>
+              <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel={`Increase quantity for ${service.name}`}
+                style={styles.qtyBtn}
+                onPress={() => onUpdateQuantity(service, 1)}>
+                <AppIcon name="plus" size={14} color={colors.textPrimary} strokeWidth={2.5} />
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel={`Add ${service.name} to cart`}
+              style={styles.addButton}
+              onPress={() => onUpdateQuantity(service, 1)}>
+              <Text style={styles.addButtonText}>Add</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+    );
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" />
 
       <View style={styles.screenContainer}>
+        {/* Header */}
         <View style={styles.pageHeader}>
-          <TouchableOpacity onPress={onBack}>
-            <Text style={styles.pageBack}>
-              ← Back
-            </Text>
+          <TouchableOpacity
+            style={styles.headerButton}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+            onPress={onBack}>
+            <View style={styles.backRow}>
+              <AppIcon name="arrow-left" size={16} color={colors.textPrimary} />
+              <Text style={styles.pageBack}>Back</Text>
+            </View>
           </TouchableOpacity>
 
-          <Text
-            style={styles.pageHeaderTitle}
-            numberOfLines={1}>
+          <Text style={styles.pageHeaderTitle} numberOfLines={1}>
             {categoryName}
           </Text>
 
           <TouchableOpacity
             style={styles.headerCartButton}
+            accessibilityRole="button"
+            accessibilityLabel={`Cart with ${cartItemCount} items, total ₹${formatMoney(cartSubtotal)}`}
             onPress={onOpenCart}>
-            <Text style={styles.headerCartText}>
-              Cart
-            </Text>
-
+            <AppIcon name="cart" size={20} color={colors.textPrimary} />
             {cartItemCount > 0 ? (
               <View style={styles.headerCartBadge}>
-                <Text style={styles.headerCartBadgeText}>
-                  {cartItemCount}
-                </Text>
+                <Text style={styles.headerCartBadgeText}>{cartItemCount}</Text>
               </View>
             ) : null}
           </TouchableOpacity>
         </View>
 
-        <ScrollView
-          style={styles.flex}
-          contentContainerStyle={
-            cartItemCount > 0
-              ? styles.itemsScrollWithCart
-              : styles.itemsScroll
-          }>
-          <View style={styles.categoryHero}>
-            <Text style={styles.categoryHeroEmoji}>
-              {categoryEmoji(categoryName)}
-            </Text>
+        {/* Search Bar */}
+        <View style={styles.searchBarContainer}>
+          <AppIcon name="search" size={16} color={colors.textMuted} />
+          <TextInput
+            accessibilityLabel={`Search in ${categoryName}`}
+            placeholder={`Search in ${categoryName}...`}
+            placeholderTextColor={colors.textMuted}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            style={styles.searchInput}
+          />
+          {searchQuery ? (
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="Clear search"
+              onPress={() => setSearchQuery('')}>
+              <AppIcon name="close" size={16} color={colors.textMuted} />
+            </TouchableOpacity>
+          ) : null}
+        </View>
 
-            <View style={styles.categoryHeroInfo}>
-              <Text style={styles.categoryHeroTitle}>
-                {categoryName}
+        {/* Category Hero Banner */}
+        <View style={styles.categoryHero}>
+          <View style={styles.heroIconBox}>
+            <AppIcon
+              name={categoryIconName(categoryName)}
+              size={22}
+              color={colors.primary}
+            />
+          </View>
+          <View style={styles.heroTextCol}>
+            <Text style={styles.heroTitle}>{categoryName}</Text>
+            <Text style={styles.heroSubtitle}>{categoryDescription(categoryName)}</Text>
+          </View>
+        </View>
+
+        {/* Services List */}
+        <FlatList
+          data={filteredServices}
+          keyExtractor={item => item.id}
+          renderItem={renderServiceCard}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          ListEmptyComponent={
+            <StateView
+              type="empty"
+              icon="search"
+              title="No services found"
+              message={`We couldn't find any services matching "${searchQuery}".`}
+              actionLabel="Clear Search"
+              onAction={() => setSearchQuery('')}
+            />
+          }
+        />
+
+        {/* Floating Cart Bottom Bar */}
+        {cartItemCount > 0 ? (
+          <View style={styles.bottomCartBar}>
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel={`View Cart: ${cartItemCount} items, ₹${formatMoney(cartSubtotal)}`}
+              style={styles.cartBarButton}
+              onPress={onOpenCart}>
+              <View style={styles.cartBarLeft}>
+                <View style={styles.cartBadgeSmall}>
+                  <Text style={styles.cartBadgeSmallText}>{cartItemCount}</Text>
+                </View>
+                <Text style={styles.cartBarLabel}>
+                  {cartItemCount === 1 ? '1 Item' : `${cartItemCount} Items`}
+                </Text>
+              </View>
+
+              <View style={styles.cartBarRight}>
+                <Text style={styles.cartBarTotal}>
+                  ₹{formatMoney(cartSubtotal)}
+                </Text>
+                <Text style={styles.cartBarAction}>View Cart</Text>
+                <AppIcon name="arrow-right" size={16} color={colors.textInverse} strokeWidth={2.5} />
+              </View>
+            </TouchableOpacity>
+          </View>
+        ) : null}
+
+        {/* Service Inspection Modal */}
+        <Modal
+          visible={inspectionItem !== null}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setInspectionItem(null)}>
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <View style={styles.modalTitleRow}>
+                  <AppIcon name="info" size={18} color={colors.primary} />
+                  <Text style={styles.modalTitle}>{inspectionItem?.name}</Text>
+                </View>
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  accessibilityLabel="Close service details"
+                  style={styles.modalCloseBtn}
+                  onPress={() => setInspectionItem(null)}>
+                  <AppIcon name="close" size={18} color={colors.textPrimary} />
+                </TouchableOpacity>
+              </View>
+
+              <Text style={styles.modalDesc}>
+                {inspectionItem?.description || 'Standard professional laundry care for this garment.'}
               </Text>
 
-              <Text style={styles.categoryHeroDescription}>
-                {categoryDescription(categoryName)}
-              </Text>
+              <View style={styles.modalPricingCard}>
+                <Text style={styles.modalPricingLabel}>Unit Price</Text>
+                <Text style={styles.modalPricingValue}>
+                  ₹{formatMoney(inspectionItem?.price ?? 0)} / {inspectionItem?.pricingUnit}
+                </Text>
+              </View>
 
-              <Text style={styles.categoryHeroCount}>
-                {services.length} services
-              </Text>
+              <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel="Close"
+                style={styles.modalDismissBtn}
+                onPress={() => setInspectionItem(null)}>
+                <Text style={styles.modalDismissBtnText}>Done</Text>
+              </TouchableOpacity>
             </View>
           </View>
-
-          {services.map(service => {
-            const quantity =
-              getQuantity(service.id);
-
-            const isQuote =
-              service.price === null;
-
-            return (
-              <View
-                key={service.id}
-                style={styles.itemCard}>
-                <View style={styles.itemTopRow}>
-                  <View style={styles.itemInfo}>
-                    <Text style={styles.itemName}>
-                      {service.name}
-                    </Text>
-
-                    {service.description ? (
-                      <Text style={styles.itemDescription}>
-                        {service.description}
-                      </Text>
-                    ) : null}
-                  </View>
-
-                  <View style={styles.itemPriceContainer}>
-                    {isQuote ? (
-                      <>
-                        <Text style={styles.quotePrice}>
-                          Quote
-                        </Text>
-
-                        <Text style={styles.itemPriceUnit}>
-                          after inspection
-                        </Text>
-                      </>
-                    ) : (
-                      <>
-                        <Text style={styles.itemPrice}>
-                          ₹
-                          {formatMoney(
-                            service.price ?? 0,
-                          )}
-                        </Text>
-
-                        <Text style={styles.itemPriceUnit}>
-                          per {service.pricingUnit}
-                        </Text>
-                      </>
-                    )}
-                  </View>
-                </View>
-
-                {isQuote ? (
-                  <TouchableOpacity
-                    style={styles.quoteButton}
-                    onPress={() =>
-                      Alert.alert(
-                        service.name,
-                        'This item requires inspection before pricing.',
-                      )
-                    }>
-                    <Text style={styles.quoteButtonText}>
-                      Price after inspection
-                    </Text>
-                  </TouchableOpacity>
-                ) : (
-                  <View style={styles.itemQuantityArea}>
-                    <Text style={styles.quantityLabel}>
-                      Quantity
-                    </Text>
-
-                    <View style={styles.quantityControl}>
-                      <TouchableOpacity
-                        style={[
-                          styles.quantityButton,
-                          quantity === 0 &&
-                            styles.quantityButtonDisabled,
-                        ]}
-                        disabled={quantity === 0}
-                        onPress={() =>
-                          onUpdateQuantity(
-                            service,
-                            -1,
-                          )
-                        }>
-                        <Text
-                          style={
-                            styles.quantityButtonText
-                          }>
-                          −
-                        </Text>
-                      </TouchableOpacity>
-
-                      <Text style={styles.quantityValue}>
-                        {quantity}
-                      </Text>
-
-                      <TouchableOpacity
-                        style={styles.quantityButton}
-                        onPress={() =>
-                          onUpdateQuantity(
-                            service,
-                            1,
-                          )
-                        }>
-                        <Text
-                          style={
-                            styles.quantityButtonText
-                          }>
-                          +
-                        </Text>
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-                )}
-              </View>
-            );
-          })}
-        </ScrollView>
-
-        {cartItemCount > 0 ? (
-          <TouchableOpacity
-            style={styles.cartBottomBar}
-            onPress={onOpenCart}>
-            <View>
-              <Text style={styles.cartBottomCount}>
-                {cartItemCount}{' '}
-                {cartItemCount === 1
-                  ? 'item'
-                  : 'items'}
-              </Text>
-
-              <Text style={styles.cartBottomTotal}>
-                ₹{formatMoney(cartSubtotal)}
-              </Text>
-            </View>
-
-            <Text style={styles.cartBottomAction}>
-              View Cart →
-            </Text>
-          </TouchableOpacity>
-        ) : null}
+        </Modal>
       </View>
     </SafeAreaView>
   );
@@ -337,247 +345,327 @@ export default function CategoryScreen({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.background,
   },
-
-  flex: {
-    flex: 1,
-  },
-
   screenContainer: {
     flex: 1,
-    paddingHorizontal: 20,
+    paddingHorizontal: spacing.lg,
   },
-
   pageHeader: {
-    height: 65,
+    height: 56,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-
+  headerButton: {
+    minWidth: 54,
+    minHeight: 44,
+    justifyContent: 'center',
+  },
+  backRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
   pageBack: {
     fontSize: 15,
-    fontWeight: '600',
-    minWidth: 60,
+    fontWeight: '700',
+    color: colors.textPrimary,
   },
-
   pageHeaderTitle: {
     flex: 1,
     textAlign: 'center',
-    fontSize: 18,
-    fontWeight: '700',
-    marginHorizontal: 8,
+    fontSize: 17,
+    fontWeight: '800',
+    color: colors.textPrimary,
+    marginHorizontal: spacing.sm,
   },
-
   headerCartButton: {
-    minWidth: 60,
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    alignItems: 'center',
-  },
-
-  headerCartText: {
-    fontSize: 15,
-    fontWeight: '600',
-  },
-
-  headerCartBadge: {
-    marginLeft: 5,
-    minWidth: 20,
-    height: 20,
-    paddingHorizontal: 5,
-    borderRadius: 10,
-    backgroundColor: '#111111',
+    width: 44,
+    height: 44,
     alignItems: 'center',
     justifyContent: 'center',
   },
-
+  headerCartBadge: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    backgroundColor: colors.primary,
+    borderRadius: borderRadius.full,
+    minWidth: 18,
+    height: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
   headerCartBadgeText: {
-    color: '#FFFFFF',
-    fontSize: 11,
-    fontWeight: '700',
+    color: colors.textInverse,
+    fontSize: 10,
+    fontWeight: '800',
   },
-
-  itemsScroll: {
-    paddingBottom: 30,
-  },
-
-  itemsScrollWithCart: {
-    paddingBottom: 115,
-  },
-
-  categoryHero: {
-    backgroundColor: '#F7F7F7',
-    borderRadius: 18,
-    padding: 18,
+  searchBarContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 20,
-  },
-
-  categoryHeroEmoji: {
-    fontSize: 40,
-    marginRight: 16,
-  },
-
-  categoryHeroInfo: {
-    flex: 1,
-  },
-
-  categoryHeroTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    marginBottom: 4,
-  },
-
-  categoryHeroDescription: {
-    fontSize: 13,
-    color: '#666666',
-    lineHeight: 18,
-  },
-
-  categoryHeroCount: {
-    fontSize: 12,
-    color: '#888888',
-    marginTop: 7,
-  },
-
-  itemCard: {
+    backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: '#E5E5E5',
-    borderRadius: 16,
-    padding: 17,
-    marginBottom: 12,
+    borderColor: colors.border,
+    borderRadius: borderRadius.md,
+    height: 44,
+    paddingHorizontal: spacing.md,
+    marginBottom: spacing.md,
+    gap: spacing.sm,
   },
-
-  itemTopRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-
-  itemInfo: {
+  searchInput: {
     flex: 1,
-    paddingRight: 14,
+    ...typography.body,
+    color: colors.textPrimary,
+    paddingVertical: 0,
   },
-
-  itemName: {
-    fontSize: 16,
-    fontWeight: '600',
+  categoryHero: {
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    ...shadows.sm,
   },
-
-  itemDescription: {
-    marginTop: 5,
-    fontSize: 13,
-    color: '#777777',
+  heroIconBox: {
+    width: 42,
+    height: 42,
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.surfaceSubtle,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-
-  itemPriceContainer: {
+  heroTextCol: {
+    flex: 1,
+  },
+  heroTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: colors.textPrimary,
+  },
+  heroSubtitle: {
+    fontSize: 11,
+    color: colors.textMuted,
+    marginTop: 2,
+    lineHeight: 15,
+  },
+  scrollContent: {
+    paddingBottom: 100,
+  },
+  serviceCard: {
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.lg,
+    marginBottom: spacing.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    ...shadows.sm,
+  },
+  cardInfoCol: {
+    flex: 1,
+    paddingRight: spacing.md,
+  },
+  serviceName: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: colors.textPrimary,
+  },
+  serviceDesc: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginTop: 3,
+    lineHeight: 16,
+  },
+  servicePrice: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: colors.textPrimary,
+    marginTop: 6,
+  },
+  pricingUnit: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: colors.textMuted,
+  },
+  cardActionCol: {
     alignItems: 'flex-end',
   },
-
-  itemPrice: {
-    fontSize: 18,
-    fontWeight: '700',
-  },
-
-  quotePrice: {
-    fontSize: 15,
-    fontWeight: '700',
-  },
-
-  itemPriceUnit: {
-    fontSize: 11,
-    color: '#777777',
-  },
-
-  itemQuantityArea: {
-    marginTop: 15,
-    paddingTop: 14,
-    borderTopWidth: 1,
-    borderTopColor: '#F0F0F0',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  addButton: {
+    backgroundColor: colors.primary,
+    borderRadius: borderRadius.md,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    minHeight: 38,
+    minWidth: 72,
     alignItems: 'center',
+    justifyContent: 'center',
   },
-
-  quantityLabel: {
+  addButtonText: {
+    color: colors.textInverse,
     fontSize: 13,
-    color: '#666666',
+    fontWeight: '700',
   },
-
   quantityControl: {
     flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: colors.surfaceSubtle,
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 2,
   },
-
-  quantityButton: {
+  qtyBtn: {
     width: 34,
     height: 34,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#D7D7D7',
     alignItems: 'center',
     justifyContent: 'center',
+    borderRadius: borderRadius.sm,
+    backgroundColor: colors.surface,
   },
-
-  quantityButtonDisabled: {
-    opacity: 0.35,
-  },
-
-  quantityButtonText: {
-    fontSize: 20,
-  },
-
-  quantityValue: {
-    minWidth: 36,
+  qtyCount: {
+    minWidth: 28,
     textAlign: 'center',
-    fontSize: 16,
-    fontWeight: '700',
+    fontSize: 14,
+    fontWeight: '800',
+    color: colors.textPrimary,
   },
-
-  quoteButton: {
-    marginTop: 14,
-    paddingVertical: 11,
-    borderRadius: 10,
-    backgroundColor: '#F4F4F4',
-    alignItems: 'center',
-  },
-
-  quoteButtonText: {
-    fontSize: 13,
-    fontWeight: '600',
-  },
-
-  cartBottomBar: {
+  bottomCartBar: {
     position: 'absolute',
-    left: 20,
-    right: 20,
-    bottom: 10,
-    minHeight: 72,
-    backgroundColor: '#111111',
-    borderRadius: 17,
-    paddingHorizontal: 20,
-    paddingVertical: 13,
+    left: spacing.lg,
+    right: spacing.lg,
+    bottom: spacing.md,
+  },
+  cartBarButton: {
+    backgroundColor: colors.primary,
+    borderRadius: borderRadius.lg,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    minHeight: 52,
+    ...shadows.lg,
   },
-
-  cartBottomCount: {
-    color: '#BBBBBB',
+  cartBarLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  cartBadgeSmall: {
+    backgroundColor: '#374151',
+    borderRadius: borderRadius.full,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  cartBadgeSmallText: {
+    color: colors.textInverse,
     fontSize: 12,
+    fontWeight: '800',
   },
-
-  cartBottomTotal: {
-    color: '#FFFFFF',
-    fontSize: 18,
+  cartBarLabel: {
+    color: colors.textInverse,
+    fontSize: 14,
     fontWeight: '700',
   },
-
-  cartBottomAction: {
-    color: '#FFFFFF',
+  cartBarRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  cartBarTotal: {
+    color: colors.textInverse,
     fontSize: 15,
+    fontWeight: '900',
+  },
+  cartBarAction: {
+    color: '#D1D5DB',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: spacing.xl,
+  },
+  modalContent: {
+    width: '100%',
+    maxWidth: 380,
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.xl,
+    padding: spacing.xl,
+    ...shadows.lg,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacing.md,
+  },
+  modalTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    flex: 1,
+  },
+  modalTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: colors.textPrimary,
+  },
+  modalCloseBtn: {
+    padding: spacing.xs,
+  },
+  modalDesc: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    lineHeight: 18,
+    marginBottom: spacing.lg,
+  },
+  modalPricingCard: {
+    backgroundColor: colors.surfaceSubtle,
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.md,
+    marginBottom: spacing.lg,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  modalPricingLabel: {
+    fontSize: 12,
+    color: colors.textMuted,
+    fontWeight: '600',
+  },
+  modalPricingValue: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: colors.textPrimary,
+  },
+  modalDismissBtn: {
+    backgroundColor: colors.primary,
+    borderRadius: borderRadius.md,
+    paddingVertical: spacing.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 44,
+  },
+  modalDismissBtnText: {
+    color: colors.textInverse,
+    fontSize: 14,
     fontWeight: '700',
   },
 });

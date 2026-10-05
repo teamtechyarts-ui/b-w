@@ -1,16 +1,12 @@
-export type ProviderMode = 'mock' | 'live';
-
 type Environment = Record<string, unknown>;
 
 export type ProviderConfiguration = {
   nodeEnv: string;
   maps: {
-    mode: ProviderMode;
     serverKey?: string;
     configured: boolean;
   };
   payments: {
-    mode: ProviderMode;
     keyId?: string;
     keySecret?: string;
     webhookSecret?: string;
@@ -35,7 +31,7 @@ const credentialPlaceholders = new Set([
 const delimitedCredentialPlaceholder =
   /(?:^|[-./:_])(?:replace_me|replaceme|change_me|changeme|placeholder|your_key_here|your_secret_here)(?:$|[-./:_])/;
 
-function credentialValue(environment: Environment, name: string) {
+export function credentialValue(environment: Environment, name: string) {
   const configured = value(environment, name);
 
   if (!configured) {
@@ -54,38 +50,6 @@ function credentialValue(environment: Environment, name: string) {
   return configured;
 }
 
-function mode(
-  environment: Environment,
-  name: 'GOOGLE_MAPS_MODE' | 'RAZORPAY_MODE',
-  nodeEnv: string,
-): ProviderMode {
-  const configured = value(environment, name);
-
-  if (!configured) {
-    if (nodeEnv === 'development' || nodeEnv === 'test') {
-      return 'mock';
-    }
-
-    if (nodeEnv === 'production') {
-      throw new Error(`${name} must be explicitly set to live in production`);
-    }
-
-    throw new Error(
-      `${name} must be explicitly set outside development and test`,
-    );
-  }
-
-  if (configured !== 'mock' && configured !== 'live') {
-    throw new Error(`${name} must be either mock or live`);
-  }
-
-  if (nodeEnv === 'production' && configured === 'mock') {
-    throw new Error(`${name}=mock is forbidden in production`);
-  }
-
-  return configured;
-}
-
 function requireVariables(
   environment: Environment,
   names: string[],
@@ -95,7 +59,7 @@ function requireVariables(
 
   if (missing.length) {
     throw new Error(
-      `${provider} live mode requires ${missing.join(', ')}`,
+      `${provider} requires ${missing.join(', ')}`,
     );
   }
 }
@@ -104,14 +68,13 @@ export function getProviderConfiguration(
   environment: Environment = process.env,
 ): ProviderConfiguration {
   const nodeEnv = value(environment, 'NODE_ENV') ?? 'unspecified';
-  const mapsMode = mode(environment, 'GOOGLE_MAPS_MODE', nodeEnv);
-  const paymentsMode = mode(environment, 'RAZORPAY_MODE', nodeEnv);
+  const mapsKey = credentialValue(environment, 'GOOGLE_MAPS_SERVER_KEY');
+  const razorpayKeyId = credentialValue(environment, 'RAZORPAY_KEY_ID');
+  const razorpayKeySecret = credentialValue(environment, 'RAZORPAY_KEY_SECRET');
+  const razorpayWebhookSecret = credentialValue(environment, 'RAZORPAY_WEBHOOK_SECRET');
 
-  if (mapsMode === 'live') {
+  if (nodeEnv === 'production') {
     requireVariables(environment, ['GOOGLE_MAPS_SERVER_KEY'], 'Google Maps');
-  }
-
-  if (paymentsMode === 'live') {
     requireVariables(
       environment,
       [
@@ -126,34 +89,19 @@ export function getProviderConfiguration(
   return {
     nodeEnv,
     maps: {
-      mode: mapsMode,
-      serverKey: credentialValue(environment, 'GOOGLE_MAPS_SERVER_KEY'),
-      configured:
-        mapsMode === 'mock' ||
-        Boolean(credentialValue(environment, 'GOOGLE_MAPS_SERVER_KEY')),
+      serverKey: mapsKey,
+      configured: Boolean(mapsKey),
     },
     payments: {
-      mode: paymentsMode,
-      keyId: credentialValue(environment, 'RAZORPAY_KEY_ID'),
-      keySecret: credentialValue(environment, 'RAZORPAY_KEY_SECRET'),
-      webhookSecret: credentialValue(environment, 'RAZORPAY_WEBHOOK_SECRET'),
-      configured:
-        paymentsMode === 'mock' ||
-        Boolean(
-          credentialValue(environment, 'RAZORPAY_KEY_ID') &&
-            credentialValue(environment, 'RAZORPAY_KEY_SECRET') &&
-            credentialValue(environment, 'RAZORPAY_WEBHOOK_SECRET'),
-        ),
+      keyId: razorpayKeyId,
+      keySecret: razorpayKeySecret,
+      webhookSecret: razorpayWebhookSecret,
+      configured: Boolean(razorpayKeyId && razorpayKeySecret && razorpayWebhookSecret),
     },
   };
 }
 
 export function validateProviderConfiguration(environment: Environment) {
-  const providers = getProviderConfiguration(environment);
-
-  return {
-    ...environment,
-    GOOGLE_MAPS_MODE: providers.maps.mode,
-    RAZORPAY_MODE: providers.payments.mode,
-  };
+  getProviderConfiguration(environment);
+  return { ...environment };
 }

@@ -4,10 +4,13 @@ import DriverNotificationsScreen from './DriverNotificationsScreen';
 import {getNotifications} from '../services/notificationsApi';
 import {openDriverNotification} from '../services/driverNotifications';
 
-jest.mock('../services/notificationsApi', () => ({getNotifications: jest.fn()}));
+jest.mock('../services/notificationsApi', () => ({
+  getNotifications: jest.fn(),
+  notificationOrderNumber: jest.requireActual('../services/notificationsApi').notificationOrderNumber,
+}));
 jest.mock('../services/driverNotifications', () => ({openDriverNotification: jest.fn()}));
-const notification = {id: 'n-1', title: 'Assigned pickup', body: 'New job', is_read: false,
-  data: {assignmentId: 'job-1'}};
+const notification = {id: 'n-1', title: 'Assigned pickup', body: 'New job for Order BW-20261003-7CB85C51', is_read: false,
+  data: {assignmentId: 'job-1', orderNumber: 'BW-20261003-7CB85C51'}};
 beforeEach(() => {jest.clearAllMocks(); (getNotifications as jest.Mock).mockResolvedValue([notification]);
   (openDriverNotification as jest.Mock).mockImplementation(async (_token, _role, item, onJob) => onJob(item.data.assignmentId));});
 afterEach(() => cleanup());

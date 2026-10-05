@@ -2,49 +2,80 @@ import React from 'react';
 import {fireEvent, render, waitFor} from '@testing-library/react-native';
 import FacilityDashboardScreen from './FacilityDashboardScreen';
 import {getAvailableDeliveryDrivers, getFacilityDashboard, reassignFacilityDelivery} from '../services/facilityDashboardApi';
+import {confirmFacilityReceiptByOrderId} from '../services/facilityIntakeApi';
 
 jest.mock('../services/facilityDashboardApi', () => ({
   getFacilityDashboard: jest.fn(),
   getAvailableDeliveryDrivers: jest.fn(),
   reassignFacilityDelivery: jest.fn(),
 }));
+jest.mock('../services/facilityIntakeApi', () => ({
+  confirmFacilityReceiptByOrderId: jest.fn(),
+}));
+
 const load = getFacilityDashboard as jest.Mock;
 const available = getAvailableDeliveryDrivers as jest.Mock;
 const reassign = reassignFacilityDelivery as jest.Mock;
-const dashboard = {facility: {id: 'facility-1', name: 'Local Facility', address: 'Test Lane'}, role: 'manager',
+const confirmReceipt = confirmFacilityReceiptByOrderId as jest.Mock;
+
+const dashboard = {
+  facility: {id: 'facility-1', name: 'Hyderabad Facility', address: 'Banjara Hills, Hyderabad'},
+  role: 'manager',
   summary: {incoming: 1, received: 0, processing: 0, ready: 0},
-  orders: [{id: 'order-1', order_number: 'BW-1', current_status: 'in_transit_to_facility', deliveryAssignment: null}]};
+  orders: [{
+    id: 'order-1',
+    order_number: 'BW-1001',
+    current_status: 'in_transit_to_facility',
+    pickupDriverName: 'Ramesh Patel',
+    deliveryAssignment: null,
+  }],
+};
 
 beforeEach(() => {jest.clearAllMocks();});
 
 test('shows assigned facility, status counts and orders from authenticated endpoint', async () => {
   load.mockResolvedValue(dashboard);
   const view = await render(<FacilityDashboardScreen accessToken="staff-token" onLogout={jest.fn()} onIntake={jest.fn()} onOrder={jest.fn()} />);
-  await waitFor(() => expect(view.getByText('Local Facility')).toBeTruthy());
+  await waitFor(() => expect(view.getByText('Hyderabad Facility')).toBeTruthy());
   expect(load).toHaveBeenCalledWith('staff-token');
   expect(view.getByText('Facility Manager')).toBeTruthy();
   expect(view.getByText('Incoming 1')).toBeTruthy();
-  expect(view.getByText('BW-1')).toBeTruthy();
+  expect(view.getByText('BW-1001')).toBeTruthy();
+  expect(view.getByText('Driver: Ramesh Patel')).toBeTruthy();
+  expect(view.getByText('Receive Order')).toBeTruthy();
 });
 
-test('shows clear Received, Processing and Ready tabs and empty queues', async () => {
+test('allows facility employee to directly receive incoming order', async () => {
+  load.mockResolvedValue(dashboard);
+  confirmReceipt.mockResolvedValue({orderId: 'order-1', orderStatus: 'received_at_facility'});
+  const view = await render(<FacilityDashboardScreen accessToken="staff-token" onLogout={jest.fn()} onIntake={jest.fn()} onOrder={jest.fn()} />);
+  await waitFor(() => expect(view.getByText('Receive Order')).toBeTruthy());
+  fireEvent.press(view.getByText('Receive Order'));
+  await waitFor(() => expect(confirmReceipt).toHaveBeenCalledWith('staff-token', 'BW-1001'));
+});
+
+test('shows clear Incoming, Received, Processing and Ready tabs and empty queues', async () => {
   load.mockResolvedValue({...dashboard, role: 'facility_employee', orders: []});
   const view = await render(<FacilityDashboardScreen accessToken="staff-token" onLogout={jest.fn()} onIntake={jest.fn()} onOrder={jest.fn()} />);
-  await waitFor(() => expect(view.getByText('No received orders')).toBeTruthy());
-  expect(view.getByText('Facility Staff')).toBeTruthy();
+  await waitFor(() => expect(view.getByText('No incoming orders')).toBeTruthy());
+  expect(view.getByText('Facility Employee')).toBeTruthy();
+  expect(view.getByText('Received 0')).toBeTruthy();
   expect(view.getByText('Processing 0')).toBeTruthy();
   expect(view.getByText('Ready 0')).toBeTruthy();
+
+  fireEvent.press(view.getByText('Received 0'));
+  await waitFor(() => expect(view.getByText('No received orders')).toBeTruthy());
 });
 
 test('clears stale data after failure and retries', async () => {
   load.mockResolvedValueOnce(dashboard).mockRejectedValueOnce(new Error('Network unavailable')).mockResolvedValueOnce(dashboard);
   const view = await render(<FacilityDashboardScreen accessToken="staff-token" onLogout={jest.fn()} onIntake={jest.fn()} onOrder={jest.fn()} />);
-  await waitFor(() => expect(view.getByText('BW-1')).toBeTruthy());
+  await waitFor(() => expect(view.getByText('BW-1001')).toBeTruthy());
   fireEvent.press(view.getByText('Refresh'));
   await waitFor(() => expect(view.getByText('Network unavailable')).toBeTruthy());
-  expect(view.queryByText('BW-1')).toBeNull();
+  expect(view.queryByText('BW-1001')).toBeNull();
   fireEvent.press(view.getByText('Retry dashboard'));
-  await waitFor(() => expect(view.getByText('BW-1')).toBeTruthy());
+  await waitFor(() => expect(view.getByText('BW-1001')).toBeTruthy());
 });
 
 test('keeps an unaccepted delivery in Ready and reassigns a rejected delivery', async () => {

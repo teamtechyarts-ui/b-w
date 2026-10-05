@@ -1,3 +1,7 @@
+// @ts-ignore
+global.IS_REACT_ACT_ENVIRONMENT = true;
+jest.setTimeout(15000);
+
 import React from 'react';
 import {
   act,
@@ -7,7 +11,10 @@ import {
   waitFor,
 } from '@testing-library/react-native';
 import { AppState, Linking } from 'react-native';
-import { requestAndroidLocationPermission } from '../services/deviceLocationService';
+import {
+  getCurrentDeviceLocation,
+  requestAndroidLocationPermission,
+} from '../services/deviceLocationService';
 import { startDriverTripIos } from '../services/driverTripBackground';
 import DriverJobDetailScreen from './DriverJobDetailScreen';
 import {
@@ -16,6 +23,7 @@ import {
   getDriverHandoffQr,
   getDriverJob,
   markDriverArrived,
+  publishDriverTripLocation,
   rejectDriverJob,
   startDriverNavigation,
   verifyDriverPickupOtp,
@@ -40,6 +48,9 @@ jest.mock('../services/driverAssignmentsApi', () => ({
 }));
 jest.mock('../services/deviceLocationService', () => ({
   requestAndroidLocationPermission: jest.fn().mockResolvedValue(true),
+  getCurrentDeviceLocation: jest
+    .fn()
+    .mockResolvedValue({ latitude: 17.4, longitude: 78.4 }),
 }));
 jest.mock('../services/driverTripBackground', () => ({
   startDriverTripBackground: jest.fn().mockResolvedValue(undefined),
@@ -64,8 +75,14 @@ beforeEach(() => {
   (chooseDeliveryPhoto as jest.Mock).mockReset();
   (uploadDeliveryPhoto as jest.Mock).mockReset();
   (completeDriverDelivery as jest.Mock).mockReset();
+  (publishDriverTripLocation as jest.Mock).mockReset();
   (requestAndroidLocationPermission as jest.Mock).mockResolvedValue(true);
+  (getCurrentDeviceLocation as jest.Mock).mockResolvedValue({
+    latitude: 17.4,
+    longitude: 78.4,
+  });
 });
+
 afterEach(() => cleanup());
 
 const offeredJob = {
@@ -379,9 +396,9 @@ test('requires garment review and six-digit OTP, and displays backend rejection'
       view.getByText('Review and confirm the garments handed over.'),
     ).toBeTruthy(),
   );
-  await fireEvent.press(view.getByText('☐ I checked the garments handed over'));
+  await fireEvent.press(view.getByLabelText('I checked the garments handed over'));
   await waitFor(() =>
-    expect(view.getByText('☑ I checked the garments handed over')).toBeTruthy(),
+    expect(view.getByText('I checked the garments handed over')).toBeTruthy(),
   );
   await fireEvent.press(view.getByText('Verify OTP and complete pickup'));
   await waitFor(() =>
@@ -418,9 +435,9 @@ test('successful pickup OTP refreshes the job and shows the next valid state', a
   await waitFor(() =>
     expect(view.getByText('Verify OTP and complete pickup')).toBeTruthy(),
   );
-  await fireEvent.press(view.getByText('☐ I checked the garments handed over'));
+  await fireEvent.press(view.getByLabelText('I checked the garments handed over'));
   await waitFor(() =>
-    expect(view.getByText('☑ I checked the garments handed over')).toBeTruthy(),
+    expect(view.getByText('I checked the garments handed over')).toBeTruthy(),
   );
   await fireEvent.changeText(
     view.getByPlaceholderText('Six-digit pickup OTP'),
@@ -692,6 +709,11 @@ test('driver can choose delivery proof from the phone', async () => {
 });
 
 test('rapid duplicate taps send only one assignment accept request', async () => {
+  let resolveAccept!: () => void;
+  const acceptPromise = new Promise<void>(res => {
+    resolveAccept = res;
+  });
+  (acceptDriverJob as jest.Mock).mockImplementation(() => acceptPromise);
   load
     .mockResolvedValueOnce(offeredJob)
     .mockResolvedValue({
@@ -699,12 +721,7 @@ test('rapid duplicate taps send only one assignment accept request', async () =>
       assignmentStatus: 'accepted',
       orderStatus: 'pickup_accepted',
     });
-  let release!: () => void;
-  (acceptDriverJob as jest.Mock).mockReturnValue(
-    new Promise<void>(resolve => {
-      release = resolve;
-    }),
-  );
+
   const view = await render(
     <DriverJobDetailScreen
       accessToken="token"
@@ -713,12 +730,402 @@ test('rapid duplicate taps send only one assignment accept request', async () =>
     />,
   );
   await waitFor(() => expect(view.getByText('Accept job')).toBeTruthy());
-  fireEvent.press(view.getByText('Accept job'));
-  fireEvent.press(view.getByText('Accept job'));
-  expect(acceptDriverJob).toHaveBeenCalledTimes(1);
+
   await act(async () => {
-    release();
+    fireEvent.press(view.getByText('Accept job'));
+    fireEvent.press(view.getByText('Accept job'));
+    expect(acceptDriverJob).toHaveBeenCalledTimes(1);
+    resolveAccept();
   });
+
   await waitFor(() => expect(view.getByText('Job accepted.')).toBeTruthy());
-  await view.unmount();
+  await waitFor(() => expect(view.queryByText('Accept job')).toBeNull());
 });
+
+test('facility transit shows permission guidance if device location permission is denied', async () => {
+  const picked = {
+    ...arrivedPickup,
+    orderStatus: 'picked_up',
+    facility: {
+      name: 'Local Facility',
+      address: '2 Work Road',
+      latitude: 17.4,
+      longitude: 78.4,
+    },
+  };
+  load.mockResolvedValue(picked);
+  (requestAndroidLocationPermission as jest.Mock).mockResolvedValue(false);
+
+  const view = await render(
+    <DriverJobDetailScreen
+      accessToken="token"
+      assignmentId="job-1"
+      onBack={jest.fn()}
+    />,
+  );
+
+  await waitFor(() =>
+    expect(view.getByText('Start facility transit')).toBeTruthy(),
+  );
+  fireEvent.press(view.getByText('Start facility transit'));
+
+  await waitFor(() =>
+    expect(view.getByText('Open Location Settings')).toBeTruthy(),
+  );
+  expect(view.getByText('Try Again')).toBeTruthy();
+  expect(
+    view.getByText('We need your current location to start facility transit.'),
+  ).toBeTruthy();
+  expect(beginFacilityTransit).not.toHaveBeenCalled();
+});
+
+test('facility transit shows GPS error guidance if device GPS is unavailable', async () => {
+  const picked = {
+    ...arrivedPickup,
+    orderStatus: 'picked_up',
+    facility: {
+      name: 'Local Facility',
+      address: '2 Work Road',
+      latitude: 17.4,
+      longitude: 78.4,
+    },
+  };
+  load.mockResolvedValue(picked);
+  (requestAndroidLocationPermission as jest.Mock).mockResolvedValue(true);
+  (getCurrentDeviceLocation as jest.Mock).mockRejectedValue(
+    new Error('GPS timeout'),
+  );
+
+  const view = await render(
+    <DriverJobDetailScreen
+      accessToken="token"
+      assignmentId="job-1"
+      onBack={jest.fn()}
+    />,
+  );
+
+  await waitFor(() =>
+    expect(view.getByText('Start facility transit')).toBeTruthy(),
+  );
+  fireEvent.press(view.getByText('Start facility transit'));
+
+  await waitFor(() =>
+    expect(
+      view.getByText('Unable to get your current location.'),
+    ).toBeTruthy(),
+  );
+  expect(
+    view.getByText('Please move to an area with GPS access and try again.'),
+  ).toBeTruthy();
+  expect(beginFacilityTransit).not.toHaveBeenCalled();
+});
+
+test('maps backend location error to human readable guidance', async () => {
+  const picked = {
+    ...arrivedPickup,
+    orderStatus: 'picked_up',
+    facility: {
+      name: 'Local Facility',
+      address: '2 Work Road',
+      latitude: 17.4,
+      longitude: 78.4,
+    },
+  };
+  load.mockResolvedValue(picked);
+  (requestAndroidLocationPermission as jest.Mock).mockResolvedValue(true);
+  (getCurrentDeviceLocation as jest.Mock).mockResolvedValue({
+    latitude: 17.4,
+    longitude: 78.4,
+  });
+  (beginFacilityTransit as jest.Mock).mockRejectedValue(
+    new Error('Driver location is required for facility transit'),
+  );
+
+  const view = await render(
+    <DriverJobDetailScreen
+      accessToken="token"
+      assignmentId="job-1"
+      onBack={jest.fn()}
+    />,
+  );
+
+  await waitFor(() =>
+    expect(view.getByText('Start facility transit')).toBeTruthy(),
+  );
+  fireEvent.press(view.getByText('Start facility transit'));
+
+  await waitFor(() =>
+    expect(
+      view.getByText(
+        'Your current location is required before you can start facility transit.',
+      ),
+    ).toBeTruthy(),
+  );
+});
+
+test('maps RPC schema cache failure to human readable guidance', async () => {
+  const picked = {
+    ...arrivedPickup,
+    orderStatus: 'picked_up',
+    facility: {
+      name: 'Local Facility',
+      address: '2 Work Road',
+      latitude: 17.4,
+      longitude: 78.4,
+    },
+  };
+  load.mockResolvedValue(picked);
+  (requestAndroidLocationPermission as jest.Mock).mockResolvedValue(true);
+  (getCurrentDeviceLocation as jest.Mock).mockResolvedValue({
+    latitude: 17.4,
+    longitude: 78.4,
+  });
+  (publishDriverTripLocation as jest.Mock).mockRejectedValue(
+    new Error(
+      'Could not find the function public.publish_driver_trip_location_atomic(p_accuracy_m, p_assignment_id, p_driver_id, p_latitude, p_longitude) in the schema cache',
+    ),
+  );
+
+  const view = await render(
+    <DriverJobDetailScreen
+      accessToken="token"
+      assignmentId="job-1"
+      onBack={jest.fn()}
+    />,
+  );
+
+  await waitFor(() =>
+    expect(view.getByText('Start facility transit')).toBeTruthy(),
+  );
+  fireEvent.press(view.getByText('Start facility transit'));
+
+  await waitFor(() =>
+    expect(
+      view.getByText('Unable to update your location. Please try again.'),
+    ).toBeTruthy(),
+  );
+});
+
+test('maps Maps API not configured error to readable non-blocking navigation guidance', async () => {
+  const picked = {
+    ...arrivedPickup,
+    orderStatus: 'picked_up',
+    facility: {
+      name: 'Local Facility',
+      address: '2 Work Road',
+      latitude: 17.4,
+      longitude: 78.4,
+    },
+  };
+  load.mockResolvedValue(picked);
+  (requestAndroidLocationPermission as jest.Mock).mockResolvedValue(true);
+  (getCurrentDeviceLocation as jest.Mock).mockResolvedValue({
+    latitude: 17.4,
+    longitude: 78.4,
+  });
+  (publishDriverTripLocation as jest.Mock).mockResolvedValue({
+    published: true,
+    recordedAt: '2026-10-02T12:00:00Z',
+  });
+  (beginFacilityTransit as jest.Mock).mockRejectedValue(
+    new Error('Google Maps API is not configured for this environment.'),
+  );
+
+  const view = await render(
+    <DriverJobDetailScreen
+      accessToken="token"
+      assignmentId="job-1"
+      onBack={jest.fn()}
+    />,
+  );
+
+  await waitFor(() =>
+    expect(view.getByText('Start facility transit')).toBeTruthy(),
+  );
+  fireEvent.press(view.getByText('Start facility transit'));
+
+  await waitFor(() =>
+    expect(
+      view.getByText(
+        'Navigation is unavailable. Your location has been updated. You can continue the facility handoff without in-app navigation.',
+      ),
+    ).toBeTruthy(),
+  );
+});
+
+test('handles low GPS accuracy by displaying clear guidance and retry button', async () => {
+  const picked = {
+    ...arrivedPickup,
+    orderStatus: 'picked_up',
+    facility: {
+      name: 'Local Facility',
+      address: '2 Work Road',
+      latitude: 17.4,
+      longitude: 78.4,
+    },
+  };
+  load.mockResolvedValue(picked);
+  (requestAndroidLocationPermission as jest.Mock).mockResolvedValue(true);
+  (getCurrentDeviceLocation as jest.Mock).mockRejectedValue(
+    new Error('Your location accuracy is low (1500m). Move to an area with a clearer GPS signal and try again.'),
+  );
+
+  const view = await render(
+    <DriverJobDetailScreen
+      accessToken="token"
+      assignmentId="job-1"
+      onBack={jest.fn()}
+    />,
+  );
+
+  await waitFor(() =>
+    expect(view.getByText('Start facility transit')).toBeTruthy(),
+  );
+  fireEvent.press(view.getByText('Start facility transit'));
+
+  await waitFor(() =>
+    expect(
+      view.getByText('Your location accuracy is low.'),
+    ).toBeTruthy(),
+  );
+  expect(view.getByText('Retry Location')).toBeTruthy();
+});
+
+test('supplies fresh device GPS coordinates as origin to external navigation', async () => {
+  const picked = {
+    ...arrivedPickup,
+    orderStatus: 'picked_up',
+    facility: {
+      name: 'Central Facility',
+      address: 'Hayathnagar',
+      latitude: 17.3328,
+      longitude: 78.5795,
+    },
+  };
+  load.mockResolvedValue(picked);
+  (requestAndroidLocationPermission as jest.Mock).mockResolvedValue(true);
+  (getCurrentDeviceLocation as jest.Mock).mockResolvedValue({
+    latitude: 17.3750,
+    longitude: 78.5550,
+    accuracy: 15,
+  });
+  (publishDriverTripLocation as jest.Mock).mockResolvedValue({
+    published: true,
+    recordedAt: '2026-10-02T12:00:00Z',
+  });
+  (beginFacilityTransit as jest.Mock).mockResolvedValue({
+    assignmentId: 'job-1',
+    orderId: 'order-1',
+    assignmentStatus: 'arrived',
+    orderStatus: 'in_transit_to_facility',
+  });
+
+  const view = await render(
+    <DriverJobDetailScreen
+      accessToken="token"
+      assignmentId="job-1"
+      onBack={jest.fn()}
+    />,
+  );
+
+  await waitFor(() =>
+    expect(view.getByText('Start facility transit')).toBeTruthy(),
+  );
+  fireEvent.press(view.getByText('Start facility transit'));
+
+  await waitFor(() => {
+    expect(publishDriverTripLocation).toHaveBeenCalledWith(
+      'token',
+      'job-1',
+      17.375,
+      78.555,
+      15,
+    );
+  });
+});
+
+test('Navigate to facility button fetches fresh GPS if not cached and opens external directions with mandatory origin', async () => {
+  const inTransitJob = {
+    ...arrivedPickup,
+    assignmentStatus: 'arrived',
+    orderStatus: 'in_transit_to_facility',
+    facility: {
+      name: 'Central Facility',
+      address: 'Hayathnagar',
+      latitude: 17.3328127,
+      longitude: 78.5795357,
+    },
+  };
+  load.mockResolvedValue(inTransitJob);
+  (getCurrentDeviceLocation as jest.Mock).mockResolvedValue({
+    latitude: 17.3751234,
+    longitude: 78.5554321,
+    accuracy: 10,
+  });
+
+  const view = await render(
+    <DriverJobDetailScreen
+      accessToken="token"
+      assignmentId="job-1"
+      onBack={jest.fn()}
+    />,
+  );
+
+  await waitFor(() =>
+    expect(view.getByText('Navigate to facility')).toBeTruthy(),
+  );
+  fireEvent.press(view.getByText('Navigate to facility'));
+
+  await waitFor(() => {
+    expect(Linking.openURL).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /(saddr=17\.3751234,78\.5554321|origin=17\.3751234%2C78\.5554321)/,
+      ),
+    );
+  });
+});
+
+test('Navigate to facility button blocks navigation when GPS is unavailable and shows actionable error', async () => {
+  const inTransitJob = {
+    ...arrivedPickup,
+    assignmentStatus: 'arrived',
+    orderStatus: 'in_transit_to_facility',
+    facility: {
+      name: 'Central Facility',
+      address: 'Hayathnagar',
+      latitude: 17.3328127,
+      longitude: 78.5795357,
+    },
+  };
+  load.mockResolvedValue(inTransitJob);
+  (getCurrentDeviceLocation as jest.Mock).mockRejectedValue(
+    new Error('Unable to determine current location'),
+  );
+
+  const view = await render(
+    <DriverJobDetailScreen
+      accessToken="token"
+      assignmentId="job-1"
+      onBack={jest.fn()}
+    />,
+  );
+
+  await waitFor(() =>
+    expect(view.getByText('Navigate to facility')).toBeTruthy(),
+  );
+  fireEvent.press(view.getByText('Navigate to facility'));
+
+  await waitFor(() => {
+    expect(
+      view.getByText(
+        'Your current location is required to open directions. Please update your location and try again.',
+      ),
+    ).toBeTruthy();
+  });
+  expect(Linking.openURL).not.toHaveBeenCalled();
+});
+
+
+
+
+

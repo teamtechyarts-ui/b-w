@@ -13,7 +13,7 @@ export type StaffDetail = {
   workload: Array<{id: string; order_id: string; status?: string; current_status?: string; assignment_type?: string; assigned_at?: string; completed_at?: string}>;
 };
 export type FacilityChoice = {id: string; name: string; is_active: boolean};
-export type ProvisionStaffInput = {phone: string; fullName: string; role: StaffRole; facilityId?: string};
+export type ProvisionStaffInput = {phone: string; fullName: string; role: StaffRole; facilityId?: string; pin?: string};
 
 export function listAdminStaff(token: string, filters: {search?: string; role?: string; status?: string} = {}) {
   const query = new URLSearchParams();
@@ -31,9 +31,34 @@ export function provisionAdminStaff(token: string, input: ProvisionStaffInput) {
   const fullName = input.fullName.trim();
   if (!/^\+[1-9]\d{7,14}$/.test(phone)) throw new Error('Enter a valid phone number with country code.');
   if (!fullName || fullName.length > 100) throw new Error('Enter a staff name.');
-  if (input.role !== 'driver' && !input.facilityId) throw new Error('Choose a facility.');
-  return apiRequest<{profileId: string}>('/admin/staff', {method: 'POST', accessToken: token,
-    body: {phone, fullName, role: input.role, ...(input.role === 'driver' ? {} : {facilityId: input.facilityId})}});
+  if (!input.pin || !/^\d{6}$/.test(input.pin)) {
+    throw new Error(input.role === 'driver' ? 'Driver PIN must be exactly 6 digits.' : 'Facility Employee PIN must be exactly 6 digits.');
+  }
+  if (input.role === 'facility_employee' && !input.facilityId) {
+    throw new Error('Choose a facility.');
+  }
+  return apiRequest<{profileId: string}>('/admin/staff', {
+    method: 'POST',
+    accessToken: token,
+    body: {
+      phone,
+      fullName,
+      role: input.role,
+      ...(input.role === 'facility_employee' ? {facilityId: input.facilityId} : {}),
+      pin: input.pin,
+    },
+  });
+}
+export function updateStaffPin(token: string, profileId: string, pin: string) {
+  if (!pin || !/^\d{6}$/.test(pin)) throw new Error('Staff PIN must be exactly 6 digits.');
+  return apiRequest<{success: boolean; message: string}>(`/admin/staff/${profileId}/pin`, {
+    method: 'PATCH',
+    accessToken: token,
+    body: {newPin: pin, pin},
+  });
+}
+export function updateDriverPin(token: string, profileId: string, pin: string) {
+  return updateStaffPin(token, profileId, pin);
 }
 export function deactivateAdminStaff(token: string, profileId: string) {
   return apiRequest(`/admin/staff/${profileId}/deactivate`, {method: 'PATCH', accessToken: token});
@@ -48,3 +73,8 @@ export function reassignAdminStaffFacility(token: string, profileId: string, fac
   if (!facilityId) throw new Error('Choose a facility.');
   return apiRequest(`/admin/staff/${profileId}/facility`, {method: 'PATCH', accessToken: token, body: {facilityId}});
 }
+export function updateDriverAvailability(token: string, profileId: string, isAvailable: boolean) {
+  return apiRequest(`/admin/staff/${profileId}/availability`, {method: 'PATCH', accessToken: token, body: {isAvailable}});
+}
+
+

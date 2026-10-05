@@ -17,12 +17,28 @@ it("requires an idempotency key at the customer order API boundary", async () =>
 });
 
 describe("OrdersService checkout rewards", () => {
-  function fixture(minimumOrderAmount = 0, servicePrice = 200) {
+  function fixture(minimumOrderAmount = 0, servicePrice = 200, addressOverride?: any, facilitiesOverride?: any) {
     const from = jest.fn((table: string) => {
       const results: Record<string, any> = {
         customers: { data: { id: "customer-1" }, error: null },
-        customer_addresses: { data: { id: "address-1" }, error: null },
-        facilities: { data: { id: "facility-1" }, error: null },
+        customer_addresses: {
+          data: addressOverride !== undefined ? addressOverride : { id: "address-1", postal_code: "500068", address_line1: "123 Street", label: "Home" },
+          error: null,
+        },
+        facilities: {
+          data: facilitiesOverride !== undefined ? facilitiesOverride : [
+            {
+              id: "facility-1",
+              name: "Central Hub",
+              is_active: true,
+            },
+          ],
+          error: null,
+        },
+        facility_service_pincodes: {
+          data: [{ facility_id: "facility-1", pincode: "500068" }],
+          error: null,
+        },
         services: { data: { id: "service-1", is_active: true }, error: null },
         service_prices: { data: [{ price: servicePrice }], error: null },
         checkout_pricing_policies: {
@@ -53,6 +69,7 @@ describe("OrdersService checkout rewards", () => {
         "limit",
         "is",
         "not",
+        "in",
       ])
         chain[method] = jest.fn(() => chain);
       chain.maybeSingle = jest.fn().mockResolvedValue(value);
@@ -60,7 +77,12 @@ describe("OrdersService checkout rewards", () => {
       chain.then = (resolve: any) => Promise.resolve(value).then(resolve);
       return chain;
     });
-    const rpc = jest.fn().mockResolvedValue({ data: "order-1", error: null });
+    const rpc = jest.fn((proc: string) => {
+      if (proc === "check_location_serviceability") {
+        return Promise.resolve({ data: null, error: { message: "RPC not available" } });
+      }
+      return Promise.resolve({ data: "order-1", error: null });
+    });
     const service = new OrdersService(
       { admin: { from, rpc } } as any,
       {
@@ -109,7 +131,7 @@ describe("OrdersService checkout rewards", () => {
     await expect(f.service.create("profile-1", f.dto)).rejects.toBeInstanceOf(
       BadRequestException,
     );
-    expect(f.rpc).not.toHaveBeenCalled();
+    expect(f.rpc).not.toHaveBeenCalledWith("create_customer_order_with_rewards_atomic", expect.anything());
   });
   it("converts 2,000 points to ₹200 on the server", async () => {
     const f = fixture(0, 300);
@@ -131,7 +153,7 @@ describe("OrdersService checkout rewards", () => {
     await expect(f.service.create("profile-1", f.dto)).rejects.toBeInstanceOf(
       BadRequestException,
     );
-    expect(f.rpc).not.toHaveBeenCalled();
+    expect(f.rpc).not.toHaveBeenCalledWith("create_customer_order_with_rewards_atomic", expect.anything());
   });
   it("creates ordinary orders through the same atomic procedure", async () => {
     const f = fixture();
@@ -150,7 +172,7 @@ describe("OrdersService checkout rewards", () => {
     await expect(f.service.create("profile-1", f.dto)).rejects.toThrow(
       "minimum order",
     );
-    expect(f.rpc).not.toHaveBeenCalled();
+    expect(f.rpc).not.toHaveBeenCalledWith("create_customer_order_with_rewards_atomic", expect.anything());
   });
 });
 
@@ -369,3 +391,292 @@ describe("OrdersService customer cancellation", () => {
     ).rejects.toBeInstanceOf(type);
   });
 });
+
+describe("OrdersService pincode-based laundry serviceability", () => {
+  function fixtureWithPincodes(pincodeMappings: any[], facilities: any[], address?: any) {
+    const from = jest.fn((table: string) => {
+      let currentData: any = null;
+      if (table === "customers") currentData = { id: "customer-1" };
+      else if (table === "customer_addresses")
+        currentData = address !== undefined ? address : { id: "addr-1", postal_code: "500068", address_line1: "Road 1" };
+      else if (table === "facility_service_pincodes") currentData = [...pincodeMappings];
+      else if (table === "facilities") currentData = [...facilities];
+      else if (table === "services") currentData = { id: "service-1", is_active: true };
+      else if (table === "service_prices") currentData = [{ price: 200 }];
+      else if (table === "orders") currentData = null;
+      else if (table === "admin_growth_settings")
+        currentData = { loyalty_points_per_rupee: 10, loyalty_minimum_redemption_rupees: 100 };
+      else if (table === "checkout_pricing_policies")
+        currentData = {
+          pickup_delivery_fee: 50,
+          free_delivery_threshold: 500,
+          gst_rate_percent: 5,
+          minimum_order_amount: 0,
+        };
+
+      const chain: any = {};
+      chain.select = jest.fn(() => chain);
+      chain.order = jest.fn(() => chain);
+      chain.limit = jest.fn(() => chain);
+      chain.is = jest.fn(() => chain);
+      chain.not = jest.fn(() => chain);
+      chain.lte = jest.fn(() => chain);
+      chain.or = jest.fn(() => chain);
+      chain.eq = jest.fn((col: string, val: any) => {
+        if (table === "facility_service_pincodes" && col === "pincode" && Array.isArray(currentData)) {
+          currentData = currentData.filter((r: any) => r.pincode === val);
+        } else if (table === "facilities" && col === "is_active" && Array.isArray(currentData)) {
+          currentData = currentData.filter((r: any) => r.is_active === val);
+        }
+        return chain;
+      });
+      chain.in = jest.fn((col: string, vals: any[]) => {
+        if (table === "facilities" && col === "id" && Array.isArray(currentData)) {
+          currentData = currentData.filter((r: any) => vals.includes(r.id));
+        }
+        return chain;
+      });
+      chain.maybeSingle = jest.fn(() => Promise.resolve({ data: currentData, error: null }));
+      chain.single = jest.fn(() => Promise.resolve({ data: currentData, error: null }));
+      chain.then = (resolve: any) => Promise.resolve({ data: currentData, error: null }).then(resolve);
+      return chain;
+    });
+    const rpc = jest.fn().mockResolvedValue({ data: "order-1", error: null });
+    const service = new OrdersService({ admin: { from, rpc } } as any);
+    jest.spyOn(service, "getById").mockResolvedValue({ id: "order-1", facility_id: "fac-1" } as any);
+    return { service, from, rpc };
+  }
+
+  it("1. Valid pincode + active facility -> serviceable", async () => {
+    const { service } = fixtureWithPincodes(
+      [{ facility_id: "fac-1", pincode: "500068" }],
+      [{ id: "fac-1", name: "Central Laundry", is_active: true }],
+      { id: "addr-1", postal_code: "500068" },
+    );
+
+    const result = await service.checkServiceability("profile-1", "addr-1");
+    expect(result.serviceable).toBe(true);
+    expect(result.facilityId).toBe("fac-1");
+    expect(result.facilityName).toBe("Central Laundry");
+    expect(result.pincode).toBe("500068");
+  });
+
+  it("2. Valid pincode + no matching facility -> not serviceable", async () => {
+    const { service } = fixtureWithPincodes(
+      [],
+      [{ id: "fac-1", name: "Central Laundry", is_active: true }],
+      { id: "addr-1", postal_code: "500099" },
+    );
+
+    const result = await service.checkServiceability("profile-1", "addr-1");
+    expect(result.serviceable).toBe(false);
+    expect(result.reason).toBe("OUTSIDE_SERVICE_AREA");
+    expect(result.message).toContain("do not provide pickup and delivery service in your pincode");
+  });
+
+  it("3. Facility inactive + matching pincode -> not serviceable", async () => {
+    const { service } = fixtureWithPincodes(
+      [{ facility_id: "fac-inactive", pincode: "500068" }],
+      [], // No active facilities returned
+      { id: "addr-1", postal_code: "500068" },
+    );
+
+    const result = await service.checkServiceability("profile-1", "addr-1");
+    expect(result.serviceable).toBe(false);
+    expect(result.reason).toBe("OUTSIDE_SERVICE_AREA");
+  });
+
+  it("4. Two active facilities serve same pincode -> deterministic selection by name ASC", async () => {
+    const { service } = fixtureWithPincodes(
+      [
+        { facility_id: "fac-z", pincode: "500068" },
+        { facility_id: "fac-a", pincode: "500068" },
+      ],
+      [
+        { id: "fac-z", name: "Zebra Hub", is_active: true },
+        { id: "fac-a", name: "Alpha Hub", is_active: true },
+      ],
+      { id: "addr-1", postal_code: "500068" },
+    );
+
+    const result = await service.checkServiceability("profile-1", "addr-1");
+    expect(result.serviceable).toBe(true);
+    expect(result.facilityId).toBe("fac-a");
+    expect(result.facilityName).toBe("Alpha Hub");
+  });
+
+  it("6. Invalid pincode: 50068 (5 digits) -> rejected", async () => {
+    const { service } = fixtureWithPincodes(
+      [{ facility_id: "fac-1", pincode: "500068" }],
+      [{ id: "fac-1", name: "Central", is_active: true }],
+      { id: "addr-short", postal_code: "50068" },
+    );
+
+    const result = await service.checkServiceability("profile-1", "addr-short");
+    expect(result.serviceable).toBe(false);
+    expect(result.reason).toBe("INVALID_PINCODE");
+    expect(result.message).toContain("valid 6-digit pincode");
+  });
+
+  it("7. Invalid pincode: 5000680 (7 digits) -> rejected", async () => {
+    const { service } = fixtureWithPincodes(
+      [{ facility_id: "fac-1", pincode: "500068" }],
+      [{ id: "fac-1", name: "Central", is_active: true }],
+      { id: "addr-long", postal_code: "5000680" },
+    );
+
+    const result = await service.checkServiceability("profile-1", "addr-long");
+    expect(result.serviceable).toBe(false);
+    expect(result.reason).toBe("INVALID_PINCODE");
+  });
+
+  it("8. Non-numeric pincode: 50A068 -> rejected", async () => {
+    const { service } = fixtureWithPincodes(
+      [{ facility_id: "fac-1", pincode: "500068" }],
+      [{ id: "fac-1", name: "Central", is_active: true }],
+      { id: "addr-alpha", postal_code: "50A068" },
+    );
+
+    const result = await service.checkServiceability("profile-1", "addr-alpha");
+    expect(result.serviceable).toBe(false);
+    expect(result.reason).toBe("INVALID_PINCODE");
+  });
+
+  it("9. Missing pincode -> rejected", async () => {
+    const { service } = fixtureWithPincodes(
+      [{ facility_id: "fac-1", pincode: "500068" }],
+      [{ id: "fac-1", name: "Central", is_active: true }],
+      { id: "addr-null", postal_code: null },
+    );
+
+    const result = await service.checkServiceability("profile-1", "addr-null");
+    expect(result.serviceable).toBe(false);
+    expect(result.reason).toBe("INVALID_PINCODE");
+  });
+
+  it("10. Customer tries to use another customer's address -> 400 BadRequestException", async () => {
+    const { service } = fixtureWithPincodes(
+      [{ facility_id: "fac-1", pincode: "500068" }],
+      [{ id: "fac-1", name: "Central", is_active: true }],
+      null, // Address not found
+    );
+
+    await expect(service.checkServiceability("profile-1", "addr-other")).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+  });
+
+  it("11 & 12. Address changes between serviceable and unserviceable pincodes", async () => {
+    const { service: serviceableService } = fixtureWithPincodes(
+      [{ facility_id: "fac-1", pincode: "500068" }],
+      [{ id: "fac-1", name: "Central", is_active: true }],
+      { id: "addr-1", postal_code: "500068" },
+    );
+    const res1 = await serviceableService.checkServiceability("profile-1", "addr-1");
+    expect(res1.serviceable).toBe(true);
+
+    const { service: unserviceableService } = fixtureWithPincodes(
+      [{ facility_id: "fac-1", pincode: "500068" }],
+      [{ id: "fac-1", name: "Central", is_active: true }],
+      { id: "addr-2", postal_code: "500099" },
+    );
+    const res2 = await unserviceableService.checkServiceability("profile-1", "addr-2");
+    expect(res2.serviceable).toBe(false);
+  });
+
+  it("13. POST /v1/orders with serviceable pincode -> order succeeds and assigns facility_id", async () => {
+    const { service, rpc } = fixtureWithPincodes(
+      [{ facility_id: "fac-1", pincode: "500068" }],
+      [{ id: "fac-1", name: "Central Hub", is_active: true }],
+      { id: "addr-1", postal_code: "500068" },
+    );
+
+    const dto: any = {
+      pickupAddressId: "addr-1",
+      deliveryAddressId: "addr-1",
+      pickupScheduledAt: new Date(Date.now() + 86400000).toISOString(),
+      pickupSlotLabel: "Morning",
+      paymentMethod: "cash_on_delivery",
+      termsAccepted: true,
+      items: [{ serviceId: "service-1", itemName: "Shirt", quantity: 1 }],
+      idempotencyKey: "test-key-pincode-order",
+    };
+
+    const order = await service.create("profile-1", dto);
+    expect(order).toBeDefined();
+    expect(rpc).toHaveBeenCalledWith(
+      "create_customer_order_with_rewards_atomic",
+      expect.objectContaining({
+        p_order: expect.objectContaining({
+          facility_id: "fac-1",
+        }),
+      }),
+    );
+  });
+
+  it("14. POST /v1/orders with non-serviceable pincode -> order rejected with 400", async () => {
+    const { service } = fixtureWithPincodes(
+      [],
+      [{ id: "fac-1", name: "Central Hub", is_active: true }],
+      { id: "addr-1", postal_code: "500099" },
+    );
+
+    const dto: any = {
+      pickupAddressId: "addr-1",
+      deliveryAddressId: "addr-1",
+      pickupScheduledAt: new Date(Date.now() + 86400000).toISOString(),
+      pickupSlotLabel: "Morning",
+      paymentMethod: "cash_on_delivery",
+      termsAccepted: true,
+      items: [{ serviceId: "service-1", itemName: "Shirt", quantity: 1 }],
+      idempotencyKey: "test-key-pincode-fail",
+    };
+
+    await expect(service.create("profile-1", dto)).rejects.toThrow(
+      "do not provide pickup and delivery service in your pincode",
+    );
+  });
+
+  it("17. Latitude/longitude missing -> order allowed when pincode is valid and serviceable", async () => {
+    const { service, rpc } = fixtureWithPincodes(
+      [{ facility_id: "fac-1", pincode: "500068" }],
+      [{ id: "fac-1", name: "Central Hub", is_active: true, latitude: null, longitude: null }],
+      { id: "addr-no-gps", postal_code: "500068", latitude: null, longitude: null },
+    );
+
+    const dto: any = {
+      pickupAddressId: "addr-no-gps",
+      deliveryAddressId: "addr-no-gps",
+      pickupScheduledAt: new Date(Date.now() + 86400000).toISOString(),
+      pickupSlotLabel: "Morning",
+      paymentMethod: "cash_on_delivery",
+      termsAccepted: true,
+      items: [{ serviceId: "service-1", itemName: "Shirt", quantity: 1 }],
+      idempotencyKey: "test-key-no-gps",
+    };
+
+    const order = await service.create("profile-1", dto);
+    expect(order).toBeDefined();
+    expect(rpc).toHaveBeenCalledWith(
+      "create_customer_order_with_rewards_atomic",
+      expect.objectContaining({
+        p_order: expect.objectContaining({
+          facility_id: "fac-1",
+        }),
+      }),
+    );
+  });
+
+  it("18. Latitude/longitude present -> does not affect pincode serviceability", async () => {
+    const { service } = fixtureWithPincodes(
+      [{ facility_id: "fac-1", pincode: "500068" }],
+      [{ id: "fac-1", name: "Central Hub", is_active: true, latitude: 12.34, longitude: 56.78 }],
+      { id: "addr-with-gps", postal_code: "500068", latitude: 98.76, longitude: 54.32 },
+    );
+
+    const result = await service.checkServiceability("profile-1", "addr-with-gps");
+    expect(result.serviceable).toBe(true);
+    expect(result.facilityId).toBe("fac-1");
+  });
+});
+

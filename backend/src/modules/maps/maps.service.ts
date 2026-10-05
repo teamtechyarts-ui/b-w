@@ -23,13 +23,8 @@ export class MapsService {
       MapsProvider,
   ) {}
 
-  get providerName():
-    | 'mock'
-    | 'google' {
-    return this.provider.mode ===
-      'mock'
-      ? 'mock'
-      : 'google';
+  get providerName(): 'google' {
+    return 'google';
   }
 
   private validateCoordinate(

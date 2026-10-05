@@ -7,8 +7,7 @@ import {
 } from '@nestjs/common';
 
 import { SupabaseService } from '../supabase/supabase.service';
-import {PAYMENT_PROVIDER, isDevelopmentPaymentProvider} from '../payments/providers/payment.provider';
-import type {PaymentProvider} from '../payments/providers/payment.provider';
+import {PAYMENT_PROVIDER, type PaymentProvider} from '../payments/providers/payment.provider';
 
 @Injectable()
 export class PackagesService {
@@ -106,96 +105,10 @@ export class PackagesService {
   }
 
   async subscribe(
-    profileId: string,
-    packageId: string,
+    _profileId: string,
+    _packageId: string,
   ) {
-    if (process.env.NODE_ENV === 'production' || !isDevelopmentPaymentProvider(this.paymentProvider)) {
-      throw new ServiceUnavailableException('Package purchase requires a configured payment flow');
-    }
-    const {
-      data: customer,
-      error: customerError,
-    } = await this.db()
-      .from('customers')
-      .select('id')
-      .eq('profile_id', profileId)
-      .maybeSingle();
-
-    if (customerError || !customer) {
-      throw new NotFoundException(
-        'Customer not found',
-      );
-    }
-
-    const {
-      data: pkg,
-      error: packageError,
-    } = await this.db()
-      .from('packages')
-      .select('id,monthly_price,is_active,validity_days')
-      .eq('id', packageId)
-      .eq('is_active', true)
-      .maybeSingle();
-
-    if (packageError || !pkg) {
-      throw new NotFoundException(
-        'Package not found',
-      );
-    }
-
-    const amountPaise = Math.round(Number(pkg.monthly_price) * 100);
-    if (!Number.isSafeInteger(amountPaise) || amountPaise <= 0) {
-      throw new BadRequestException('Package price is not payable');
-    }
-    const providerOrder = await this.paymentProvider.createOrder({
-      amount: amountPaise, currency: 'INR', receipt: `BW-PKG-${packageId.slice(0, 12)}`,
-    });
-    const captured = await this.paymentProvider.simulatePayment({
-      providerOrderId: providerOrder.id, amount: amountPaise, currency: 'INR', status: 'captured',
-    });
-    if (captured.payment.status !== 'captured' || captured.payment.amount !== amountPaise ||
-        !this.paymentProvider.verifyCheckoutSignature({
-          providerOrderId: providerOrder.id, providerPaymentId: captured.payment.id,
-          signature: captured.signature,
-        })) throw new BadRequestException('Mock package payment failed');
-    const start = new Date();
-    const end = new Date(start);
-    if (pkg.validity_days != null) {
-      end.setUTCDate(end.getUTCDate() + Number(pkg.validity_days));
-    } else {
-      // Existing package templates retain their calendar-month validity.
-      const day = start.getUTCDate();
-      end.setUTCDate(1);
-      end.setUTCMonth(end.getUTCMonth() + 1);
-      const lastDay = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth() + 1, 0)).getUTCDate();
-      end.setUTCDate(Math.min(day, lastDay));
-    }
-
-    const {
-      data,
-      error,
-    } = await this.db()
-      .from('package_subscriptions')
-      .insert({
-        customer_id: customer.id,
-        package_id: packageId,
-        status: 'active',
-        starts_at: start.toISOString(),
-        started_at: start.toISOString(),
-        expires_at: end.toISOString(),
-        amount: Number(pkg.monthly_price),
-        payment_provider: 'mock',
-        payment_reference: captured.payment.id,
-        paid_at: start.toISOString(),
-      })
-      .select()
-      .single();
-
-    if (error) {
-      throw new BadRequestException(error.message);
-    }
-
-    return data;
+    throw new ServiceUnavailableException('Package purchase requires a configured payment flow');
   }
 
   async usage(

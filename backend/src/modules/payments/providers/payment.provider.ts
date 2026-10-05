@@ -24,7 +24,7 @@ export type ProviderRefund = {
 };
 
 export interface PaymentProvider {
-  readonly mode: 'mock' | 'live';
+  readonly mode: 'live' | 'development';
   readonly publicKeyId: string | null;
 
   createOrder(input: {
@@ -54,29 +54,4 @@ export interface PaymentProvider {
     providerPaymentId: string;
     reference: string;
   }): Promise<ProviderRefund | null>;
-}
-
-export type MockPaymentSimulation = {
-  payment: ProviderPayment;
-  signature: string;
-};
-
-export interface DevelopmentPaymentProvider extends PaymentProvider {
-  readonly mode: 'mock';
-  simulatePayment(input: {
-    providerOrderId: string;
-    amount: number;
-    currency: string;
-    status: 'captured' | 'failed';
-  }): Promise<MockPaymentSimulation>;
-}
-
-export function isDevelopmentPaymentProvider(
-  provider: PaymentProvider,
-): provider is DevelopmentPaymentProvider {
-  return (
-    provider.mode === 'mock' &&
-    typeof (provider as DevelopmentPaymentProvider).simulatePayment ===
-      'function'
-  );
 }

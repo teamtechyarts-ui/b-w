@@ -1,6 +1,10 @@
 export type RootStackParamList = {
   Welcome: undefined;
   Login: undefined;
+  DriverLogin: undefined;
+  SignUp: undefined;
+  ForgotPassword: undefined;
+  ResetPassword: {accessToken?: string} | undefined;
   Otp: {phone: string};
 
   Home: undefined;
@@ -30,10 +34,6 @@ export type RootStackParamList = {
     orderId: string;
   };
 
-  Tracking: {
-    orderId: string;
-  };
-
   Notifications: undefined;
   Benefits: undefined;
   Profile: undefined;
@@ -54,6 +54,7 @@ export type RootStackParamList = {
   AdminIssueDetail: {orderId: string};
   AdminGrowth: undefined;
   AdminFacilities: undefined;
+  AdminLocations: undefined;
   AdminFacilityDetail: {facilityId: string};
   AdminFacilityOrder: {facilityId: string; orderId: string};
   AdminReports: undefined;
@@ -61,10 +62,4 @@ export type RootStackParamList = {
   FacilityVerification: {orderId: string};
   Support: {showTerms?: boolean} | undefined;
   Receipt: {orderId: string};
-  Packages: undefined;
-  PackageDetail: {packageId: string};
-
-  Claim: {
-    orderId: string;
-  };
 };

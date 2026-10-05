@@ -28,3 +28,13 @@ export function updateDriverName(accessToken: string, fullName: string) {
     accessToken, method: 'PATCH', body: {fullName: fullName.trim()},
   });
 }
+
+export function setDriverAvailability(accessToken: string, isAvailable: boolean) {
+  return apiRequest<{driverId: string; isAvailable: boolean}>('/drivers/me/availability', {
+    accessToken,
+    method: 'PATCH',
+    body: {isAvailable},
+  });
+}
+
+

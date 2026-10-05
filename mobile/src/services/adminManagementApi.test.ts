@@ -17,7 +17,7 @@ test('Admin cancellation requires a reason and never calls customer cancellation
   expect(request).toHaveBeenCalledWith('/admin/orders/order-1/cancel', {method: 'POST', accessToken: 'token', body: {reason: 'Customer requested cancellation'}});
 });
 test('Admin QR lookup validates the BW1 payload and uses audited staff scan', async () => {
-  expect(() => lookupAdminQr('token', 'garbage')).toThrow('valid BW1');
+  await expect(lookupAdminQr('token', 'garbage')).rejects.toThrow('valid BW1');
   const id = '00000000-0000-4000-8000-000000000001';
   await lookupAdminQr('token', `BW1:${id}`);
   expect(request).toHaveBeenCalledWith('/qr/scan', {method: 'POST', accessToken: 'token', body: {token: id, action: 'lookup'}});

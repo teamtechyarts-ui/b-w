@@ -13,16 +13,6 @@ export type PaymentOrderResponse = {
   reused?: boolean;
 };
 
-export type MockPaymentCaptureResponse = {
-  paymentOrderId: string;
-  razorpayOrderId: string;
-  razorpayPaymentId: string;
-  razorpaySignature: string;
-  provider: string;
-  status: string;
-  duplicate?: boolean;
-  orderStatus?: string;
-};
 
 export type PaymentVerificationResponse = {
   verified: boolean;

@@ -308,6 +308,58 @@ export function useAddresses(
         }
 
         if (
+          !addressForm.city.trim()
+        ) {
+          Alert.alert(
+            'City required',
+            'Please enter City.',
+          );
+
+          return false;
+        }
+
+        if (
+          !addressForm.state.trim()
+        ) {
+          Alert.alert(
+            'State required',
+            'Please enter State.',
+          );
+
+          return false;
+        }
+
+        const pincode = addressForm.postalCode.trim();
+        if (!pincode || !/^\d{6}$/.test(pincode)) {
+          Alert.alert(
+            'Pincode required',
+            'Please enter a valid 6-digit pincode.',
+          );
+
+          return false;
+        }
+
+        if (addressForm.latitude !== null || addressForm.longitude !== null) {
+          const lat = Number(addressForm.latitude);
+          const lng = Number(addressForm.longitude);
+          if (
+            !Number.isFinite(lat) ||
+            !Number.isFinite(lng) ||
+            lat < -90 ||
+            lat > 90 ||
+            lng < -180 ||
+            lng > 180
+          ) {
+            Alert.alert(
+              'Location Error',
+              'Invalid GPS coordinates.',
+            );
+
+            return false;
+          }
+        }
+
+        if (
           !accessToken
         ) {
           Alert.alert(
@@ -444,72 +496,57 @@ export function useAddresses(
 
   const deleteAddress =
     useCallback(
-      (
+      async (
         address: AddressItem,
-      ) => {
-        Alert.alert(
-          'Delete Address',
-          'Are you sure you want to delete this address?',
-          [
-            {
-              text:
-                'Cancel',
+      ): Promise<{ success: boolean; error?: string; inUse?: boolean }> => {
+        if (!accessToken) {
+          return {
+            success: false,
+            error: 'Please login again.',
+            inUse: false,
+          };
+        }
 
-              style:
-                'cancel',
-            },
-            {
-              text:
-                'Delete',
+        try {
+          setAddressSaving(true);
 
-              style:
-                'destructive',
+          await removeAddress(
+            accessToken,
+            address.id,
+          );
 
-              onPress:
-                async () => {
-                  if (
-                    !accessToken
-                  ) {
-                    return;
-                  }
+          await loadAddresses(
+            selectedAddressId ===
+              address.id
+              ? null
+              : selectedAddressId,
+          );
 
-                  try {
-                    setAddressSaving(
-                      true,
-                    );
+          return {
+            success: true,
+          };
+        } catch (
+          error: unknown
+        ) {
+          const message =
+            error instanceof Error
+              ? error.message
+              : 'Unable to delete address';
 
-                    await removeAddress(
-                      accessToken,
-                      address.id,
-                    );
+          const inUse =
+            message.toLowerCase().includes('existing order') ||
+            message.toLowerCase().includes('used by an existing order');
 
-                    await loadAddresses(
-                      selectedAddressId ===
-                        address.id
-                        ? null
-                        : selectedAddressId,
-                    );
-                  } catch (
-                    error: unknown
-                  ) {
-                    const message =
-                      error instanceof Error
-                        ? error.message
-                        : 'Unable to delete address';
-
-                    Alert.alert(
-                      'Delete Address Error',
-                      message,
-                    );
-                  } finally {
-                    setAddressSaving(
-                      false,
-                    );
-                  }
-                },
-            },
-          ],
-        );
+          return {
+            success: false,
+            error: message,
+            inUse,
+          };
+        } finally {
+          setAddressSaving(
+            false,
+          );
+        }
       },
       [
         accessToken,

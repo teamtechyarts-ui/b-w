@@ -14,13 +14,22 @@ import {
   FacilityDashboard,
   getAvailableDeliveryDrivers,
   getFacilityDashboard,
+  handoverFacilityOrderToDriver,
   reassignFacilityDelivery,
 } from '../services/facilityDashboardApi';
+import { confirmFacilityReceiptByOrderId } from '../services/facilityIntakeApi';
 
 const READY_STATUSES = [
   'ready_for_delivery',
   'delivery_assigned',
   'delivery_failed',
+];
+
+const PROCESSING_STATUSES = [
+  'verification',
+  'processing',
+  'quality_check',
+  'rework_required',
 ];
 
 type Props = {
@@ -36,8 +45,8 @@ export default function FacilityDashboardScreen({
   onIntake,
   onOrder,
 }: Props) {
-  const [tab, setTab] = useState<'received' | 'processing' | 'ready'>(
-    'received',
+  const [tab, setTab] = useState<'incoming' | 'received' | 'processing' | 'ready'>(
+    'incoming',
   );
   const [dashboard, setDashboard] = useState<FacilityDashboard | null>(null);
   const [loading, setLoading] = useState(true);
@@ -49,13 +58,17 @@ export default function FacilityDashboardScreen({
   const [drivers, setDrivers] = useState<AvailableDeliveryDriver[]>([]);
   const [loadingDrivers, setLoadingDrivers] = useState(false);
   const [reassigning, setReassigning] = useState(false);
+  const [handingOverId, setHandingOverId] = useState<string | null>(null);
+  const [receivingOrderId, setReceivingOrderId] = useState<string | null>(null);
+
   const load = useCallback(
     async (refresh = false) => {
       if (refresh) setRefreshing(true);
       else setLoading(true);
       setError('');
       try {
-        setDashboard(await getFacilityDashboard(accessToken));
+        const result = await getFacilityDashboard(accessToken);
+        setDashboard(result);
       } catch (cause) {
         setDashboard(null);
         setError(
@@ -70,9 +83,48 @@ export default function FacilityDashboardScreen({
     },
     [accessToken],
   );
+
   useEffect(() => {
     load();
   }, [load]);
+
+  const receiveOrderDirectly = async (orderNumber: string) => {
+    if (receivingOrderId) return;
+    setReceivingOrderId(orderNumber);
+    setActionError('');
+    setMessage('');
+    try {
+      await confirmFacilityReceiptByOrderId(accessToken, orderNumber);
+      setMessage(`Order ${orderNumber} received at facility.`);
+      await load(true);
+      setTab('received');
+    } catch (cause) {
+      setActionError(
+        cause instanceof Error ? cause.message : 'Unable to receive order at facility.',
+      );
+    } finally {
+      setReceivingOrderId(null);
+    }
+  };
+
+  const handover = async (orderId: string, driverId?: string) => {
+    if (handingOverId) return;
+    setHandingOverId(orderId);
+    setActionError('');
+    setMessage('');
+    try {
+      await handoverFacilityOrderToDriver(accessToken, orderId, driverId);
+      setMessage('Order handed over to delivery driver.');
+      await load(true);
+      setTab('ready');
+    } catch (cause) {
+      setActionError(
+        cause instanceof Error ? cause.message : 'Unable to hand over order.',
+      );
+    } finally {
+      setHandingOverId(null);
+    }
+  };
 
   const showDrivers = async (orderId: string) => {
     setDriverOrderId(orderId);
@@ -115,6 +167,19 @@ export default function FacilityDashboardScreen({
     }
   };
 
+  const filteredOrders = (dashboard?.orders ?? []).filter(order => {
+    if (tab === 'incoming') {
+      return order.current_status === 'in_transit_to_facility';
+    }
+    if (tab === 'received') {
+      return order.current_status === 'received_at_facility';
+    }
+    if (tab === 'processing') {
+      return PROCESSING_STATUSES.includes(order.current_status);
+    }
+    return READY_STATUSES.includes(order.current_status);
+  });
+
   return (
     <SafeAreaView style={styles.page}>
       <ScrollView
@@ -142,6 +207,7 @@ export default function FacilityDashboardScreen({
             <Text style={styles.link}>Refresh</Text>
           </TouchableOpacity>
         </View>
+
         <TouchableOpacity
           accessibilityRole="button"
           style={styles.scanButton}
@@ -149,6 +215,7 @@ export default function FacilityDashboardScreen({
         >
           <Text style={styles.scanText}>▣ Scan incoming order</Text>
         </TouchableOpacity>
+
         {loading ? (
           <ActivityIndicator accessibilityLabel="Loading facility dashboard" />
         ) : null}
@@ -162,7 +229,7 @@ export default function FacilityDashboardScreen({
             {actionError}
           </Text>
         ) : null}
-        {message ? <Text accessibilityRole="alert">{message}</Text> : null}
+        {message ? <Text accessibilityRole="alert" style={styles.successMessage}>{message}</Text> : null}
         {error ? (
           <TouchableOpacity
             accessibilityRole="button"
@@ -173,6 +240,7 @@ export default function FacilityDashboardScreen({
             <Text style={styles.link}>Retry dashboard</Text>
           </TouchableOpacity>
         ) : null}
+
         {dashboard ? (
           <>
             <View style={styles.facilityCard}>
@@ -181,19 +249,22 @@ export default function FacilityDashboardScreen({
                 <Text style={styles.muted}>
                   {dashboard.role === 'manager'
                     ? 'Facility Manager'
-                    : 'Facility Staff'}
+                    : 'Facility Employee'}
                 </Text>
               </View>
-              <Text style={styles.incoming}>
-                Incoming {dashboard.summary.incoming}
-              </Text>
             </View>
             {dashboard.facility.address ? (
               <Text style={styles.muted}>{dashboard.facility.address}</Text>
             ) : null}
+
             <View style={styles.tabs}>
               {(
                 [
+                  {
+                    key: 'incoming',
+                    label: 'Incoming',
+                    count: dashboard.summary.incoming,
+                  },
                   {
                     key: 'received',
                     label: 'Received',
@@ -229,35 +300,68 @@ export default function FacilityDashboardScreen({
                 </TouchableOpacity>
               ))}
             </View>
+
             <Text style={styles.heading}>
-              {tab === 'received'
+              {tab === 'incoming'
+                ? 'Incoming orders'
+                : tab === 'received'
                 ? 'Received orders'
                 : tab === 'processing'
                 ? 'In processing'
                 : 'Ready for delivery'}
             </Text>
-            {dashboard.orders
-              .filter(order =>
-                tab === 'received'
-                  ? [
-                      'received_at_facility',
-                      'verification',
-                      'in_transit_to_facility',
-                    ].includes(order.current_status)
-                  : tab === 'processing'
-                  ? ['processing', 'quality_check', 'rework_required'].includes(
-                      order.current_status,
-                    )
-                  : READY_STATUSES.includes(order.current_status),
-              )
-              .map(order => (
-                <View key={order.id} style={styles.card}>
+
+            {filteredOrders.map(order => (
+              <View key={order.id} style={styles.card}>
+                {tab === 'incoming' ? (
+                  <View style={styles.orderTop}>
+                    <View style={styles.orderRowBetween}>
+                      <Text style={styles.orderNumber}>{order.order_number}</Text>
+                      <View style={styles.incomingTag}>
+                        <Text style={styles.incomingTagText}>Driver arriving</Text>
+                      </View>
+                    </View>
+                    <Text style={styles.driverInfoText}>
+                      Driver: {order.pickupDriverName || order.pickupAssignment?.driverName || 'Pickup Driver'}
+                    </Text>
+                    <View style={styles.incomingActionRow}>
+                      <TouchableOpacity
+                        accessibilityRole="button"
+                        style={styles.receiveButton}
+                        disabled={receivingOrderId === order.order_number}
+                        onPress={() => receiveOrderDirectly(order.order_number)}
+                      >
+                        {receivingOrderId === order.order_number ? (
+                          <ActivityIndicator color="#fff" size="small" />
+                        ) : (
+                          <Text style={styles.receiveButtonText}>Receive Order</Text>
+                        )}
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        accessibilityRole="button"
+                        style={styles.scanSecondaryButton}
+                        onPress={onIntake}
+                      >
+                        <Text style={styles.scanSecondaryButtonText}>Scan QR</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                ) : (
                   <TouchableOpacity
                     accessibilityRole="button"
                     onPress={() => onOrder(order.id)}
                   >
                     <View style={styles.orderTop}>
-                      <Text style={styles.orderNumber}>{order.order_number}</Text>
+                      <View style={styles.orderRowBetween}>
+                        <Text style={styles.orderNumber}>{order.order_number}</Text>
+                        {tab === 'processing' && order.processingStage ? (
+                          <View style={styles.stageTag}>
+                            <Text style={styles.stageTagText}>
+                              {order.processingStage.toUpperCase()}
+                            </Text>
+                          </View>
+                        ) : null}
+                      </View>
                       <Text style={styles.status}>
                         {order.current_status.replace(/_/g, ' ')}
                       </Text>
@@ -271,75 +375,113 @@ export default function FacilityDashboardScreen({
                       →
                     </Text>
                   </TouchableOpacity>
-                  {tab === 'ready' &&
-                  order.current_status === 'delivery_assigned' ? (
-                    <Text style={styles.muted}>
-                      Waiting for Driver acceptance.
+                )}
+
+                {tab === 'ready' && order.deliveryAssignment && order.deliveryAssignment.status !== 'rejected' ? (
+                  <View style={styles.driverSection}>
+                    <Text style={styles.driverNameText}>
+                      Delivery Driver: {order.deliveryAssignment.driverName || 'Assigned Driver'}
                     </Text>
-                  ) : null}
-                  {tab === 'ready' &&
-                  order.current_status === 'ready_for_delivery' ? (
-                    <Text style={styles.muted}>Ready for Driver assignment.</Text>
-                  ) : null}
-                  {tab === 'ready' &&
-                  order.current_status === 'delivery_failed' ? (
-                    <>
-                      <Text style={styles.rejected}>
-                        Driver rejected the delivery
-                        {order.deliveryAssignment?.rejectionReason
-                          ? `: ${order.deliveryAssignment.rejectionReason}`
-                          : '.'}
-                      </Text>
+                    {order.deliveryAssignment.status === 'assigned' ? (
+                      <Text style={styles.muted}>Waiting for Driver acceptance.</Text>
+                    ) : null}
+                    {order.deliveryAssignment.status === 'accepted' || order.deliveryAssignment.status === 'en_route' ? (
+                      <Text style={styles.driverEnRouteText}>Driver en route to facility</Text>
+                    ) : null}
+                    {order.deliveryAssignment.status === 'arrived' ? (
+                      <Text style={styles.driverArrivedText}>Driver arrived at facility</Text>
+                    ) : null}
+                    {order.deliveryAssignment.handedOver ? (
+                      <View style={styles.handoverSuccessBadge}>
+                        <Text style={styles.handoverSuccessText}>
+                          Handed Over to Driver
+                          {order.deliveryAssignment.handedOverAt
+                            ? ` (${new Date(order.deliveryAssignment.handedOverAt).toLocaleTimeString([], {
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })})`
+                            : ''}
+                        </Text>
+                      </View>
+                    ) : (
                       <TouchableOpacity
                         accessibilityRole="button"
-                        style={styles.reassignButton}
-                        disabled={reassigning}
-                        onPress={() => showDrivers(order.id)}
+                        style={styles.handoverButton}
+                        disabled={handingOverId === order.id}
+                        onPress={() => handover(order.id, order.deliveryAssignment?.driverId)}
                       >
-                        <Text style={styles.reassignText}>Reassign Driver</Text>
+                        {handingOverId === order.id ? (
+                          <ActivityIndicator color="#fff" size="small" />
+                        ) : (
+                          <Text style={styles.handoverButtonText}>Hand Over Order</Text>
+                        )}
                       </TouchableOpacity>
-                    </>
-                  ) : null}
-                  {driverOrderId === order.id ? (
-                    <View style={styles.driverList}>
-                      <Text style={styles.driverListTitle}>Available Drivers</Text>
-                      {loadingDrivers ? (
-                        <ActivityIndicator accessibilityLabel="Loading available Drivers" />
-                      ) : null}
-                      {!loadingDrivers && !drivers.length && !actionError ? (
-                        <Text style={styles.muted}>No other Drivers are available.</Text>
-                      ) : null}
-                      {drivers.map(driver => (
-                        <TouchableOpacity
-                          accessibilityRole="button"
-                          key={driver.id}
-                          disabled={reassigning}
-                          style={styles.driverOption}
-                          onPress={() => reassign(order.id, driver)}
-                        >
-                          <Text style={styles.driverName}>{driver.name}</Text>
-                          <Text style={styles.muted}>
-                            {driver.activeJobs} active jobs
-                          </Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  ) : null}
-                </View>
-              ))}
-            {!dashboard.orders.filter(order =>
-              tab === 'received'
-                ? [
-                    'received_at_facility',
-                    'verification',
-                    'in_transit_to_facility',
-                  ].includes(order.current_status)
-                : tab === 'processing'
-                ? ['processing', 'quality_check', 'rework_required'].includes(
-                    order.current_status,
-                  )
-                : READY_STATUSES.includes(order.current_status),
-            ).length ? (
+                    )}
+                  </View>
+                ) : null}
+
+                {tab === 'ready' &&
+                !order.deliveryAssignment &&
+                order.current_status === 'delivery_assigned' ? (
+                  <Text style={styles.muted}>
+                    Waiting for Driver acceptance.
+                  </Text>
+                ) : null}
+
+                {tab === 'ready' &&
+                order.current_status === 'ready_for_delivery' ? (
+                  <Text style={styles.muted}>Ready for Driver assignment.</Text>
+                ) : null}
+
+                {tab === 'ready' &&
+                order.current_status === 'delivery_failed' ? (
+                  <>
+                    <Text style={styles.rejected}>
+                      Driver rejected the delivery
+                      {order.deliveryAssignment?.rejectionReason
+                        ? `: ${order.deliveryAssignment.rejectionReason}`
+                        : '.'}
+                    </Text>
+                    <TouchableOpacity
+                      accessibilityRole="button"
+                      style={styles.reassignButton}
+                      disabled={reassigning}
+                      onPress={() => showDrivers(order.id)}
+                    >
+                      <Text style={styles.reassignText}>Reassign Driver</Text>
+                    </TouchableOpacity>
+                  </>
+                ) : null}
+
+                {driverOrderId === order.id ? (
+                  <View style={styles.driverList}>
+                    <Text style={styles.driverListTitle}>Available Drivers</Text>
+                    {loadingDrivers ? (
+                      <ActivityIndicator accessibilityLabel="Loading available Drivers" />
+                    ) : null}
+                    {!loadingDrivers && !drivers.length && !actionError ? (
+                      <Text style={styles.muted}>No other Drivers are available.</Text>
+                    ) : null}
+                    {drivers.map(driver => (
+                      <TouchableOpacity
+                        accessibilityRole="button"
+                        key={driver.id}
+                        disabled={reassigning}
+                        style={styles.driverOption}
+                        onPress={() => reassign(order.id, driver)}
+                      >
+                        <Text style={styles.driverName}>{driver.name}</Text>
+                        <Text style={styles.muted}>
+                          {driver.activeJobs} active jobs
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                ) : null}
+              </View>
+            ))}
+
+            {!filteredOrders.length ? (
               <View style={styles.empty}>
                 <Text style={styles.emptyTitle}>No {tab} orders</Text>
                 <Text style={styles.muted}>This queue is clear.</Text>
@@ -347,6 +489,7 @@ export default function FacilityDashboardScreen({
             ) : null}
           </>
         ) : null}
+
         <TouchableOpacity
           accessibilityRole="button"
           style={styles.logout}
@@ -397,13 +540,17 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   facilityIdentity: { flex: 1, minWidth: 0, gap: 3 },
-  incoming: {
+  incomingBadge: {
     backgroundColor: '#FFF1CF',
     borderRadius: 20,
     paddingHorizontal: 10,
     paddingVertical: 6,
-    fontWeight: '800',
     flexShrink: 0,
+  },
+  incomingBadgeText: {
+    fontWeight: '800',
+    fontSize: 12,
+    color: '#8A5D00',
   },
   tabs: {
     flexDirection: 'row',
@@ -428,16 +575,86 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     gap: 9,
   },
-  orderTop: { gap: 5, alignItems: 'flex-start' },
+  orderTop: { gap: 6, alignItems: 'flex-start' },
+  orderRowBetween: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    width: '100%',
+  },
   orderNumber: { fontWeight: '900', fontSize: 16, flexShrink: 1 },
+  incomingTag: {
+    backgroundColor: '#FEF3C7',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  incomingTagText: {
+    color: '#92400E',
+    fontWeight: '800',
+    fontSize: 11,
+  },
+  stageTag: {
+    backgroundColor: '#E0E7FF',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  stageTagText: {
+    color: '#3730A3',
+    fontWeight: '800',
+    fontSize: 11,
+  },
   status: { color: '#67635B', textTransform: 'capitalize', flexShrink: 1 },
-  link: { fontWeight: '900' },
+  driverInfoText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#4B5563',
+  },
+  incomingActionRow: {
+    flexDirection: 'row',
+    gap: 8,
+    width: '100%',
+    marginTop: 6,
+  },
+  receiveButton: {
+    flex: 2,
+    backgroundColor: '#15803D',
+    borderRadius: 10,
+    minHeight: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+  },
+  receiveButtonText: {
+    color: '#fff',
+    fontWeight: '900',
+    fontSize: 13,
+  },
+  scanSecondaryButton: {
+    flex: 1,
+    backgroundColor: '#F3F4F6',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#D1D5DB',
+    minHeight: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+  },
+  scanSecondaryButtonText: {
+    color: '#374151',
+    fontWeight: '800',
+    fontSize: 13,
+  },
+  link: { fontWeight: '900', color: '#151515' },
   muted: { color: '#6D685F', flexShrink: 1 },
   empty: { backgroundColor: '#EDEAE3', borderRadius: 16, padding: 18 },
   emptyTitle: { fontWeight: '900', fontSize: 17 },
   logout: { alignItems: 'center', padding: 14 },
   logoutText: { fontWeight: '800', color: '#8C2D26' },
   error: { color: '#9A241E' },
+  successMessage: { color: '#15803D', fontWeight: '700' },
   rejected: { color: '#982C23', fontWeight: '700' },
   reassignButton: {
     minHeight: 44,
@@ -457,4 +674,50 @@ const styles = StyleSheet.create({
     backgroundColor: '#FAF9F6',
   },
   driverName: { fontWeight: '900' },
+  driverSection: {
+    backgroundColor: '#F3EFEB',
+    borderRadius: 12,
+    padding: 12,
+    gap: 8,
+    marginTop: 4,
+  },
+  driverNameText: {
+    fontWeight: '800',
+    fontSize: 14,
+    color: '#151515',
+  },
+  driverEnRouteText: {
+    fontSize: 12,
+    color: '#2563EB',
+    fontWeight: '700',
+  },
+  driverArrivedText: {
+    fontSize: 12,
+    color: '#15803D',
+    fontWeight: '800',
+  },
+  handoverButton: {
+    backgroundColor: '#176E47',
+    borderRadius: 10,
+    minHeight: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+  },
+  handoverButtonText: {
+    color: '#fff',
+    fontWeight: '900',
+    fontSize: 13,
+  },
+  handoverSuccessBadge: {
+    backgroundColor: '#E7F4ED',
+    borderRadius: 8,
+    padding: 8,
+    alignItems: 'center',
+  },
+  handoverSuccessText: {
+    color: '#176E47',
+    fontWeight: '800',
+    fontSize: 12,
+  },
 });

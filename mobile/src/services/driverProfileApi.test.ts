@@ -1,4 +1,4 @@
-import {accountRoleFromProfile, getDriverProfile, updateDriverName} from './driverProfileApi';
+import {accountRoleFromProfile, getDriverProfile, setDriverAvailability, updateDriverName} from './driverProfileApi';
 import {apiRequest} from './api';
 
 jest.mock('./api', () => ({apiRequest: jest.fn()}));
@@ -26,3 +26,16 @@ test('rejects an invalid Driver name before sending a request', () => {
   expect(() => updateDriverName('token', ' ')).toThrow();
   expect(request).not.toHaveBeenCalled();
 });
+
+test('setDriverAvailability sends PATCH /drivers/me/availability with target state', async () => {
+  request.mockClear();
+  request.mockResolvedValue({driverId: 'driver-1', isAvailable: true});
+  const result = await setDriverAvailability('token', true);
+  expect(request).toHaveBeenCalledWith('/drivers/me/availability', {
+    accessToken: 'token',
+    method: 'PATCH',
+    body: {isAvailable: true},
+  });
+  expect(result).toEqual({driverId: 'driver-1', isAvailable: true});
+});
+

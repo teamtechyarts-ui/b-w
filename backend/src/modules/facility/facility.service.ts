@@ -26,14 +26,8 @@ export class FacilityService {
   ) {}
 
   private async triggerDeliveryAssignment(orderId: string) {
-    if (!this.logistics) return;
-    try {
-      await this.logistics.assignBestDriver(orderId, "delivery");
-    } catch (error) {
-      this.logger.warn(
-        `Automatic delivery assignment failed for order ${orderId}: ${error instanceof Error ? error.message : "unknown error"}`,
-      );
-    }
+    // Under availability-based driver dispatch architecture, ready_for_delivery orders
+    // automatically enter the available delivery job pool for drivers to claim.
   }
 
   private db() {
@@ -88,6 +82,11 @@ export class FacilityService {
       .limit(100);
     if (error) throw new BadRequestException("Facility dashboard unavailable");
     const queue = orders ?? [];
+
+    const incomingOrderIds = queue
+      .filter((order) => order.current_status === "in_transit_to_facility")
+      .map((order) => order.id);
+
     const readyOrderIds = queue
       .filter((order) =>
         ["ready_for_delivery", "delivery_assigned", "delivery_failed"].includes(
@@ -95,37 +94,142 @@ export class FacilityService {
         ),
       )
       .map((order) => order.id);
-    const assignmentByOrder = new Map<string, any>();
-    if (readyOrderIds.length) {
-      const { data: assignments, error: assignmentError } = await this.db()
+
+    const processingOrderIds = queue
+      .filter((order) =>
+        ["verification", "processing", "quality_check", "rework_required"].includes(
+          order.current_status,
+        ),
+      )
+      .map((order) => order.id);
+
+    const pickupAssignmentByOrder = new Map<string, any>();
+    const deliveryAssignmentByOrder = new Map<string, any>();
+    const driverNames = new Map<string, string>();
+    const processingStages = new Map<string, string>();
+    const handedOverOrders = new Map<string, string>();
+    const collectedOrders = new Map<string, string>();
+
+    const neededDriverIds: string[] = [];
+
+    // Load pickup assignments for incoming orders
+    if (incomingOrderIds.length) {
+      const { data: pickupAssignments } = await this.db()
         .from("driver_assignments")
-        .select(
-          "id,order_id,driver_id,status,assigned_at,rejection_reason",
-        )
-        .eq("assignment_type", "delivery")
-        .in("order_id", readyOrderIds)
+        .select("id,order_id,driver_id,status,assigned_at")
+        .eq("assignment_type", "pickup")
+        .in("order_id", incomingOrderIds)
         .order("assigned_at", { ascending: false });
-      if (assignmentError) {
-        throw new BadRequestException("Facility delivery assignments unavailable");
-      }
-      for (const assignment of assignments ?? []) {
-        if (!assignmentByOrder.has(assignment.order_id)) {
-          assignmentByOrder.set(assignment.order_id, assignment);
+
+      for (const assignment of pickupAssignments ?? []) {
+        if (!pickupAssignmentByOrder.has(assignment.order_id)) {
+          pickupAssignmentByOrder.set(assignment.order_id, assignment);
+          neededDriverIds.push(assignment.driver_id);
         }
       }
     }
-    const dashboardOrders = queue.map((order) => ({
-      ...order,
-      deliveryAssignment: assignmentByOrder.get(order.id)
-        ? {
-            id: assignmentByOrder.get(order.id).id,
-            driverId: assignmentByOrder.get(order.id).driver_id,
-            status: assignmentByOrder.get(order.id).status,
-            rejectionReason:
-              assignmentByOrder.get(order.id).rejection_reason ?? null,
-          }
-        : null,
-    }));
+
+    // Load delivery assignments & dispatch events for ready orders
+    if (readyOrderIds.length) {
+      const [assignmentResult, operationsResult] = await Promise.all([
+        this.db()
+          .from("driver_assignments")
+          .select("id,order_id,driver_id,status,assigned_at,rejection_reason")
+          .eq("assignment_type", "delivery")
+          .in("order_id", readyOrderIds)
+          .order("assigned_at", { ascending: false }),
+        this.db()
+          .from("driver_navigation_events")
+          .select("order_id,event_type,created_at")
+          .in("order_id", readyOrderIds)
+          .in("event_type", ["facility_dispatch", "driver_collection_confirmed"]),
+      ]);
+
+      if (assignmentResult.error) {
+        throw new BadRequestException("Facility delivery assignments unavailable");
+      }
+
+      const assignments = assignmentResult.data ?? [];
+      for (const assignment of assignments) {
+        if (!deliveryAssignmentByOrder.has(assignment.order_id)) {
+          deliveryAssignmentByOrder.set(assignment.order_id, assignment);
+          neededDriverIds.push(assignment.driver_id);
+        }
+      }
+
+      for (const op of operationsResult.data ?? []) {
+        if (op.event_type === "facility_dispatch") {
+          handedOverOrders.set(op.order_id, op.created_at);
+        } else if (op.event_type === "driver_collection_confirmed") {
+          collectedOrders.set(op.order_id, op.created_at);
+        }
+      }
+    }
+
+    // Load operations to determine stage for processing orders
+    if (processingOrderIds.length) {
+      const { data: operations } = await this.db()
+        .from("facility_order_operations")
+        .select("order_id,operation_type,current_status,started_at,completed_at")
+        .in("order_id", processingOrderIds)
+        .order("started_at", { ascending: false });
+
+      for (const op of operations ?? []) {
+        if (!processingStages.has(op.order_id)) {
+          processingStages.set(op.order_id, op.operation_type || op.current_status);
+        }
+      }
+    }
+
+    // Resolve driver profile names in batch
+    const uniqueDriverIds = [...new Set(neededDriverIds)];
+    if (uniqueDriverIds.length) {
+      const { data: drivers } = await this.db()
+        .from("drivers")
+        .select("id,profile_id,profiles(full_name)")
+        .in("id", uniqueDriverIds);
+      for (const driver of (drivers as any[]) ?? []) {
+        if (driver.profiles?.full_name) {
+          driverNames.set(driver.id, driver.profiles.full_name);
+        }
+      }
+    }
+
+    const dashboardOrders = queue.map((order) => {
+      const deliveryAssignment = deliveryAssignmentByOrder.get(order.id);
+      const pickupAssignment = pickupAssignmentByOrder.get(order.id);
+      const pickupDriverName = pickupAssignment
+        ? driverNames.get(pickupAssignment.driver_id) || "Assigned Driver"
+        : null;
+
+      return {
+        ...order,
+        pickupDriverName,
+        pickupAssignment: pickupAssignment
+          ? {
+              id: pickupAssignment.id,
+              driverId: pickupAssignment.driver_id,
+              driverName: pickupDriverName,
+              status: pickupAssignment.status,
+            }
+          : null,
+        processingStage: processingStages.get(order.id) ?? (order.current_status === "verification" ? "verification" : null),
+        deliveryAssignment: deliveryAssignment
+          ? {
+              id: deliveryAssignment.id,
+              driverId: deliveryAssignment.driver_id,
+              driverName: driverNames.get(deliveryAssignment.driver_id) || "Assigned Driver",
+              status: deliveryAssignment.status,
+              rejectionReason: deliveryAssignment.rejection_reason ?? null,
+              handedOver: handedOverOrders.has(order.id),
+              handedOverAt: handedOverOrders.get(order.id) ?? null,
+              collected: collectedOrders.has(order.id),
+              collectedAt: collectedOrders.get(order.id) ?? null,
+            }
+          : null,
+      };
+    });
+
     return {
       facility: {
         id: access.facility.id,
@@ -137,13 +241,11 @@ export class FacilityService {
         incoming: queue.filter(
           (order) => order.current_status === "in_transit_to_facility",
         ).length,
-        received: queue.filter((order) =>
-          ["received_at_facility", "verification"].includes(
-            order.current_status,
-          ),
+        received: queue.filter(
+          (order) => order.current_status === "received_at_facility",
         ).length,
         processing: queue.filter((order) =>
-          ["processing", "quality_check", "rework_required"].includes(
+          ["verification", "processing", "quality_check", "rework_required"].includes(
             order.current_status,
           ),
         ).length,
@@ -229,6 +331,85 @@ export class FacilityService {
             activeJobs: Number(candidate.active_workload ?? 0),
           };
         }),
+    };
+  }
+
+  async handoverToDriver(
+    profileId: string,
+    orderId: string,
+    targetDriverId?: string,
+  ) {
+    const access = await this.requireFacilityEmployee(profileId);
+    const order = await this.requireOrder(orderId);
+    this.ensureFacilityMatch(access, order.facility_id);
+
+    if (
+      !["ready_for_delivery", "delivery_assigned", "delivery_accepted"].includes(
+        order.current_status,
+      )
+    ) {
+      throw new ConflictException(
+        `Handover is not allowed while order is ${order.current_status}`,
+      );
+    }
+
+    const { data: assignment, error: assignmentError } = await this.db()
+      .from("driver_assignments")
+      .select("id,driver_id,status")
+      .eq("order_id", orderId)
+      .eq("assignment_type", "delivery")
+      .in("status", ["assigned", "accepted", "en_route", "arrived"])
+      .order("assigned_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (assignmentError || !assignment) {
+      throw new NotFoundException(
+        "No active delivery assignment found for this order",
+      );
+    }
+
+    if (targetDriverId && assignment.driver_id !== targetDriverId) {
+      throw new ConflictException(
+        "Assigned driver does not match the handover driver",
+      );
+    }
+
+    const { data: existingOp } = await this.db()
+      .from("driver_navigation_events")
+      .select("id,created_at")
+      .eq("order_id", orderId)
+      .eq("event_type", "facility_dispatch")
+      .maybeSingle();
+
+    if (existingOp) {
+      return {
+        orderId,
+        handedOver: true,
+        driverId: assignment.driver_id,
+        handedOverAt: existingOp.created_at,
+        message: "Order was already handed over to driver",
+      };
+    }
+
+    const now = new Date().toISOString();
+    const { error: insertError } = await this.db()
+      .from("driver_navigation_events")
+      .insert({
+        order_id: orderId,
+        driver_id: assignment.driver_id,
+        event_type: "facility_dispatch",
+      });
+
+    if (insertError) {
+      throw new BadRequestException(insertError.message);
+    }
+
+    return {
+      orderId,
+      handedOver: true,
+      driverId: assignment.driver_id,
+      handedOverAt: now,
     };
   }
 
@@ -612,7 +793,8 @@ export class FacilityService {
         `Verification is not allowed while order is ${order.current_status}`,
       );
     }
-    const { data, error } = await this.db().rpc(
+    let data = null;
+    const { data: intakeRes, error: intakeErr } = await this.db().rpc(
       "record_facility_intake_verification_atomic",
       {
         p_order_id: orderId,
@@ -621,14 +803,41 @@ export class FacilityService {
         p_notes: body.notes?.trim() || null,
       },
     );
-    if (error || !data)
-      this.throwProcessingRpcError(error, "Unable to verify Facility intake");
+    if (intakeErr && intakeErr.code === "PGRST202") {
+      const totalCount = (body.items || []).reduce(
+        (sum, item) => sum + (Number(item.countedQuantity) || 0),
+        0,
+      );
+      const totalWeight = (body.items || []).reduce(
+        (sum, item) => sum + (Number(item.weightKg) || 0),
+        0,
+      );
+      const { data: verRes, error: verErr } = await this.db().rpc(
+        "record_facility_verification_atomic",
+        {
+          p_order_id: orderId,
+          p_performed_by: profileId,
+          p_item_count: totalCount || null,
+          p_weight_kg: totalWeight || null,
+          p_notes: body.notes?.trim() || null,
+        },
+      );
+      if (verErr || !verRes) {
+        this.throwProcessingRpcError(verErr, "Unable to verify Facility intake");
+      }
+      data = { ...verRes, discrepancyCount: 0 };
+    } else if (intakeErr || !intakeRes) {
+      this.throwProcessingRpcError(intakeErr, "Unable to verify Facility intake");
+    } else {
+      data = intakeRes;
+    }
+
     return {
       orderId,
       operationId: data.operationId,
       verified: true,
       orderStatus: data.orderStatus,
-      discrepancyCount: data.discrepancyCount,
+      discrepancyCount: data.discrepancyCount ?? 0,
     };
   }
 
@@ -640,7 +849,7 @@ export class FacilityService {
   ) {
     const access = await this.requireFacilityEmployee(profileId);
     if (access.role !== "manager")
-      throw new ForbiddenException("Facility Manager resolution required");
+      throw new ForbiddenException("Facility manager access required");
     if (!notes?.trim())
       throw new BadRequestException("Resolution notes are required");
     const order = await this.requireOrder(orderId);
@@ -670,18 +879,33 @@ export class FacilityService {
     const { data, error } = await this.db()
       .from("facility_order_operations")
       .select(
-        "id,operation_type,current_status,started_at,completed_at,started_by,completed_by,performed_by,rewash_cycle",
+        "id,operation_type,current_status,started_at,completed_at,performed_by,notes",
       )
       .eq("order_id", orderId)
       .order("started_at", { ascending: true })
       .order("id", { ascending: true });
-    if (error)
-      throw new BadRequestException("Facility processing history unavailable");
-    const stages = (data ?? []).filter((operation) =>
-      ["washing", "drying", "ironing", "folding", "packaging"].includes(
-        operation.operation_type,
-      ),
-    );
+    if (error) {
+      throw new BadRequestException(
+        error.message || "Facility processing history unavailable",
+      );
+    }
+    const stages = (data ?? [])
+      .filter((operation) =>
+        ["washing", "drying", "ironing", "folding", "packaging"].includes(
+          operation.operation_type,
+        ),
+      )
+      .map((operation) => ({
+        id: operation.id,
+        operation_type: operation.operation_type,
+        current_status: operation.current_status,
+        started_at: operation.started_at,
+        completed_at: operation.completed_at,
+        started_by: operation.performed_by,
+        completed_by: operation.completed_at ? operation.performed_by : null,
+        performed_by: operation.performed_by,
+        rewash_cycle: 0,
+      }));
     const active = stages.find((operation) => !operation.completed_at);
     const completed = stages.filter((operation) => operation.completed_at);
     const next: Record<string, string> = {
@@ -704,8 +928,11 @@ export class FacilityService {
       .select("id", { count: "exact", head: true })
       .eq("order_id", orderId)
       .eq("status", "open");
-    if (discrepancyError)
-      throw new BadRequestException("Facility discrepancy status unavailable");
+    if (discrepancyError) {
+      throw new BadRequestException(
+        discrepancyError.message || "Facility discrepancy status unavailable",
+      );
+    }
     const { data: decisions, error: qcError } = await this.db()
       .from("facility_qc_decisions")
       .select(
@@ -713,15 +940,50 @@ export class FacilityService {
       )
       .eq("order_id", orderId)
       .order("created_at", { ascending: true });
-    if (qcError)
-      throw new BadRequestException("Facility QC history unavailable");
+    if (qcError) {
+      throw new BadRequestException(
+        qcError.message || "Facility QC history unavailable",
+      );
+    }
+    const qcOperations = (data ?? []).filter(
+      (operation) => operation.operation_type === "quality_check",
+    );
+    const resolvedDecisions =
+      decisions && decisions.length > 0
+        ? decisions
+        : qcOperations.map((op, idx) => ({
+            id: op.id,
+            operation_id: op.id,
+            cycle_number: idx,
+            approved:
+              op.current_status === "ready_for_delivery" ||
+              [
+                "ready_for_delivery",
+                "delivery_assigned",
+                "delivery_accepted",
+                "en_route_delivery",
+                "delivery_otp_pending",
+                "delivered",
+                "claim_period_active",
+              ].includes(order.current_status),
+            rewash_required: op.current_status === "rework_required",
+            defect_code: null,
+            reason:
+              op.notes ||
+              (op.current_status === "ready_for_delivery"
+                ? "Quality check approved"
+                : null),
+            affected_item_ids: [],
+            decided_by: op.performed_by,
+            created_at: op.completed_at || op.started_at,
+          }));
     return {
       orderId,
       orderStatus: order.current_status,
       stages,
-      qualityDecisions: decisions ?? [],
+      qualityDecisions: resolvedDecisions,
       role: access.role,
-      rewashCycle: (decisions ?? []).filter((decision) => !decision.approved)
+      rewashCycle: resolvedDecisions.filter((decision) => !decision.approved)
         .length,
       canQualityCheck:
         order.current_status === "processing" &&
@@ -1079,21 +1341,44 @@ export class FacilityService {
       );
     }
 
-    const { data: qualityOperation, error: qualityOperationError } =
-      await this.db().rpc("record_facility_qc_decision_atomic", {
+    let qualityOperation = null;
+    const { data: qOp, error: qErr } = await this.db().rpc(
+      "record_facility_qc_decision_atomic",
+      {
         p_order_id: orderId,
         p_performed_by: profileId,
         p_approved: approved,
         p_defect_code: defectCode ?? null,
         p_reason: notes?.trim() || null,
         p_affected_item_ids: affectedItemIds ?? [],
-      });
+      },
+    );
 
-    if (qualityOperationError || !qualityOperation) {
+    if (qErr && qErr.code === "PGRST202") {
+      const { data: fbOp, error: fbErr } = await this.db().rpc(
+        "complete_facility_quality_check_atomic",
+        {
+          p_order_id: orderId,
+          p_performed_by: profileId,
+          p_approved: approved,
+          p_notes: notes?.trim() || null,
+        },
+      );
+      if (fbErr || !fbOp) {
+        this.throwProcessingRpcError(fbErr, "Unable to record quality check");
+      }
+      qualityOperation = {
+        ...fbOp,
+        rewashRequired: !approved,
+        cycleNumber: 0,
+      };
+    } else if (qErr || !qOp) {
       this.throwProcessingRpcError(
-        qualityOperationError,
+        qErr,
         "Unable to record quality check",
       );
+    } else {
+      qualityOperation = qOp;
     }
 
     if (qualityOperation.orderStatus === "ready_for_delivery") {

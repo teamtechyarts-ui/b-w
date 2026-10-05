@@ -68,13 +68,17 @@ export class NotificationsService {
     body: string,
     data?: any,
   ) {
+    const orderId = data?.orderId || null;
     const { data: row, error } = await this.db()
       .from('notifications')
       .insert({
         profile_id: profileId,
+        order_id: orderId,
         notification_type: type,
+        event_type: type,
         title,
         body,
+        message: body,
         data: data || {},
         status: 'queued',
       })
@@ -123,5 +127,25 @@ export class NotificationsService {
     }
 
     return data;
+  }
+
+  async markAllRead(profileId: string) {
+    const { data, error } = await this.db()
+      .from('notifications')
+      .update({
+        is_read: true,
+        read_at: new Date().toISOString(),
+      })
+      .eq('profile_id', profileId)
+      .eq('is_read', false)
+      .select('id');
+
+    if (error) {
+      throw new BadRequestException('Unable to mark all notifications read');
+    }
+
+    return {
+      updatedCount: data ? data.length : 0,
+    };
   }
 }

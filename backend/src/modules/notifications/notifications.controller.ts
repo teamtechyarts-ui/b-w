@@ -43,6 +43,16 @@ export class NotificationsController {
     return this.notifications.list(req.user.id);
   }
 
+  @Post('read-all')
+  readAll(@Req() req: any) {
+    return this.notifications.markAllRead(req.user.id);
+  }
+
+  @Post('mark-all-read')
+  markAllRead(@Req() req: any) {
+    return this.notifications.markAllRead(req.user.id);
+  }
+
   @Post(':id/read')
   read(@Req() req: any, @Param('id', ParseUUIDPipe) id: string) {
     return this.notifications.markRead(req.user.id, id);

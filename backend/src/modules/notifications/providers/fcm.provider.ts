@@ -71,6 +71,18 @@ function firebaseErrorCode(error: unknown) {
   return undefined;
 }
 
+function isConfiguredFirebaseCredential(val?: string): boolean {
+  if (!val) return false;
+  const normalized = val.trim().toLowerCase();
+  return !(
+    normalized.includes('placeholder') ||
+    normalized.includes('replace_me') ||
+    normalized.includes('change_me') ||
+    normalized.includes('your_') ||
+    normalized.includes('@bright-white.local')
+  );
+}
+
 @Injectable()
 export class FcmProvider implements PushProvider {
   private readonly messaging: Messaging | null;
@@ -105,7 +117,12 @@ export class FcmProvider implements PushProvider {
 
     const hasServiceAccountPart = Boolean(clientEmail || privateKey);
     const hasCompleteServiceAccount = Boolean(
-      projectId && clientEmail && privateKey,
+      projectId &&
+        clientEmail &&
+        privateKey &&
+        isConfiguredFirebaseCredential(projectId) &&
+        isConfiguredFirebaseCredential(clientEmail) &&
+        isConfiguredFirebaseCredential(privateKey),
     );
     const canUseApplicationDefault = Boolean(
       projectId || applicationCredentials,

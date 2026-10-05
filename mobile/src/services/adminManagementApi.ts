@@ -24,8 +24,10 @@ export type AdminOrderDetail = {
     order_status_history: Array<{id: string; from_status: string | null; to_status: string; reason: string | null; created_at: string}>;
     order_qr_codes: {id: string; secure_token: string; is_active: boolean} | null;
     customers: {id: string; profile_id: string; profiles: {full_name: string | null; phone: string | null}};
-    pickup_address?: {address_line1: string; city: string | null; state: string | null; postal_code: string | null} | null;
-    delivery_address?: {address_line1: string; city: string | null; state: string | null; postal_code: string | null} | null;
+    facilities?: {id: string; name: string; address: string | null} | null;
+    pickup_address?: {id?: string; label?: string | null; address_line1: string; address_line2?: string | null; city: string | null; state: string | null; postal_code: string | null} | null;
+    delivery_address?: {id?: string; label?: string | null; address_line1: string; address_line2?: string | null; city: string | null; state: string | null; postal_code: string | null} | null;
+    driver_assignments?: Array<{id: string; status: string; assignment_type: string; assigned_at: string; accepted_at: string | null; drivers?: {id: string; profiles?: {full_name: string | null; phone: string | null} | null} | null}>;
   };
   payments: Array<{id: string; provider: string; amount: number | string; currency: string; status: string; paid_at: string | null; refund_requests: Array<{id: string; amount: number | string; reason: string; status: string; is_cancellation_refund: boolean; created_at: string}>}>;
   claims: Array<{id: string; claim_type: string; description: string; status: string; created_at: string; customer_claim_photos: Array<{id: string; storage_path: string}>}>;
@@ -43,13 +45,21 @@ export function getAdminCustomerOrders(token: string, customerId: string) {
 export function getAdminOrder(token: string, orderId: string) {
   return apiRequest<AdminOrderDetail>(`/admin/orders/${orderId}`, {accessToken: token});
 }
-export function lookupAdminQr(token: string, payload: string) {
+export async function lookupAdminQr(token: string, payload: string) {
   const value = payload.trim();
   const match = /^(?:BW1:)?([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i.exec(value);
-  if (!match) throw new Error('Enter a valid BW1 handoff code.');
-  return apiRequest<{orderId: string; currentStatus: string}>('/qr/scan', {
-    method: 'POST', accessToken: token, body: {token: match[1], action: 'lookup'},
-  });
+  if (match) {
+    return apiRequest<{orderId: string; currentStatus: string}>('/qr/scan', {
+      method: 'POST', accessToken: token, body: {token: match[1], action: 'lookup'},
+    });
+  }
+  if (value.toUpperCase().startsWith('BW-') || value.length >= 3) {
+    const detail = await getAdminOrder(token, value);
+    if (detail?.order?.id) {
+      return {orderId: detail.order.id, currentStatus: detail.order.current_status};
+    }
+  }
+  throw new Error('Enter a valid BW1 handoff code or order number.');
 }
 export function canAdminCancelOrder(status: string) { return canCancelOrder(status); }
 export function cancelAdminOrder(token: string, orderId: string, reason: string) {

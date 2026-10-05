@@ -13,7 +13,6 @@ import { createHash, createHmac, timingSafeEqual } from "crypto";
 import { SupabaseService } from "../supabase/supabase.service";
 import { LogisticsService } from "../logistics/logistics.service";
 import {
-  isDevelopmentPaymentProvider,
   PAYMENT_PROVIDER,
   PaymentProvider,
   ProviderPayment,
@@ -68,14 +67,8 @@ export class PaymentsService {
   ) {}
 
   private async triggerPickupAssignment(orderId: string) {
-    if (!this.logistics) return;
-    try {
-      await this.logistics.assignBestDriver(orderId, "pickup");
-    } catch (error) {
-      this.logger.warn(
-        `Automatic pickup assignment failed for order ${orderId}: ${error instanceof Error ? error.message : "unknown error"}`,
-      );
-    }
+    // Under availability-based driver dispatch architecture, confirmed orders
+    // automatically enter the available pickup job pool for drivers to claim.
   }
 
   private db() {
@@ -83,7 +76,7 @@ export class PaymentsService {
   }
 
   private providerName() {
-    return this.provider.mode === "mock" ? "mock" : "razorpay";
+    return "razorpay";
   }
 
   private throwDatabaseError(error: DatabaseError, fallback: string): never {
@@ -122,6 +115,7 @@ export class PaymentsService {
 
   private paymentResponse(paymentOrder: ProviderPaymentRecord) {
     return {
+      orderId: paymentOrder.order_id,
       paymentOrderId: paymentOrder.id,
       razorpayOrderId: paymentOrder.provider_order_id,
       providerOrderId: paymentOrder.provider_order_id,
@@ -129,6 +123,7 @@ export class PaymentsService {
       currency: paymentOrder.currency || "INR",
       keyId: this.provider.publicKeyId,
       provider: this.providerName(),
+      paymentMethod: "razorpay",
     };
   }
 
@@ -188,6 +183,12 @@ export class PaymentsService {
       order.current_status !== "pending_payment"
     ) {
       throw new ConflictException("Order is not awaiting a Razorpay payment");
+    }
+
+    if (this.provider.mode === "development") {
+      throw new ServiceUnavailableException(
+        "Online payment is temporarily unavailable. Please try again or choose Cash on Delivery.",
+      );
     }
 
     const existing = await this.activePaymentOrder(orderId);
@@ -507,6 +508,12 @@ export class PaymentsService {
   }
 
   async verifyPayment(profileId: string, body: VerifyPaymentInput) {
+    if (this.provider.mode === "development") {
+      throw new ServiceUnavailableException(
+        "Razorpay credentials are not configured for this environment.",
+      );
+    }
+
     this.verify(
       body.razorpayOrderId,
       body.razorpayPaymentId,
@@ -561,66 +568,6 @@ export class PaymentsService {
       orderId: result.orderId,
       orderStatus: result.orderStatus,
       provider: this.providerName(),
-    };
-  }
-
-  async simulateMockPayment(
-    profileId: string,
-    paymentOrderId: string,
-    status: "captured" | "failed",
-  ) {
-    if (
-      process.env.NODE_ENV === "production" ||
-      !isDevelopmentPaymentProvider(this.provider)
-    ) {
-      throw new NotFoundException("Mock payment simulation is unavailable");
-    }
-
-    const { data: paymentOrder, error } = await this.db()
-      .from("payment_orders")
-      .select("*")
-      .eq("id", paymentOrderId)
-      .maybeSingle();
-
-    if (error || !paymentOrder) {
-      throw new NotFoundException("Payment order not found");
-    }
-
-    await this.requireOwnedOrder(profileId, paymentOrder.order_id);
-
-    if (!["created", "authorized"].includes(paymentOrder.status)) {
-      throw new ConflictException(
-        `Mock payment cannot be simulated while it is ${paymentOrder.status}`,
-      );
-    }
-
-    const simulation = await this.provider.simulatePayment({
-      providerOrderId: paymentOrder.provider_order_id,
-      amount: Math.round(Number(paymentOrder.amount) * 100),
-      currency: paymentOrder.currency,
-      status,
-    });
-
-    this.ensureMatchingPayment(paymentOrder, simulation.payment);
-
-    let databaseResult:
-      { orderId: string; orderStatus: string; duplicate: boolean } | undefined;
-    if (status === "failed") {
-      databaseResult = await this.recordFailedPayment(
-        paymentOrder,
-        simulation.payment,
-      );
-    }
-
-    return {
-      paymentOrderId: paymentOrder.id,
-      razorpayOrderId: paymentOrder.provider_order_id,
-      razorpayPaymentId: simulation.payment.id,
-      razorpaySignature: simulation.signature,
-      provider: "mock",
-      status: simulation.payment.status,
-      duplicate: databaseResult?.duplicate ?? false,
-      orderStatus: databaseResult?.orderStatus,
     };
   }
 
@@ -893,6 +840,12 @@ export class PaymentsService {
     refundId: string,
     notes = "Approved by Admin",
   ) {
+    if (this.provider.mode === "development") {
+      throw new ServiceUnavailableException(
+        "Razorpay credentials are not configured for this environment.",
+      );
+    }
+
     const { data: claim, error: claimError } = await this.db().rpc(
       "admin_claim_refund_approval_audited_atomic",
       {

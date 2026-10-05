@@ -53,44 +53,121 @@ export async function requestAndroidLocationPermission():
   );
 }
 
-export async function getCurrentDeviceLocation():
-  Promise<LocationCoordinates> {
+export async function getCurrentDeviceLocation(): Promise<LocationCoordinates> {
   if (Platform.OS === 'ios') {
-    Geolocation.setRNConfiguration({skipPermissionRequests: false, authorizationLevel: 'whenInUse'});
+    Geolocation.setRNConfiguration({
+      skipPermissionRequests: false,
+      authorizationLevel: 'whenInUse',
+    });
   }
-  const permissionGranted =
-    await requestAndroidLocationPermission();
+  const permissionGranted = await requestAndroidLocationPermission();
 
-  if (
-    !permissionGranted
-  ) {
-    throw new Error(
-      'Location permission was not granted',
-    );
+  if (!permissionGranted) {
+    throw new Error('Location permission was not granted');
   }
 
   return new Promise((resolve, reject) => {
+    const nav = typeof navigator !== 'undefined' ? (navigator as any) : null;
+    if (Platform.OS === 'web' && nav?.geolocation) {
+      nav.geolocation.getCurrentPosition(
+        (position: any) => {
+          const latitude = Number(position.coords.latitude);
+          const longitude = Number(position.coords.longitude);
+          const accuracy = Number(position.coords.accuracy);
+          const timestamp = new Date(
+            position.timestamp || Date.now(),
+          ).toISOString();
+
+          if (__DEV__) {
+            console.log('[DRIVER_GPS_DIAGNOSTIC]', {
+              latitude,
+              longitude,
+              accuracyMeters: Number.isFinite(accuracy) ? accuracy : undefined,
+              timestamp,
+              source: 'browser-geolocation',
+            });
+          }
+
+          if (Number.isFinite(accuracy) && accuracy > 1000) {
+            reject(
+              new Error(
+                `Your location accuracy is low (${Math.round(
+                  accuracy,
+                )}m). Move to an area with a clearer GPS signal and try again.`,
+              ),
+            );
+            return;
+          }
+
+          resolve({
+            latitude,
+            longitude,
+            accuracy: Number.isFinite(accuracy) ? accuracy : undefined,
+          });
+        },
+        (error: any) => {
+          reject(
+            new Error(
+              error.message || 'Unable to determine current location',
+            ),
+          );
+        },
+        {
+          enableHighAccuracy: true,
+          timeout: 15000,
+          maximumAge: 0,
+        },
+      );
+      return;
+    }
+
     Geolocation.getCurrentPosition(
       position => {
+        const latitude = Number(position.coords.latitude);
+        const longitude = Number(position.coords.longitude);
+        const accuracy = Number(position.coords.accuracy);
+        const timestamp = new Date(
+          position.timestamp || Date.now(),
+        ).toISOString();
+
+        if (__DEV__) {
+          console.log('[DRIVER_GPS_DIAGNOSTIC]', {
+            latitude,
+            longitude,
+            accuracyMeters: Number.isFinite(accuracy) ? accuracy : undefined,
+            timestamp,
+            source: 'native-geolocation',
+          });
+        }
+
+        if (Number.isFinite(accuracy) && accuracy > 1000) {
+          reject(
+            new Error(
+              `Your location accuracy is low (${Math.round(
+                accuracy,
+              )}m). Move to an area with a clearer GPS signal and try again.`,
+            ),
+          );
+          return;
+        }
+
         resolve({
-          latitude:
-            position.coords.latitude,
-          longitude:
-            position.coords.longitude,
+          latitude,
+          longitude,
+          accuracy: Number.isFinite(accuracy) ? accuracy : undefined,
         });
       },
       error => {
         reject(
           new Error(
-            error.message ||
-              'Unable to determine current location',
+            error.message || 'Unable to determine current location',
           ),
         );
       },
       {
         enableHighAccuracy: true,
         timeout: 15000,
-        maximumAge: 5000,
+        maximumAge: 0,
       },
     );
   });

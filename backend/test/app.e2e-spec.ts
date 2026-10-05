@@ -16,29 +16,28 @@ import { AdminGrowthService } from "../src/modules/admin-management/admin-growth
 import { AdminFacilityOversightService } from "../src/modules/admin-management/admin-facility-oversight.service";
 import { AnalyticsReportsService } from "../src/modules/analytics/analytics-reports.service";
 import { StaffService } from "../src/modules/staff/staff.service";
-import { QueueService } from "../src/queues/queues.service";
 
 // Keep HTTP routing, validation and guards real; never contact external services.
 describe("Backend HTTP integration", () => {
   let app: NestFastifyApplication;
   let roles = ["customer"];
-  const redis = { status: "ready" };
   const from = jest.fn();
   const rpc = jest.fn();
   const getUser = jest.fn();
   const originalSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
+  const originalKeyId = process.env.RAZORPAY_KEY_ID;
+  const originalKeySecret = process.env.RAZORPAY_KEY_SECRET;
+  const originalMapsKey = process.env.GOOGLE_MAPS_SERVER_KEY;
 
   beforeAll(async () => {
+    process.env.RAZORPAY_KEY_ID = "e2e-test-key-id";
+    process.env.RAZORPAY_KEY_SECRET = "e2e-test-key-secret";
     process.env.RAZORPAY_WEBHOOK_SECRET = "e2e-webhook-secret";
+    process.env.GOOGLE_MAPS_SERVER_KEY = "e2e-maps-key";
+
     const module = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(SupabaseService)
       .useValue({ admin: { from, rpc }, client: {}, getUser })
-      .overrideProvider(QueueService)
-      .useValue({
-        redis,
-        enqueueNotification: jest.fn(),
-        enqueueAssignment: jest.fn(),
-      })
       .compile();
     app = module.createNestApplication<NestFastifyApplication>(
       new FastifyAdapter(),
@@ -49,9 +48,21 @@ describe("Backend HTTP integration", () => {
     await app.getHttpAdapter().getInstance().ready();
   });
 
+  afterAll(async () => {
+    if (originalSecret !== undefined) process.env.RAZORPAY_WEBHOOK_SECRET = originalSecret;
+    else delete process.env.RAZORPAY_WEBHOOK_SECRET;
+    if (originalKeyId !== undefined) process.env.RAZORPAY_KEY_ID = originalKeyId;
+    else delete process.env.RAZORPAY_KEY_ID;
+    if (originalKeySecret !== undefined) process.env.RAZORPAY_KEY_SECRET = originalKeySecret;
+    else delete process.env.RAZORPAY_KEY_SECRET;
+    if (originalMapsKey !== undefined) process.env.GOOGLE_MAPS_SERVER_KEY = originalMapsKey;
+    else delete process.env.GOOGLE_MAPS_SERVER_KEY;
+
+    if (app) await app.close();
+  });
+
   beforeEach(() => {
     roles = ["customer"];
-    redis.status = "ready";
     from.mockReset();
     rpc.mockReset();
     getUser.mockReset().mockResolvedValue({ id: "profile-1" });
@@ -134,19 +145,6 @@ describe("Backend HTTP integration", () => {
       expect(response.json().status).toMatch(/^(ok|ready)$/);
     },
   );
-
-  it("returns 503 when Redis is disconnected", async () => {
-    redis.status = "reconnecting";
-    const response = await app.inject({
-      method: "GET",
-      url: "/v1/health/ready",
-    });
-    expect(response.statusCode).toBe(503);
-    expect(response.json()).toMatchObject({
-      ready: false,
-      checks: { redis: false },
-    });
-  });
 
   it("returns 503 when Supabase is unavailable", async () => {
     from.mockImplementation(() => ({
@@ -354,6 +352,9 @@ describe("Backend HTTP integration", () => {
       "/v1/auth/phone/request-otp",
       "/v1/auth/phone/verify-otp",
       "/v1/auth/refresh",
+      "/v1/auth/signup",
+      "/v1/auth/signin",
+      "/v1/auth/forgot-password",
       "/v1/payments/webhook/razorpay",
     ]);
     let checked = 0;

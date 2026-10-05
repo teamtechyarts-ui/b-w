@@ -45,3 +45,40 @@ test('address selection uses the server address and updates the selected id', as
   await fireEvent.press(view.getByText('Banjara Hills'));
   expect(base.onSelectAddress).toHaveBeenCalledWith('address');
 });
+
+test('renders distinct urgent action cards for multiple active orders requiring OTP and navigates directly', async () => {
+  const onOpenOrder = jest.fn();
+  const activeUrgentOrders: any = [
+    {
+      id: 'order-1',
+      order_number: 'BW-20261003-7CB85C51',
+      current_status: 'pickup_otp_pending',
+    },
+    {
+      id: 'order-2',
+      order_number: 'BW-TEST-709166',
+      current_status: 'delivery_otp_pending',
+    },
+  ];
+
+  const view = await render(
+    <HomeScreen
+      {...base}
+      activeUrgentOrders={activeUrgentOrders}
+      onOpenOrder={onOpenOrder}
+    />,
+  );
+
+  // Checks both cards exist simultaneously with exact order numbers
+  expect(view.getByText('Order BW-20261003-7CB85C51')).toBeTruthy();
+  expect(view.getByText('Order BW-TEST-709166')).toBeTruthy();
+  expect(view.getByText('Give Pickup OTP →')).toBeTruthy();
+  expect(view.getByText('Give Delivery OTP →')).toBeTruthy();
+
+  await fireEvent.press(view.getByText('Give Pickup OTP →'));
+  expect(onOpenOrder).toHaveBeenCalledWith('order-1');
+
+  await fireEvent.press(view.getByText('Give Delivery OTP →'));
+  expect(onOpenOrder).toHaveBeenCalledWith('order-2');
+});
+

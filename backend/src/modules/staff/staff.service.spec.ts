@@ -29,7 +29,7 @@ function fixture(admin = true) {
 }
 
 describe('Admin operational provisioning', () => {
-  const driver = {phone: '+16505550102', fullName: 'Development Driver', role: 'driver' as const};
+  const driver = {phone: '+16505550102', fullName: 'Development Driver', role: 'driver' as const, pin: '123456'};
 
   it('rejects a Driver or Facility actor before creating a privileged account', async () => {
     const f = fixture(false);
@@ -52,10 +52,104 @@ describe('Admin operational provisioning', () => {
     expect(f.calls.some(call => call.table === 'drivers' && call.method === 'insert')).toBe(true);
   });
 
+  it('allows Admin to update driver PIN securely with hash and audit', async () => {
+    const f = fixture();
+    const result = await f.service.changeDriverPin('admin-actor', 'driver-profile-id', '654321');
+    expect(result.success).toBe(true);
+    expect(result.message).toBe('Driver PIN updated successfully');
+    expect(f.updateUserById).toHaveBeenCalledWith('driver-profile-id', expect.objectContaining({
+      password: '654321',
+      app_metadata: expect.objectContaining({provider: 'phone'}),
+    }));
+    expect(f.calls.some(call => call.table === 'admin_staff_action_audit' && call.method === 'insert')).toBe(true);
+  });
+
   it('requires an active facility for staff and never creates an Auth user otherwise', async () => {
     const f = fixture();
-    await expect(f.service.provision('admin-actor', {...driver, role: 'facility_employee'})).rejects.toThrow('Active facility');
+    await expect(f.service.provision('admin-actor', {phone: driver.phone, fullName: driver.fullName, role: 'facility_employee'})).rejects.toThrow('Active facility');
     expect(f.createUser).not.toHaveBeenCalled();
+  });
+
+  it('provisions Facility Employee with active facility and 6-digit PIN', async () => {
+    const f = fixture();
+    const result = await f.service.provision('admin-actor', {
+      phone: '+919876543210',
+      fullName: 'Suresh Kumar',
+      role: 'facility_employee',
+      facilityId: 'facility-id',
+      pin: '654321',
+    });
+    expect(result.success).toBe(true);
+    expect(result.message).toBe('Facility Employee provisioned successfully');
+    expect(f.createUser).toHaveBeenCalledWith(expect.objectContaining({
+      phone: '+919876543210',
+      email: 'facility.919876543210@brightwhite.internal',
+      password: '654321',
+      app_metadata: expect.objectContaining({
+        employee_pin_hash: expect.stringMatching(/^pbkdf2:/),
+        provider: 'phone',
+      }),
+    }));
+    expect(f.calls.some(call => call.table === 'facility_employees' && call.method === 'insert')).toBe(true);
+  });
+
+  it('rejects Facility Employee provisioning when PIN is missing or invalid', async () => {
+    const f = fixture();
+    await expect(f.service.provision('admin-actor', {
+      phone: '+919876543210',
+      fullName: 'Suresh Kumar',
+      role: 'facility_employee',
+      facilityId: 'facility-id',
+      pin: '123',
+    })).rejects.toThrow('Facility Employee PIN is required and must be exactly 6 digits');
+  });
+
+  it('rejects Manager role from active provisioning', async () => {
+    const f = fixture();
+    await expect(f.service.provision('admin-actor', {
+      phone: '+919876543210',
+      fullName: 'Manager Name',
+      role: 'manager' as any,
+      facilityId: 'facility-id',
+      pin: '123456',
+    })).rejects.toThrow('Manager role is no longer available');
+  });
+
+  it('allows Admin to update facility employee PIN securely with hash and audit', async () => {
+    const f = fixture();
+    let lastEq: any = null;
+    f.from.mockImplementation((table: string) => {
+      const query: any = {};
+      for (const method of ['select', 'eq', 'insert', 'update', 'single', 'maybeSingle']) {
+        query[method] = jest.fn((field?: unknown, value?: unknown) => {
+          if (method === 'eq') lastEq = value !== undefined ? value : field;
+          f.calls.push({table, method, value: value !== undefined ? value : field});
+          return query;
+        });
+      }
+      query.then = (resolve: any) => {
+        const data = table === 'profile_roles'
+          ? (lastEq === 'admin-actor' ? [{roles: {code: 'admin'}}] : [{roles: {code: 'facility_employee'}}])
+          : table === 'facility_employees' ? {id: 'emp-id', is_active: true, facility_id: 'facility-1'}
+          : table === 'profiles' ? {id: 'emp-profile-id', phone: '+919876543210', is_active: true}
+          : {id: 'record-id', is_active: true};
+        return Promise.resolve({data, error: null}).then(resolve);
+      };
+      return query;
+    });
+
+    const result = await f.service.changeStaffPin('admin-actor', 'emp-profile-id', '987654');
+    expect(result.success).toBe(true);
+    expect(result.message).toBe('Facility employee PIN updated successfully');
+    expect(f.updateUserById).toHaveBeenCalledWith('emp-profile-id', expect.objectContaining({
+      password: '987654',
+      email: 'facility.919876543210@brightwhite.internal',
+      app_metadata: expect.objectContaining({
+        employee_pin_hash: expect.stringMatching(/^pbkdf2:/),
+        provider: 'phone',
+      }),
+    }));
+    expect(f.calls.some(call => call.table === 'admin_staff_action_audit' && call.method === 'insert')).toBe(true);
   });
 
   it('deactivates access and availability without deleting historical Driver rows', async () => {

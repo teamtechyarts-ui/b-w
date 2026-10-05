@@ -15,4 +15,8 @@ export class ProvisionStaffDto {
   @IsOptional()
   @IsUUID()
   facilityId?: string;
+
+  @IsOptional()
+  @Matches(/^\d{6}$/, { message: 'Driver PIN must be exactly 6 digits' })
+  pin?: string;
 }

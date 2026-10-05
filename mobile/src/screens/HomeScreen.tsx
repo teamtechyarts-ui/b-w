@@ -1,41 +1,885 @@
-import React, {useMemo, useState} from 'react';
-import {ActivityIndicator, SafeAreaView, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
+import React, {useEffect, useMemo, useState} from 'react';
+import {
+  ActivityIndicator,
+  SafeAreaView,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+
+import AppIcon, {IconName} from '../components/AppIcon';
+import {borderRadius, colors, shadows, spacing, typography} from '../theme/designSystem';
 import type {AddressItem} from '../types/address';
 import type {ServiceCategory, ServiceItem} from '../types/service';
+import type {CustomerOrder} from '../types/order';
+import {getOrders} from '../services/ordersApi';
+import {formatMoney} from '../utils/orderPricing';
 
 type Props = {
   customerName: string | null;
-  servicesLoading: boolean; servicesError: string; services: ServiceItem[]; categories: ServiceCategory[];
-  addresses: AddressItem[]; selectedAddressId: string | null; cartItemCount: number;
-  getQuantity: (serviceId: string) => number; onSelectAddress: (addressId: string) => void;
-  onManageAddresses: () => void; onOpenCart: () => void; onOpenNotifications: () => void;
-  onRetryServices: () => void; onUpdateQuantity: (service: ServiceItem, change: number) => void;
+  servicesLoading: boolean;
+  servicesError: string;
+  services: ServiceItem[];
+  categories: ServiceCategory[];
+  addresses: AddressItem[];
+  selectedAddressId: string | null;
+  cartItemCount: number;
+  cartSubtotal?: number;
+  accessToken?: string;
+  activeUrgentOrders?: CustomerOrder[];
+  getQuantity: (serviceId: string) => number;
+  onSelectAddress: (addressId: string) => void;
+  onManageAddresses: () => void;
+  onOpenCart: () => void;
+  onOpenNotifications: () => void;
+  onRetryServices: () => void;
+  onUpdateQuantity: (service: ServiceItem, change: number) => void;
+  onOpenCategory?: (categoryName: string) => void;
+  onOpenOrder?: (orderId: string) => void;
 };
+
+function getCategoryIconName(name: string): IconName {
+  const lower = name.toLowerCase();
+  if (lower.includes('fold')) return 'fold';
+  if (lower.includes('iron') || lower.includes('steam')) return 'iron';
+  if (lower.includes('dry') || lower.includes('coat')) return 'sparkles';
+  if (lower.includes('linen') || lower.includes('bed') || lower.includes('house')) return 'box';
+  if (lower.includes('shoe')) return 'sparkles';
+  if (lower.includes('premium')) return 'sparkles';
+  if (lower.includes('curtain') || lower.includes('carpet')) return 'box';
+  if (lower.includes('add')) return 'plus';
+  return 'wash';
+}
 
 export default function HomeScreen(props: Props) {
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [addressMenuOpen, setAddressMenuOpen] = useState(false);
-  const selectedAddress = props.addresses.find(address => address.id === props.selectedAddressId);
-  const visibleServices = useMemo(
-    () => selectedCategory ? props.services.filter(service => service.categoryName === selectedCategory) : [],
-    [props.services, selectedCategory],
+  const [fetchedOrders, setFetchedOrders] = useState<CustomerOrder[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (props.accessToken && !props.activeUrgentOrders) {
+      getOrders(props.accessToken)
+        .then(orders => {
+          if (!cancelled && Array.isArray(orders)) setFetchedOrders(orders);
+        })
+        .catch(() => {});
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [props.accessToken, props.activeUrgentOrders]);
+
+  const urgentOrders = useMemo(() => {
+    const list = props.activeUrgentOrders || fetchedOrders;
+    return list.filter(
+      o =>
+        o.current_status === 'pickup_otp_pending' ||
+        o.current_status === 'delivery_otp_pending',
+    );
+  }, [props.activeUrgentOrders, fetchedOrders]);
+
+  const selectedAddress = props.addresses.find(
+    address => address.id === props.selectedAddressId,
   );
 
-  return <SafeAreaView style={styles.page}><StatusBar barStyle="dark-content" /><ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-    <View style={styles.topRow}>
-      <TouchableOpacity accessibilityRole="button" accessibilityLabel="Choose delivery address" style={styles.addressButton} onPress={() => setAddressMenuOpen(value => !value)}><Text style={styles.eyebrow}>DELIVER TO</Text><Text numberOfLines={1} style={styles.addressText}>{selectedAddress?.label || selectedAddress?.address_line1 || 'Choose an address'} ▾</Text></TouchableOpacity>
-      <TouchableOpacity accessibilityRole="button" accessibilityLabel="Notifications" style={styles.iconButton} onPress={props.onOpenNotifications}><Text>🔔</Text></TouchableOpacity>
-      <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Cart with ${props.cartItemCount} items`} style={styles.iconButton} onPress={props.onOpenCart}><Text>🛒 {props.cartItemCount || ''}</Text></TouchableOpacity>
-    </View>
-    {addressMenuOpen ? <View style={styles.menu}>{props.addresses.map(address => <TouchableOpacity key={address.id} style={styles.menuItem} onPress={() => {props.onSelectAddress(address.id); setAddressMenuOpen(false);}}><Text style={styles.menuTitle}>{address.label || 'Saved address'}</Text><Text numberOfLines={1} style={styles.muted}>{address.address_line1}</Text></TouchableOpacity>)}<TouchableOpacity style={styles.menuItem} onPress={props.onManageAddresses}><Text style={styles.link}>{props.addresses.length ? 'Manage addresses' : 'Add delivery address'} →</Text></TouchableOpacity></View> : null}
-    <Text style={styles.welcome}>{props.customerName ? `Welcome ${props.customerName}` : 'Welcome'}</Text>
-    <Text style={styles.title}>Laundry care, made simple</Text><Text style={styles.subtitle}>Choose a category to see available services.</Text>
-    <Text style={styles.sectionTitle}>Service categories</Text>
-    {props.servicesLoading ? <ActivityIndicator accessibilityLabel="Loading services" /> : null}
-    {props.servicesError ? <View style={styles.errorCard}><Text style={styles.error}>{props.servicesError}</Text><TouchableOpacity onPress={props.onRetryServices}><Text style={styles.link}>Try again</Text></TouchableOpacity></View> : null}
-    {!props.servicesLoading && !props.servicesError && !props.categories.length ? <Text style={styles.empty}>No services are available right now.</Text> : null}
-    <View style={styles.categories}>{props.categories.map(category => <TouchableOpacity key={`${category.id ?? ''}-${category.name}`} accessibilityRole="button" accessibilityState={{selected: selectedCategory === category.name}} style={[styles.categoryCard, selectedCategory === category.name && styles.categoryCardSelected]} onPress={() => setSelectedCategory(category.name)}><Text style={styles.categoryName}>{category.name}</Text><Text style={styles.muted}>{category.count} service{category.count === 1 ? '' : 's'}</Text></TouchableOpacity>)}</View>
-    {selectedCategory ? <View style={styles.serviceSection}><Text style={styles.sectionTitle}>{selectedCategory}</Text>{visibleServices.length ? visibleServices.map(service => {const quantity = props.getQuantity(service.id); return <View key={service.id} style={styles.serviceCard}><View style={styles.flex}><Text style={styles.serviceName}>{service.name}</Text>{service.description ? <Text style={styles.muted}>{service.description}</Text> : null}<Text style={styles.price}>{service.price == null ? 'Price after inspection' : `₹${service.price.toFixed(2)} / ${service.pricingUnit}`}</Text></View>{quantity ? <View style={styles.stepper}><TouchableOpacity accessibilityLabel={`Remove ${service.name}`} onPress={() => props.onUpdateQuantity(service, -1)}><Text style={styles.step}>−</Text></TouchableOpacity><Text style={styles.quantity}>{quantity}</Text><TouchableOpacity accessibilityLabel={`Add ${service.name}`} onPress={() => props.onUpdateQuantity(service, 1)}><Text style={styles.step}>＋</Text></TouchableOpacity></View> : <TouchableOpacity style={styles.addButton} accessibilityLabel={`Add ${service.name}`} onPress={() => props.onUpdateQuantity(service, 1)}><Text style={styles.addText}>Add</Text></TouchableOpacity>}</View>;}) : <Text style={styles.empty}>{props.servicesLoading ? 'Loading services…' : props.servicesError ? 'Retry loading services to continue.' : 'No services are available in this category.'}</Text>}</View> : props.categories.length > 0 && !props.servicesLoading ? <View style={styles.prompt}><Text style={styles.promptTitle}>Select a category</Text><Text style={styles.muted}>Service items will appear here after you choose one.</Text></View> : null}
-  </ScrollView></SafeAreaView>;
+  const visibleServices = useMemo(() => {
+    if (selectedCategory) {
+      return props.services.filter(
+        service => service.categoryName === selectedCategory,
+      );
+    }
+    return [];
+  }, [props.services, selectedCategory]);
+
+  const handleCategoryPress = (categoryName: string) => {
+    if (selectedCategory === categoryName) {
+      setSelectedCategory(null);
+    } else {
+      setSelectedCategory(categoryName);
+      props.onOpenCategory?.(categoryName);
+    }
+  };
+
+  const handleBookPickupPress = () => {
+    if (props.categories.length > 0) {
+      setSelectedCategory(props.categories[0].name);
+    } else if (props.cartItemCount > 0) {
+      props.onOpenCart();
+    }
+  };
+
+  return (
+    <SafeAreaView style={styles.page}>
+      <StatusBar barStyle="dark-content" />
+
+      {/* Main Scrollable Content */}
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}>
+        
+        {/* Top Header */}
+        <View style={styles.topHeader}>
+          <View style={styles.brandContainer}>
+            <Text style={styles.brandTitle}>Bright & White</Text>
+            <Text style={styles.brandTagline}>Premium Garment Care</Text>
+          </View>
+          <View style={styles.headerActions}>
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="Notifications"
+              style={styles.iconButton}
+              onPress={props.onOpenNotifications}>
+              <AppIcon name="info" size={20} color={colors.textPrimary} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel={`Cart with ${props.cartItemCount} items`}
+              style={styles.iconButton}
+              onPress={props.onOpenCart}>
+              <AppIcon name="cart" size={20} color={colors.textPrimary} />
+              {props.cartItemCount > 0 ? (
+                <View style={styles.cartBadge}>
+                  <Text style={styles.cartBadgeText}>
+                    {props.cartItemCount > 99 ? '99+' : props.cartItemCount}
+                  </Text>
+                </View>
+              ) : null}
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Deliver To Location Selector Card */}
+        <TouchableOpacity
+          accessibilityRole="button"
+          accessibilityLabel="Choose delivery address"
+          style={styles.locationCard}
+          onPress={() => setAddressMenuOpen(open => !open)}>
+          <View style={styles.locationIconBox}>
+            <AppIcon name="location" size={18} color={colors.textPrimary} />
+          </View>
+          <View style={styles.locationInfo}>
+            <Text style={styles.locationEyebrow}>DELIVER TO</Text>
+            <Text numberOfLines={1} style={styles.locationText}>
+              {selectedAddress?.label || selectedAddress?.address_line1 || 'Choose an address'} ▾
+            </Text>
+          </View>
+        </TouchableOpacity>
+
+        {/* Address Selection Dropdown Menu */}
+        {addressMenuOpen ? (
+          <View style={styles.addressDropdown}>
+            <Text style={styles.dropdownSectionTitle}>Your Saved Locations</Text>
+            {props.addresses.map(address => (
+              <TouchableOpacity
+                key={address.id}
+                accessibilityRole="button"
+                accessibilityLabel={address.label || address.address_line1}
+                style={[
+                  styles.addressItem,
+                  props.selectedAddressId === address.id && styles.addressItemSelected,
+                ]}
+                onPress={() => {
+                  props.onSelectAddress(address.id);
+                  setAddressMenuOpen(false);
+                }}>
+                <View style={styles.addressItemTextContainer}>
+                  <Text style={styles.addressItemLabel}>
+                    {address.label || 'Saved address'}
+                  </Text>
+                  <Text numberOfLines={1} style={styles.addressItemLine}>
+                    {address.address_line1}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            ))}
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="Manage addresses"
+              style={styles.manageAddressButton}
+              onPress={() => {
+                setAddressMenuOpen(false);
+                props.onManageAddresses();
+              }}>
+              <View style={styles.manageAddressRow}>
+                <Text style={styles.manageAddressText}>
+                  {props.addresses.length ? 'Manage addresses' : 'Add delivery address'}
+                </Text>
+                <AppIcon name="arrow-right" size={14} color={colors.primary} />
+              </View>
+            </TouchableOpacity>
+          </View>
+        ) : null}
+
+        {/* Active Urgent Order Action Cards (Driver Arrived / OTP Required) */}
+        {urgentOrders.map(order => {
+          const isPickup = order.current_status === 'pickup_otp_pending';
+          return (
+            <View
+              key={order.id}
+              accessibilityRole="region"
+              accessibilityLabel={`Driver arrived for Order ${order.order_number}`}
+              style={styles.urgentActionCard}>
+              <View style={styles.urgentCardHeader}>
+                <View style={styles.urgentBadge}>
+                  <AppIcon name="truck" size={14} color={colors.info} strokeWidth={2} />
+                  <Text style={styles.urgentBadgeText}>DRIVER ARRIVED</Text>
+                </View>
+                <Text style={styles.urgentOrderNumber}>Order {order.order_number}</Text>
+              </View>
+              <Text style={styles.urgentMessage}>
+                {isPickup
+                  ? 'Your pickup driver has arrived. Please provide your pickup OTP.'
+                  : 'Your delivery driver has arrived with your clean garments. Please provide your delivery OTP.'}
+              </Text>
+              <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel={`View Order ${order.order_number}`}
+                style={styles.urgentActionBtn}
+                onPress={() => props.onOpenOrder?.(order.id)}>
+                <Text style={styles.urgentActionBtnText}>
+                  {isPickup ? 'Give Pickup OTP →' : 'Give Delivery OTP →'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          );
+        })}
+
+        {/* Hero Banner / Welcome Section */}
+        <View style={styles.heroCard}>
+          <View style={styles.heroHeader}>
+            <Text style={styles.heroGreeting}>
+              {props.customerName ? `Welcome ${props.customerName}` : 'Welcome'}
+            </Text>
+            <Text style={styles.heroHeadline}>Laundry care, made simple</Text>
+          </View>
+          <Text style={styles.heroDescription}>
+            We pick up your clothes, clean them with care, and deliver them back to your doorstep.
+          </Text>
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel="Book a pickup"
+            style={styles.heroCta}
+            onPress={handleBookPickupPress}>
+            <View style={styles.heroCtaRow}>
+              <Text style={styles.heroCtaText}>BOOK A PICKUP</Text>
+              <AppIcon name="arrow-right" size={16} color={colors.textInverse} strokeWidth={2.5} />
+            </View>
+          </TouchableOpacity>
+        </View>
+
+        {/* Service Categories Section */}
+        <View style={styles.sectionHeaderRow}>
+          <Text style={styles.sectionTitle}>Service categories</Text>
+          <Text style={styles.sectionSubtitle}>Choose a category to see available services.</Text>
+        </View>
+
+        {/* Loading State */}
+        {props.servicesLoading ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator accessibilityLabel="Loading services" size="small" color={colors.primary} />
+            <Text style={styles.loadingText}>Loading catalogue...</Text>
+          </View>
+        ) : null}
+
+        {/* Error State */}
+        {props.servicesError ? (
+          <View style={styles.errorCard}>
+            <Text style={styles.errorText}>{props.servicesError}</Text>
+            <TouchableOpacity style={styles.retryButton} onPress={props.onRetryServices}>
+              <Text style={styles.retryButtonText}>Try again</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
+
+        {/* Empty Catalogue State */}
+        {!props.servicesLoading && !props.servicesError && !props.categories.length ? (
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyText}>No services are available right now.</Text>
+          </View>
+        ) : null}
+
+        {/* 2-Column Responsive Categories Grid */}
+        <View style={styles.categoriesGrid}>
+          {props.categories.map(category => {
+            const isSelected = selectedCategory === category.name;
+            const iconName = getCategoryIconName(category.name);
+            return (
+              <TouchableOpacity
+                key={`${category.id ?? ''}-${category.name}`}
+                accessibilityRole="button"
+                accessibilityState={{selected: isSelected}}
+                style={[
+                  styles.categoryCard,
+                  isSelected && styles.categoryCardSelected,
+                ]}
+                onPress={() => handleCategoryPress(category.name)}>
+                <View style={styles.categoryCardTop}>
+                  <View style={styles.catIconContainer}>
+                    <AppIcon name={iconName} size={20} color={colors.primary} />
+                  </View>
+                  {isSelected ? (
+                    <View style={styles.categoryActiveBadge}>
+                      <Text style={styles.categoryActiveBadgeText}>Selected</Text>
+                    </View>
+                  ) : null}
+                </View>
+                <Text numberOfLines={2} style={styles.categoryName}>
+                  {category.name}
+                </Text>
+                <Text style={styles.categoryCount}>
+                  {category.count} service{category.count === 1 ? '' : 's'}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
+        {/* Active Category Services View */}
+        {selectedCategory ? (
+          <View style={styles.serviceSection}>
+            <View style={styles.selectedCategoryHeader}>
+              <Text style={styles.selectedCategoryTitle}>{selectedCategory}</Text>
+              <TouchableOpacity onPress={() => setSelectedCategory(null)}>
+                <Text style={styles.closeCategoryText}>Close</Text>
+              </TouchableOpacity>
+            </View>
+
+            {visibleServices.length ? (
+              visibleServices.map(service => {
+                const quantity = props.getQuantity(service.id);
+                const priceFormatted =
+                  service.price == null
+                    ? 'Price after inspection'
+                    : `₹${service.price.toFixed(2)} / ${service.pricingUnit}`;
+
+                return (
+                  <View key={service.id} style={styles.serviceCard}>
+                    <View style={styles.serviceInfo}>
+                      <Text style={styles.serviceName}>{service.name}</Text>
+                      {service.description ? (
+                        <Text style={styles.serviceDescription} numberOfLines={2}>
+                          {service.description}
+                        </Text>
+                      ) : null}
+                      <Text style={styles.servicePrice}>{priceFormatted}</Text>
+                    </View>
+
+                    <View style={styles.serviceAction}>
+                      {quantity > 0 ? (
+                        <View style={styles.stepperContainer}>
+                          <TouchableOpacity
+                            accessibilityLabel={`Remove ${service.name}`}
+                            style={styles.stepperButton}
+                            onPress={() => props.onUpdateQuantity(service, -1)}>
+                            <AppIcon name="minus" size={14} color={colors.textPrimary} strokeWidth={2.5} />
+                          </TouchableOpacity>
+                          <Text style={styles.stepperQuantity}>{quantity}</Text>
+                          <TouchableOpacity
+                            accessibilityLabel={`Add ${service.name}`}
+                            style={styles.stepperButton}
+                            onPress={() => props.onUpdateQuantity(service, 1)}>
+                            <AppIcon name="plus" size={14} color={colors.textPrimary} strokeWidth={2.5} />
+                          </TouchableOpacity>
+                        </View>
+                      ) : (
+                        <TouchableOpacity
+                          accessibilityRole="button"
+                          accessibilityLabel={`Add ${service.name}`}
+                          style={styles.addButton}
+                          onPress={() => props.onUpdateQuantity(service, 1)}>
+                          <Text style={styles.addButtonText}>Add</Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  </View>
+                );
+              })
+            ) : (
+              <View style={styles.emptyContainer}>
+                <Text style={styles.emptyText}>
+                  {props.servicesLoading
+                    ? 'Loading services...'
+                    : props.servicesError
+                    ? 'Retry loading services to continue.'
+                    : 'No services are available in this category.'}
+                </Text>
+              </View>
+            )}
+          </View>
+        ) : null}
+      </ScrollView>
+    </SafeAreaView>
+  );
 }
-const styles = StyleSheet.create({page: {flex: 1, backgroundColor: '#FAF9F6'}, content: {padding: 18, paddingBottom: 30}, flex: {flex: 1}, topRow: {flexDirection: 'row', alignItems: 'center', gap: 9}, addressButton: {flex: 1, borderRadius: 14, backgroundColor: '#fff', padding: 12, borderWidth: 1, borderColor: '#E4E1DA'}, eyebrow: {fontSize: 10, letterSpacing: 1, color: '#67635B', fontWeight: '700'}, addressText: {fontWeight: '700', marginTop: 3}, iconButton: {minWidth: 42, minHeight: 42, alignItems: 'center', justifyContent: 'center', borderRadius: 13, backgroundColor: '#fff', borderWidth: 1, borderColor: '#E4E1DA'}, welcome: {fontSize: 17, fontWeight: '800', color: '#4F4B44', marginTop: 24}, title: {fontSize: 30, lineHeight: 36, fontWeight: '800', marginTop: 8, color: '#161513'}, subtitle: {fontSize: 15, color: '#67635B', marginTop: 6}, sectionTitle: {fontSize: 19, fontWeight: '800', marginTop: 23, marginBottom: 11}, categories: {flexDirection: 'row', flexWrap: 'wrap', gap: 10}, categoryCard: {width: '48%', minHeight: 72, justifyContent: 'center', backgroundColor: '#fff', borderWidth: 1, borderColor: '#E4E1DA', borderRadius: 18, paddingVertical: 11, paddingHorizontal: 14}, categoryCardSelected: {borderColor: '#111', borderWidth: 2, backgroundColor: '#F3F0E9'}, categoryName: {fontWeight: '800', marginBottom: 3}, menu: {borderRadius: 14, borderWidth: 1, borderColor: '#D9D5CD', backgroundColor: '#fff', marginTop: 6, overflow: 'hidden'}, menuItem: {padding: 13, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#E8E5DF'}, menuTitle: {fontWeight: '700'}, serviceSection: {marginTop: 3}, serviceCard: {flexDirection: 'row', alignItems: 'center', gap: 12, padding: 15, borderRadius: 16, backgroundColor: '#fff', borderWidth: 1, borderColor: '#E4E1DA', marginBottom: 10}, serviceName: {fontWeight: '800', fontSize: 16}, price: {marginTop: 7, fontWeight: '700'}, addButton: {backgroundColor: '#111', borderRadius: 11, paddingHorizontal: 17, paddingVertical: 10}, addText: {color: '#fff', fontWeight: '800'}, stepper: {flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderColor: '#111', borderRadius: 11, paddingHorizontal: 8, paddingVertical: 6}, step: {fontSize: 20, fontWeight: '700'}, quantity: {minWidth: 16, textAlign: 'center', fontWeight: '800'}, prompt: {padding: 22, marginTop: 18, backgroundColor: '#EFECE5', borderRadius: 16, alignItems: 'center'}, promptTitle: {fontSize: 17, fontWeight: '800', marginBottom: 5}, muted: {color: '#6D685F'}, link: {fontWeight: '800', color: '#151515'}, empty: {color: '#6D685F', paddingVertical: 12}, errorCard: {padding: 15, backgroundColor: '#FFF2F0', borderRadius: 14, gap: 8}, error: {color: '#9A241E'}});
+
+const styles = StyleSheet.create({
+  page: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
+  scrollContent: {
+    paddingHorizontal: spacing.lg,
+    paddingBottom: 40,
+  },
+  topHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: spacing.md,
+  },
+  brandContainer: {
+    flex: 1,
+  },
+  brandTitle: {
+    fontSize: 20,
+    fontWeight: '900',
+    color: colors.textPrimary,
+    letterSpacing: -0.3,
+  },
+  brandTagline: {
+    fontSize: 11,
+    color: colors.textMuted,
+    fontWeight: '600',
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  iconButton: {
+    width: 42,
+    height: 42,
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...shadows.sm,
+  },
+  cartBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    backgroundColor: colors.primary,
+    borderRadius: borderRadius.full,
+    minWidth: 18,
+    height: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
+  cartBadgeText: {
+    color: colors.textInverse,
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  locationCard: {
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: spacing.md,
+    ...shadows.sm,
+  },
+  locationIconBox: {
+    width: 36,
+    height: 36,
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.surfaceSubtle,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: spacing.md,
+  },
+  locationInfo: {
+    flex: 1,
+  },
+  locationEyebrow: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: colors.textMuted,
+    letterSpacing: 0.5,
+  },
+  locationText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.textPrimary,
+    marginTop: 1,
+  },
+  addressDropdown: {
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+    ...shadows.md,
+  },
+  dropdownSectionTitle: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: colors.textMuted,
+    marginBottom: spacing.sm,
+  },
+  addressItem: {
+    paddingVertical: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  addressItemSelected: {
+    backgroundColor: colors.surfaceSubtle,
+  },
+  addressItemTextContainer: {
+    flex: 1,
+  },
+  addressItemLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.textPrimary,
+  },
+  addressItemLine: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginTop: 1,
+  },
+  manageAddressButton: {
+    marginTop: spacing.md,
+    paddingVertical: spacing.xs,
+  },
+  manageAddressRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  manageAddressText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.primary,
+  },
+  urgentActionCard: {
+    backgroundColor: colors.infoSurface,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colors.infoBorder,
+    padding: spacing.lg,
+    marginBottom: spacing.md,
+  },
+  urgentCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.xs,
+  },
+  urgentBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.xs,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderWidth: 1,
+    borderColor: colors.infoBorder,
+  },
+  urgentBadgeText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: colors.info,
+    letterSpacing: 0.5,
+  },
+  urgentOrderNumber: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: colors.textPrimary,
+  },
+  urgentMessage: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    lineHeight: 18,
+    marginVertical: spacing.sm,
+  },
+  urgentActionBtn: {
+    backgroundColor: colors.primary,
+    borderRadius: borderRadius.md,
+    paddingVertical: spacing.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 40,
+  },
+  urgentActionBtnText: {
+    color: colors.textInverse,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  heroCard: {
+    backgroundColor: colors.primary,
+    borderRadius: borderRadius.xl,
+    padding: spacing.xl,
+    marginBottom: spacing.xl,
+    ...shadows.md,
+  },
+  heroHeader: {
+    marginBottom: spacing.sm,
+  },
+  heroGreeting: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#9CA3AF',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  heroHeadline: {
+    fontSize: 22,
+    fontWeight: '900',
+    color: colors.textInverse,
+    marginTop: 2,
+  },
+  heroDescription: {
+    fontSize: 13,
+    color: '#D1D5DB',
+    lineHeight: 18,
+    marginBottom: spacing.lg,
+  },
+  heroCta: {
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.md,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+    alignSelf: 'flex-start',
+  },
+  heroCtaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  heroCtaText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: colors.primary,
+    letterSpacing: 0.5,
+  },
+  sectionHeaderRow: {
+    marginBottom: spacing.md,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: colors.textPrimary,
+  },
+  sectionSubtitle: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginTop: 2,
+  },
+  categoriesGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.md,
+    marginBottom: spacing.xl,
+  },
+  categoryCard: {
+    width: '47.5%',
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.md,
+    ...shadows.sm,
+  },
+  categoryCardSelected: {
+    borderColor: colors.primary,
+    backgroundColor: colors.surfaceSubtle,
+    ...shadows.md,
+  },
+  categoryCardTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacing.sm,
+  },
+  catIconContainer: {
+    width: 36,
+    height: 36,
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.surfaceSubtle,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  categoryActiveBadge: {
+    backgroundColor: colors.primary,
+    borderRadius: borderRadius.xs,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  categoryActiveBadgeText: {
+    color: colors.textInverse,
+    fontSize: 9,
+    fontWeight: '800',
+  },
+  categoryName: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: colors.textPrimary,
+    lineHeight: 17,
+  },
+  categoryCount: {
+    fontSize: 11,
+    color: colors.textMuted,
+    marginTop: 4,
+  },
+  serviceSection: {
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.lg,
+    marginBottom: spacing.xl,
+  },
+  selectedCategoryHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.md,
+    paddingBottom: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  selectedCategoryTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: colors.textPrimary,
+  },
+  closeCategoryText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.textMuted,
+  },
+  serviceCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  serviceInfo: {
+    flex: 1,
+    paddingRight: spacing.md,
+  },
+  serviceName: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.textPrimary,
+  },
+  serviceDescription: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginTop: 2,
+    lineHeight: 16,
+  },
+  servicePrice: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: colors.textPrimary,
+    marginTop: 4,
+  },
+  serviceAction: {
+    alignItems: 'flex-end',
+  },
+  addButton: {
+    backgroundColor: colors.primary,
+    borderRadius: borderRadius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    minHeight: 34,
+    minWidth: 60,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addButtonText: {
+    color: colors.textInverse,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  stepperContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.surfaceSubtle,
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 2,
+  },
+  stepperButton: {
+    width: 30,
+    height: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: borderRadius.xs,
+    backgroundColor: colors.surface,
+  },
+  stepperQuantity: {
+    minWidth: 24,
+    textAlign: 'center',
+    fontSize: 13,
+    fontWeight: '800',
+    color: colors.textPrimary,
+  },
+  loadingContainer: {
+    padding: spacing.xl,
+    alignItems: 'center',
+  },
+  loadingText: {
+    fontSize: 13,
+    color: colors.textMuted,
+    marginTop: spacing.sm,
+  },
+  errorCard: {
+    backgroundColor: colors.dangerSurface,
+    borderColor: colors.dangerBorder,
+    borderWidth: 1,
+    borderRadius: borderRadius.md,
+    padding: spacing.md,
+    alignItems: 'center',
+    marginVertical: spacing.md,
+  },
+  errorText: {
+    fontSize: 13,
+    color: colors.dangerText,
+    textAlign: 'center',
+  },
+  retryButton: {
+    marginTop: spacing.sm,
+    backgroundColor: colors.primary,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: borderRadius.sm,
+  },
+  retryButtonText: {
+    color: colors.textInverse,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  emptyContainer: {
+    padding: spacing.xl,
+    alignItems: 'center',
+  },
+  emptyText: {
+    fontSize: 13,
+    color: colors.textMuted,
+    textAlign: 'center',
+  },
+});

@@ -1,10 +1,12 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
   Param,
   ParseUUIDPipe,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -19,6 +21,28 @@ export class OrdersController {
   constructor(
     private readonly orders: OrdersService,
   ) {}
+
+  @Get('serviceability')
+  async checkServiceability(
+    @Req() req: any,
+    @Query('pickupAddressId') pickupAddressId: string,
+  ) {
+    if (!pickupAddressId) {
+      throw new BadRequestException('pickupAddressId is required');
+    }
+    const result = await this.orders.checkServiceability(
+      req.user.id,
+      pickupAddressId,
+    );
+    if (!result.serviceable && result.reason === 'INVALID_PINCODE') {
+      throw new BadRequestException({
+        statusCode: 400,
+        message: result.message || 'Please enter a valid 6-digit pincode.',
+        error: 'INVALID_PINCODE',
+      });
+    }
+    return result;
+  }
 
   @Get()
   list(@Req() req: any) {

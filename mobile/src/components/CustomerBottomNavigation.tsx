@@ -1,7 +1,86 @@
 import React from 'react';
 import {StyleSheet, Text, TouchableOpacity, View} from 'react-native';
-export type CustomerTab = 'home' | 'orders' | 'packages' | 'account';
-type Props = {active: CustomerTab; onHome: () => void; onOrders: () => void; onPackages: () => void; onAccount: () => void};
-const tabs: {key: CustomerTab; label: string; icon: string}[] = [{key: 'home', label: 'Home', icon: '⌂'}, {key: 'orders', label: 'Orders', icon: '▤'}, {key: 'packages', label: 'Packages', icon: '◇'}, {key: 'account', label: 'Account', icon: '○'}];
-export default function CustomerBottomNavigation({active, onHome, onOrders, onPackages, onAccount}: Props) {const handlers = {home: onHome, orders: onOrders, packages: onPackages, account: onAccount}; return <View accessibilityRole="tablist" style={styles.bar}>{tabs.map(tab => <TouchableOpacity key={tab.key} accessibilityRole="tab" accessibilityState={{selected: tab.key === active}} accessibilityLabel={tab.label} style={styles.tab} onPress={handlers[tab.key]}><Text style={[styles.icon, tab.key === active && styles.active]}>{tab.icon}</Text><Text style={[styles.label, tab.key === active && styles.active]}>{tab.label}</Text></TouchableOpacity>)}</View>;}
-const styles = StyleSheet.create({bar: {height: 67, flexDirection: 'row', backgroundColor: '#fff', borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#CFCBC3'}, tab: {flex: 1, alignItems: 'center', justifyContent: 'center', gap: 3}, icon: {fontSize: 20, color: '#777'}, label: {fontSize: 11, color: '#777', fontWeight: '600'}, active: {color: '#111', fontWeight: '900'}});
+import AppIcon, {IconName} from './AppIcon';
+import {colors, spacing, typography} from '../theme/designSystem';
+
+export type CustomerTab = 'home' | 'orders' | 'account';
+
+type Props = {
+  active: CustomerTab;
+  onHome: () => void;
+  onOrders: () => void;
+  onAccount: () => void;
+  onPackages?: () => void;
+};
+
+const tabs: {key: CustomerTab; label: string; icon: IconName}[] = [
+  {key: 'home', label: 'Home', icon: 'wash'},
+  {key: 'orders', label: 'Orders', icon: 'box'},
+  {key: 'account', label: 'Account', icon: 'user'},
+];
+
+export default function CustomerBottomNavigation({
+  active,
+  onHome,
+  onOrders,
+  onAccount,
+}: Props) {
+  const handlers = {
+    home: onHome,
+    orders: onOrders,
+    account: onAccount,
+  };
+
+  return (
+    <View accessibilityRole="tablist" style={styles.bar}>
+      {tabs.map(tab => {
+        const isSelected = tab.key === active;
+        return (
+          <TouchableOpacity
+            key={tab.key}
+            accessibilityRole="tab"
+            accessibilityState={{selected: isSelected}}
+            accessibilityLabel={tab.label}
+            style={styles.tab}
+            onPress={handlers[tab.key]}>
+            <AppIcon
+              name={tab.icon}
+              size={20}
+              color={isSelected ? colors.primary : colors.textMuted}
+              strokeWidth={isSelected ? 2.5 : 1.75}
+            />
+            <Text style={[styles.label, isSelected && styles.active]}>
+              {tab.label}
+            </Text>
+          </TouchableOpacity>
+        );
+      })}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  bar: {
+    height: 60,
+    flexDirection: 'row',
+    backgroundColor: colors.surface,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
+  },
+  tab: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 3,
+    minHeight: 44,
+  },
+  label: {
+    fontSize: 11,
+    color: colors.textMuted,
+    fontWeight: '600',
+  },
+  active: {
+    color: colors.primary,
+    fontWeight: '800',
+  },
+});

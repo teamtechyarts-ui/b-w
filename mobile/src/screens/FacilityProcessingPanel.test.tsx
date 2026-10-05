@@ -194,9 +194,9 @@ test('Facility Staff sees QC controls, must explain failure, and history survive
     ).toBeTruthy(),
   );
   expect(decide).not.toHaveBeenCalled();
-  await fireEvent.press(view.getByText('○ stain'));
+  await fireEvent.press(view.getByLabelText('stain'));
   await fireEvent.changeText(view.getByLabelText('QC reason'), 'Stain remains');
-  await fireEvent.press(view.getByText('☐ Shirt'));
+  await fireEvent.press(view.getByLabelText('Shirt'));
   await fireEvent.press(view.getByText('Fail QC — require rewash'));
   await waitFor(() =>
     expect(view.getByText('Cycle 0 · Failed — rewash required')).toBeTruthy(),
@@ -249,4 +249,61 @@ test('Facility Staff can approve QC and sees the rewash cap', async () => {
   ).toBeTruthy();
   expect(decide).not.toHaveBeenCalled();
   expect(staff.getByText('Fail QC — require rewash').props).toBeTruthy();
+});
+
+test('shows initial ready to start processing state for verified order with empty stages', async () => {
+  get.mockResolvedValueOnce(empty);
+  const view = await render(
+    <FacilityProcessingPanel
+      accessToken="token"
+      orderId="order-1"
+      onChanged={jest.fn()}
+    />,
+  );
+  await waitFor(() =>
+    expect(view.getByText('Ready to start processing')).toBeTruthy(),
+  );
+  expect(
+    view.getByText(
+      'Intake verification is complete. Start the first processing stage below.',
+    ),
+  ).toBeTruthy();
+  expect(view.getByText('Start Wash')).toBeTruthy();
+});
+
+test('renders full processing history with completed and in-progress stages', async () => {
+  get.mockResolvedValueOnce({
+    ...empty,
+    orderStatus: 'processing',
+    nextStage: null,
+    stages: [
+      {
+        id: 'stage-1',
+        operation_type: 'washing',
+        started_at: '2026-10-03T10:00:00Z',
+        completed_at: '2026-10-03T10:30:00Z',
+        rewash_cycle: 0,
+      },
+      {
+        id: 'stage-2',
+        operation_type: 'drying',
+        started_at: '2026-10-03T10:35:00Z',
+        completed_at: null,
+        rewash_cycle: 0,
+      },
+    ],
+  });
+  const view = await render(
+    <FacilityProcessingPanel
+      accessToken="token"
+      orderId="order-1"
+      onChanged={jest.fn()}
+    />,
+  );
+  await waitFor(() =>
+    expect(view.getByText('Cycle 0 · Wash · Completed')).toBeTruthy(),
+  );
+  expect(view.getByText('Cycle 0 · Dry · In progress')).toBeTruthy();
+  expect(view.getByText('Complete Dry')).toBeTruthy();
+  expect(view.queryByText('Ready to start processing')).toBeNull();
 });

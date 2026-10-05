@@ -39,6 +39,10 @@ export type DriverJobDetail = DriverJob & {
     weight_kg: number | null;
     customer_notes: string | null;
   }[];
+  facilityHandedOver?: boolean;
+  facilityCollected?: boolean;
+  facilityHandedOverAt?: string | null;
+  facilityCollectedAt?: string | null;
 };
 
 export type DriverDashboard = {
@@ -46,10 +50,14 @@ export type DriverDashboard = {
   summary: {
     pickups: number;
     deliveries: number;
+    availablePickups?: number;
+    availableDeliveries?: number;
     pending: number;
     inProgress: number;
     completed: number;
   };
+  availablePickups?: DriverJob[];
+  availableDeliveries?: DriverJob[];
   pickups: DriverJob[];
   deliveries: DriverJob[];
 };
@@ -65,6 +73,22 @@ export type DriverOrderLookup = {
 
 export function getDriverDashboard(accessToken: string) {
   return apiRequest<DriverDashboard>('/drivers/me/dashboard', { accessToken });
+}
+
+export function claimDriverJob(
+  accessToken: string,
+  orderId: string,
+  jobType: 'pickup' | 'delivery',
+) {
+  return apiRequest<{
+    success: boolean;
+    assignment: any;
+    orderStatus: string;
+  }>(`/drivers/me/jobs/${encodeURIComponent(orderId)}/claim`, {
+    accessToken,
+    method: 'POST',
+    body: { jobType },
+  });
 }
 
 export function lookupDriverOrder(accessToken: string, code: string) {
@@ -144,6 +168,24 @@ export function beginFacilityTransit(
 ) {
   return apiRequest(
     `/driver-assignments/${encodeURIComponent(assignmentId)}/facility-transit`,
+    {
+      accessToken,
+      method: 'POST',
+    },
+  );
+}
+
+export function confirmDriverFacilityHandover(
+  accessToken: string,
+  assignmentId: string,
+) {
+  return apiRequest<{
+    assignmentId: string;
+    orderId: string;
+    facilityCollected: boolean;
+    confirmedAt: string;
+  }>(
+    `/driver-assignments/${encodeURIComponent(assignmentId)}/confirm-facility-handover`,
     {
       accessToken,
       method: 'POST',

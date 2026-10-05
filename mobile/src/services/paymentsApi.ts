@@ -1,21 +1,16 @@
 import {apiRequest} from './api';
 
 export type CreatePaymentOrderResponse = {
+  orderId?: string;
   paymentOrderId: string;
-  razorpayOrderId?: string;
-  amount?: number;
-  currency?: string;
-  keyId?: string;
-  provider?: string;
-
-  [key: string]: unknown;
-};
-
-export type MockCaptureResponse = {
   razorpayOrderId: string;
-  razorpayPaymentId: string;
-  razorpaySignature: string;
-
+  providerOrderId?: string;
+  amount: number;
+  currency: string;
+  keyId: string;
+  provider: string;
+  paymentMethod?: string;
+  reused?: boolean;
   [key: string]: unknown;
 };
 
@@ -77,42 +72,26 @@ export async function createPaymentOrder(
       },
     );
 
-  if (
-    !response.paymentOrderId
-  ) {
+  const paymentOrderId =
+    response.razorpayOrderId ||
+    response.paymentOrderId ||
+    (response as any).providerOrderId;
+
+  if (!paymentOrderId) {
     throw new Error(
-      'Payment order ID was not returned.',
+      typeof (response as any).message === 'string'
+        ? (response as any).message
+        : 'Online payment is temporarily unavailable. Please try again or choose Cash on Delivery.',
     );
   }
 
-  return response;
+  return {
+    ...response,
+    paymentOrderId: response.paymentOrderId || paymentOrderId,
+    razorpayOrderId: response.razorpayOrderId || (response as any).providerOrderId || paymentOrderId,
+  };
 }
 
-export async function captureMockPayment(
-  accessToken: string,
-  paymentOrderId: string,
-): Promise<MockCaptureResponse> {
-  const response =
-    await apiRequest<MockCaptureResponse>(
-      `/payments/mock/${paymentOrderId}/capture`,
-      {
-        method: 'POST',
-        accessToken,
-      },
-    );
-
-  if (
-    !response.razorpayOrderId ||
-    !response.razorpayPaymentId ||
-    !response.razorpaySignature
-  ) {
-    throw new Error(
-      'Mock payment response is incomplete.',
-    );
-  }
-
-  return response;
-}
 
 export async function verifyPayment(
   accessToken: string,
@@ -143,58 +122,4 @@ export async function verifyPayment(
   return response;
 }
 
-export async function completeMockPayment(
-  accessToken: string,
-  orderId: string,
-): Promise<VerifyPaymentResponse> {
-  const paymentOrder =
-    await createPaymentOrder(
-      accessToken,
-      orderId,
-    );
 
-  const capture =
-    await captureMockPayment(
-      accessToken,
-      paymentOrder.paymentOrderId,
-    );
-
-  return verifyPayment(
-    accessToken,
-    {
-      razorpayOrderId:
-        capture.razorpayOrderId,
-
-      razorpayPaymentId:
-        capture.razorpayPaymentId,
-
-      razorpaySignature:
-        capture.razorpaySignature,
-    },
-  );
-}
-
-export async function completeExistingMockPayment(
-  accessToken: string,
-  paymentOrderId: string,
-): Promise<VerifyPaymentResponse> {
-  const capture =
-    await captureMockPayment(
-      accessToken,
-      paymentOrderId,
-    );
-
-  return verifyPayment(
-    accessToken,
-    {
-      razorpayOrderId:
-        capture.razorpayOrderId,
-
-      razorpayPaymentId:
-        capture.razorpayPaymentId,
-
-      razorpaySignature:
-        capture.razorpaySignature,
-    },
-  );
-}

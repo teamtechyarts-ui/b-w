@@ -125,6 +125,30 @@ describe("LogisticsService facility transit", () => {
     expect(f.insert).not.toHaveBeenCalled();
   });
 
+  it("succeeds with facility transit even when Maps API is not configured or throws ServiceUnavailableException", async () => {
+    const f = fixture();
+    f.maps.getRoute.mockRejectedValue(
+      new Error("Google Maps API is not configured for this environment."),
+    );
+
+    await expect(
+      f.service.startFacilityTransit("driver-profile-1", "assignment-1"),
+    ).resolves.toMatchObject({
+      assignmentId: "assignment-1",
+      orderId: "order-1",
+      assignmentStatus: "arrived",
+      orderStatus: "in_transit_to_facility",
+      route: null,
+    });
+    expect(f.rpc).toHaveBeenCalledWith(
+      "start_facility_transit_atomic",
+      {
+        p_assignment_id: "assignment-1",
+        p_driver_id: "driver-1",
+      },
+    );
+  });
+
   it("reports the selected Maps provider when navigation starts", async () => {
     const f = fixture();
 

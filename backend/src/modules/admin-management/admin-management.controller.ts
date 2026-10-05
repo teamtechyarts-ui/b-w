@@ -12,7 +12,7 @@ export class AdminManagementController {
   @Get('customers') customers(@Query('search') search?: string) { return this.management.customers(search); }
   @Get('customers/:id') customer(@Param('id', ParseUUIDPipe) id: string) { return this.management.customer(id); }
   @Get('customers/:id/orders') orders(@Param('id', ParseUUIDPipe) id: string) { return this.management.orders(id); }
-  @Get('orders/:id') order(@Param('id', ParseUUIDPipe) id: string) { return this.management.order(id); }
+  @Get('orders/:id') order(@Param('id') id: string) { return this.management.order(id); }
   @Post('orders/:id/cancel') cancel(@Req() req: any, @Param('id', ParseUUIDPipe) id: string, @Body() dto: CancelOrderDto) {
     return this.management.cancel(req.user.id, id, dto.reason);
   }
