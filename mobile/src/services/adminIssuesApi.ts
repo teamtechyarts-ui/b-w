@@ -38,3 +38,11 @@ export const approveAdminRefund = (token: string, orderId: string, refundId: str
 export const rejectAdminRefund = (token: string, orderId: string, refundId: string, notes: string) =>
   apiRequest(`${base}/orders/${encodeURIComponent(orderId)}/refunds/${encodeURIComponent(refundId)}/reject`,
     {accessToken: token, method: 'POST', body: {notes: validNotes(notes)}});
+export async function executeAdminClaimRefund(token: string, orderId: string, paymentId: string, amount: number, notes: string) {
+  const refundReq: any = await requestAdminRefund(token, orderId, paymentId, amount, notes);
+  const refundId = refundReq?.id || refundReq?.refundId;
+  if (!refundId) {
+    throw new Error('Refund request was created but refund ID was not returned.');
+  }
+  return approveAdminRefund(token, orderId, refundId, notes);
+}

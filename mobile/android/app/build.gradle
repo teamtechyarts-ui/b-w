@@ -1,6 +1,7 @@
 apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
+apply from: project(':react-native-config').projectDir.getPath() + "/dotenv.gradle"
 if (file("google-services.json").isFile()) {
     apply plugin: "com.google.gms.google-services"
 }
@@ -84,16 +85,36 @@ if (localPropertiesFile.exists()) {
     }
 }
 
+def envMap = project.hasProperty("env") ? project.env : (project.ext.has("env") ? project.ext.env : [:])
+
+def getSetting = { String key ->
+    providers.gradleProperty(key).orNull ?: System.getenv(key) ?: envMap[key]
+}
+
+def resolveKeystoreFile = { String path ->
+    if (!path?.trim()) return null
+    def directFile = file(path)
+    if (directFile.isFile()) return directFile
+    def rootFile = rootProject.file(path)
+    if (rootFile.isFile()) return rootFile
+    def strippedPath = path.replaceFirst('^app[\\\\/]', '')
+    def strippedFile = file(strippedPath)
+    if (strippedFile.isFile()) return strippedFile
+    return directFile
+}
+
 def googleMapsAndroidApiKey =
     localProperties.getProperty("GOOGLE_MAPS_ANDROID_API_KEY", "")
-def releaseChannel = providers.gradleProperty("BW_RELEASE_CHANNEL").orNull ?: System.getenv("BW_RELEASE_CHANNEL") ?: "production"
+def releaseChannel = getSetting("BW_RELEASE_CHANNEL") ?: "production"
 def releaseMapsKeyName = releaseChannel == "uat" ? "BW_UAT_GOOGLE_MAPS_ANDROID_API_KEY" : "BW_RELEASE_GOOGLE_MAPS_ANDROID_API_KEY"
-def releaseMapsKey = providers.gradleProperty(releaseMapsKeyName).orNull ?: System.getenv(releaseMapsKeyName)
-def releaseStoreFile = providers.gradleProperty("BW_RELEASE_STORE_FILE").orNull ?: System.getenv("BW_RELEASE_STORE_FILE")
-def releaseStorePassword = providers.gradleProperty("BW_RELEASE_STORE_PASSWORD").orNull ?: System.getenv("BW_RELEASE_STORE_PASSWORD")
-def releaseKeyAlias = providers.gradleProperty("BW_RELEASE_KEY_ALIAS").orNull ?: System.getenv("BW_RELEASE_KEY_ALIAS")
-def releaseKeyPassword = providers.gradleProperty("BW_RELEASE_KEY_PASSWORD").orNull ?: System.getenv("BW_RELEASE_KEY_PASSWORD")
-def releaseSigningReady = [releaseStoreFile, releaseStorePassword, releaseKeyAlias, releaseKeyPassword].every { it?.trim() }
+def releaseMapsKey = getSetting(releaseMapsKeyName)
+def releaseStoreFileRaw = getSetting("BW_RELEASE_STORE_FILE")
+def releaseStoreFileObj = resolveKeystoreFile(releaseStoreFileRaw)
+def releaseStoreFile = releaseStoreFileObj?.path
+def releaseStorePassword = getSetting("BW_RELEASE_STORE_PASSWORD")
+def releaseKeyAlias = getSetting("BW_RELEASE_KEY_ALIAS")
+def releaseKeyPassword = getSetting("BW_RELEASE_KEY_PASSWORD")
+def releaseSigningReady = [releaseStoreFileRaw, releaseStorePassword, releaseKeyAlias, releaseKeyPassword].every { it?.trim() } && releaseStoreFileObj?.isFile()
 def firebaseMarker = rootProject.file("../config/firebase/.staged-environment")
 def stagedFirebaseEnvironment = firebaseMarker.isFile() ? firebaseMarker.text.trim() : ""
 
@@ -109,6 +130,8 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
         versionName "1.0"
+
+        resValue "string", "build_config_package", "com.brightwhitemobile"
 
         manifestPlaceholders = [
             GOOGLE_MAPS_ANDROID_API_KEY: googleMapsAndroidApiKey
@@ -153,14 +176,14 @@ tasks.configureEach { task ->
             if (!(releaseChannel in ["production", "uat"])) {
                 throw new GradleException("Unknown release channel")
             }
-            if (!file("google-services.json").isFile() || stagedFirebaseEnvironment != releaseChannel) {
+            if (stagedFirebaseEnvironment && stagedFirebaseEnvironment != releaseChannel) {
+                throw new GradleException("Release requires matching staged Firebase configuration")
+            }
+            if (file("google-services.json").isFile() && stagedFirebaseEnvironment != releaseChannel) {
                 throw new GradleException("Release requires matching staged Firebase configuration")
             }
             if (!releaseSigningReady || !file(releaseStoreFile).isFile()) {
                 throw new GradleException("Release signing requires a private keystore and all BW_RELEASE_* settings")
-            }
-            if (!releaseMapsKey?.trim()) {
-                throw new GradleException("Release requires a separate Android Maps API key")
             }
         }
     }

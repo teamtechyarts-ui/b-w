@@ -2,13 +2,13 @@ import React, {useCallback, useEffect, useState} from 'react';
 import {
   ActivityIndicator,
   RefreshControl,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
+import {SafeAreaView} from 'react-native-safe-area-context';
 import {openDriverNotification} from '../services/driverNotifications';
 import {
   CustomerNotification,

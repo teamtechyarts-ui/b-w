@@ -2,13 +2,15 @@ import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   RefreshControl,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import AppIcon from '../components/AppIcon';
+import { colors, spacing, borderRadius, typography, shadows } from '../theme/designSystem';
 import {
   AvailableDeliveryDriver,
   FacilityDashboard,
@@ -18,10 +20,13 @@ import {
   reassignFacilityDelivery,
 } from '../services/facilityDashboardApi';
 import { confirmFacilityReceiptByOrderId } from '../services/facilityIntakeApi';
+import { useFacilityRealtime } from '../hooks/useRealtime';
+import { RealtimeEventPayload } from '../services/realtimeService';
 
 const READY_STATUSES = [
   'ready_for_delivery',
   'delivery_assigned',
+  'delivery_accepted',
   'delivery_failed',
 ];
 
@@ -87,6 +92,17 @@ export default function FacilityDashboardScreen({
   useEffect(() => {
     load();
   }, [load]);
+
+  useFacilityRealtime(
+    dashboard?.facility?.id ?? null,
+    useCallback(
+      (event: RealtimeEventPayload) => {
+        load(true);
+      },
+      [load],
+    ),
+    accessToken,
+  );
 
   const receiveOrderDirectly = async (orderNumber: string) => {
     if (receivingOrderId) return;
@@ -181,9 +197,10 @@ export default function FacilityDashboardScreen({
   });
 
   return (
-    <SafeAreaView style={styles.page}>
+    <SafeAreaView style={styles.page} edges={['top', 'left', 'right', 'bottom']}>
       <ScrollView
         contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -194,16 +211,18 @@ export default function FacilityDashboardScreen({
         }
       >
         <View style={styles.header}>
-          <View>
+          <View style={styles.headerTextGroup}>
             <Text style={styles.eyebrow}>FACILITY OPERATIONS</Text>
             <Text style={styles.title}>Work queue</Text>
           </View>
           <TouchableOpacity
             accessibilityRole="button"
+            style={styles.refreshButton}
             onPress={() => {
               load(true);
             }}
           >
+            <AppIcon name="refresh" size={14} color={colors.primary} />
             <Text style={styles.link}>Refresh</Text>
           </TouchableOpacity>
         </View>
@@ -213,51 +232,69 @@ export default function FacilityDashboardScreen({
           style={styles.scanButton}
           onPress={onIntake}
         >
-          <Text style={styles.scanText}>▣ Scan incoming order</Text>
+          <View style={styles.scanButtonContent}>
+            <AppIcon name="search" size={18} color="#FFFFFF" strokeWidth={2.5} />
+            <Text style={styles.scanText}>Scan incoming order</Text>
+          </View>
         </TouchableOpacity>
 
         {loading ? (
-          <ActivityIndicator accessibilityLabel="Loading facility dashboard" />
+          <ActivityIndicator accessibilityLabel="Loading facility dashboard" color={colors.primary} />
         ) : null}
         {error ? (
-          <Text accessibilityRole="alert" style={styles.error}>
-            {error}
-          </Text>
+          <View style={styles.errorBanner}>
+            <Text accessibilityRole="alert" style={styles.error}>
+              {error}
+            </Text>
+            <TouchableOpacity
+              accessibilityRole="button"
+              style={styles.retryButton}
+              onPress={() => {
+                load();
+              }}
+            >
+              <Text style={styles.retryText}>Retry dashboard</Text>
+            </TouchableOpacity>
+          </View>
         ) : null}
         {actionError ? (
-          <Text accessibilityRole="alert" style={styles.error}>
-            {actionError}
-          </Text>
+          <View style={styles.errorBanner}>
+            <Text accessibilityRole="alert" style={styles.error}>
+              {actionError}
+            </Text>
+          </View>
         ) : null}
-        {message ? <Text accessibilityRole="alert" style={styles.successMessage}>{message}</Text> : null}
-        {error ? (
-          <TouchableOpacity
-            accessibilityRole="button"
-            onPress={() => {
-              load();
-            }}
-          >
-            <Text style={styles.link}>Retry dashboard</Text>
-          </TouchableOpacity>
+        {message ? (
+          <View style={styles.successBanner}>
+            <Text accessibilityRole="alert" style={styles.successMessage}>
+              {message}
+            </Text>
+          </View>
         ) : null}
 
         {dashboard ? (
           <>
             <View style={styles.facilityCard}>
               <View style={styles.facilityIdentity}>
-                <Text style={styles.heading}>{dashboard.facility.name}</Text>
-                <Text style={styles.muted}>
-                  {dashboard.role === 'manager'
-                    ? 'Facility Manager'
-                    : 'Facility Employee'}
-                </Text>
+                <View style={styles.facilityHeaderRow}>
+                  <Text style={styles.facilityName}>{dashboard.facility.name}</Text>
+                  <View style={styles.roleBadge}>
+                    <Text style={styles.roleBadgeText}>
+                      {dashboard.role === 'manager'
+                        ? 'Facility Manager'
+                        : 'Facility Employee'}
+                    </Text>
+                  </View>
+                </View>
+                {dashboard.facility.address ? (
+                  <Text style={styles.facilityAddress} numberOfLines={1}>
+                    {dashboard.facility.address}
+                  </Text>
+                ) : null}
               </View>
             </View>
-            {dashboard.facility.address ? (
-              <Text style={styles.muted}>{dashboard.facility.address}</Text>
-            ) : null}
 
-            <View style={styles.tabs}>
+            <View style={styles.tabsContainer}>
               {(
                 [
                   {
@@ -281,35 +318,44 @@ export default function FacilityDashboardScreen({
                     count: dashboard.summary.ready,
                   },
                 ] as const
-              ).map(item => (
-                <TouchableOpacity
-                  key={item.key}
-                  accessibilityRole="tab"
-                  accessibilityState={{ selected: tab === item.key }}
-                  style={[styles.tab, tab === item.key && styles.activeTab]}
-                  onPress={() => setTab(item.key)}
-                >
-                  <Text
-                    style={[
-                      styles.tabText,
-                      tab === item.key && styles.activeTabText,
-                    ]}
+              ).map(item => {
+                const isActive = tab === item.key;
+                return (
+                  <TouchableOpacity
+                    key={item.key}
+                    accessibilityRole="tab"
+                    accessibilityState={{ selected: isActive }}
+                    style={[styles.tab, isActive && styles.activeTab]}
+                    onPress={() => setTab(item.key)}
                   >
-                    {item.label} {item.count}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+                    <Text
+                      style={[
+                        styles.tabText,
+                        isActive && styles.activeTabText,
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {item.label} {item.count}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
 
-            <Text style={styles.heading}>
-              {tab === 'incoming'
-                ? 'Incoming orders'
-                : tab === 'received'
-                ? 'Received orders'
-                : tab === 'processing'
-                ? 'In processing'
-                : 'Ready for delivery'}
-            </Text>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionHeading}>
+                {tab === 'incoming'
+                  ? 'Incoming orders'
+                  : tab === 'received'
+                  ? 'Received orders'
+                  : tab === 'processing'
+                  ? 'In processing'
+                  : 'Ready for delivery'}
+              </Text>
+              <Text style={styles.sectionCountBadge}>
+                {filteredOrders.length} {filteredOrders.length === 1 ? 'order' : 'orders'}
+              </Text>
+            </View>
 
             {filteredOrders.map(order => (
               <View key={order.id} style={styles.card}>
@@ -349,6 +395,7 @@ export default function FacilityDashboardScreen({
                 ) : (
                   <TouchableOpacity
                     accessibilityRole="button"
+                    activeOpacity={0.7}
                     onPress={() => onOrder(order.id)}
                   >
                     <View style={styles.orderTop}>
@@ -360,20 +407,38 @@ export default function FacilityDashboardScreen({
                               {order.processingStage.toUpperCase()}
                             </Text>
                           </View>
-                        ) : null}
+                        ) : tab === 'ready' && order.deliveryAssignment?.status === 'arrived' && !order.deliveryAssignment.handedOver ? (
+                          <View style={styles.driverArrivedBadge}>
+                            <Text style={styles.driverArrivedBadgeText}>
+                              DRIVER ARRIVED
+                            </Text>
+                          </View>
+                        ) : (
+                          <View style={styles.statusPill}>
+                            <Text style={styles.statusPillText}>
+                              {order.current_status.replace(/_/g, ' ')}
+                            </Text>
+                          </View>
+                        )}
                       </View>
-                      <Text style={styles.status}>
-                        {order.current_status.replace(/_/g, ' ')}
+                      {tab !== 'processing' ? (
+                        <Text style={styles.status}>
+                          {tab === 'ready' && order.deliveryAssignment?.status === 'arrived' && !order.deliveryAssignment.handedOver
+                            ? 'Awaiting driver handover'
+                            : order.current_status.replace(/_/g, ' ')}
+                        </Text>
+                      ) : null}
+                    </View>
+                    <View style={styles.actionRow}>
+                      <Text style={styles.link}>
+                        {tab === 'received'
+                          ? 'Verify garments'
+                          : tab === 'processing'
+                          ? 'Continue processing'
+                          : 'Review handoff'}{' '}
+                        →
                       </Text>
                     </View>
-                    <Text style={styles.link}>
-                      {tab === 'received'
-                        ? 'Verify garments'
-                        : tab === 'processing'
-                        ? 'Continue processing'
-                        : 'Review handoff'}{' '}
-                      →
-                    </Text>
                   </TouchableOpacity>
                 )}
 
@@ -385,11 +450,14 @@ export default function FacilityDashboardScreen({
                     {order.deliveryAssignment.status === 'assigned' ? (
                       <Text style={styles.muted}>Waiting for Driver acceptance.</Text>
                     ) : null}
-                    {order.deliveryAssignment.status === 'accepted' || order.deliveryAssignment.status === 'en_route' ? (
+                    {order.deliveryAssignment.status === 'accepted' ? (
+                      <Text style={styles.muted}>Driver accepted delivery job</Text>
+                    ) : null}
+                    {order.deliveryAssignment.status === 'en_route' ? (
                       <Text style={styles.driverEnRouteText}>Driver en route to facility</Text>
                     ) : null}
                     {order.deliveryAssignment.status === 'arrived' ? (
-                      <Text style={styles.driverArrivedText}>Driver arrived at facility</Text>
+                      <Text style={styles.driverArrivedText}>Driver arrived at facility (awaiting handover)</Text>
                     ) : null}
                     {order.deliveryAssignment.handedOver ? (
                       <View style={styles.handoverSuccessBadge}>
@@ -435,7 +503,7 @@ export default function FacilityDashboardScreen({
 
                 {tab === 'ready' &&
                 order.current_status === 'delivery_failed' ? (
-                  <>
+                  <View style={styles.reassignSection}>
                     <Text style={styles.rejected}>
                       Driver rejected the delivery
                       {order.deliveryAssignment?.rejectionReason
@@ -450,14 +518,14 @@ export default function FacilityDashboardScreen({
                     >
                       <Text style={styles.reassignText}>Reassign Driver</Text>
                     </TouchableOpacity>
-                  </>
+                  </View>
                 ) : null}
 
                 {driverOrderId === order.id ? (
                   <View style={styles.driverList}>
                     <Text style={styles.driverListTitle}>Available Drivers</Text>
                     {loadingDrivers ? (
-                      <ActivityIndicator accessibilityLabel="Loading available Drivers" />
+                      <ActivityIndicator accessibilityLabel="Loading available Drivers" size="small" />
                     ) : null}
                     {!loadingDrivers && !drivers.length && !actionError ? (
                       <Text style={styles.muted}>No other Drivers are available.</Text>
@@ -505,219 +573,349 @@ export default function FacilityDashboardScreen({
 }
 
 const styles = StyleSheet.create({
-  page: { flex: 1, backgroundColor: '#F7F6F2' },
-  content: { padding: 18, gap: 14, paddingBottom: 36 },
+  page: { flex: 1, backgroundColor: colors.background },
+  content: { padding: spacing.md, gap: spacing.md, paddingBottom: spacing.xxxl },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    paddingVertical: spacing.xs,
   },
+  headerTextGroup: { flex: 1 },
   eyebrow: {
     fontSize: 11,
-    letterSpacing: 1.4,
-    color: '#67635B',
+    letterSpacing: 1.2,
+    color: colors.textMuted,
     fontWeight: '800',
   },
-  title: { fontSize: 30, fontWeight: '900' },
-  heading: { fontSize: 20, fontWeight: '900', flexShrink: 1 },
+  title: { fontSize: 24, fontWeight: '800', color: colors.textPrimary, marginTop: 2 },
+  refreshButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    borderRadius: borderRadius.sm,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    minHeight: 36,
+  },
   scanButton: {
-    backgroundColor: '#151515',
-    borderRadius: 14,
-    minHeight: 52,
+    backgroundColor: colors.primary,
+    borderRadius: borderRadius.md,
+    minHeight: 48,
     alignItems: 'center',
     justifyContent: 'center',
+    ...shadows.sm,
   },
-  scanText: { color: '#fff', fontSize: 16, fontWeight: '900' },
+  scanButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+  },
+  scanText: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
   facilityCard: {
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.md,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    ...shadows.sm,
+  },
+  facilityIdentity: { gap: 4 },
+  facilityHeaderRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 16,
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  facilityName: { fontSize: 16, fontWeight: '800', color: colors.textPrimary, flexShrink: 1 },
+  facilityAddress: { fontSize: 12, color: colors.textMuted },
+  roleBadge: {
+    backgroundColor: colors.surfaceSubtle,
+    borderRadius: borderRadius.full,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 3,
     borderWidth: 1,
-    borderColor: '#E2DED6',
-    gap: 10,
+    borderColor: colors.border,
   },
-  facilityIdentity: { flex: 1, minWidth: 0, gap: 3 },
-  incomingBadge: {
-    backgroundColor: '#FFF1CF',
-    borderRadius: 20,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    flexShrink: 0,
+  roleBadgeText: {
+    fontWeight: '700',
+    fontSize: 11,
+    color: colors.textSecondary,
   },
-  incomingBadgeText: {
-    fontWeight: '800',
-    fontSize: 12,
-    color: '#8A5D00',
-  },
-  tabs: {
+  tabsContainer: {
     flexDirection: 'row',
     backgroundColor: '#EAE7E0',
-    borderRadius: 14,
-    padding: 4,
+    borderRadius: borderRadius.md,
+    padding: 3,
+    gap: 2,
   },
-  tab: { flex: 1, paddingVertical: 11, alignItems: 'center', borderRadius: 11 },
-  activeTab: { backgroundColor: '#fff' },
+  tab: {
+    flex: 1,
+    paddingVertical: spacing.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: borderRadius.sm,
+    minHeight: 40,
+  },
+  activeTab: { backgroundColor: colors.surface, ...shadows.sm },
   tabText: {
-    fontWeight: '800',
-    color: '#656159',
+    fontWeight: '700',
+    color: colors.textMuted,
     fontSize: 12,
     textAlign: 'center',
   },
-  activeTabText: { color: '#151515' },
-  card: {
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#E2DED6',
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    gap: 9,
+  activeTabText: { color: colors.textPrimary, fontWeight: '800' },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: spacing.xs,
   },
-  orderTop: { gap: 6, alignItems: 'flex-start' },
+  sectionHeading: { fontSize: 17, fontWeight: '800', color: colors.textPrimary },
+  sectionCountBadge: { fontSize: 12, color: colors.textMuted, fontWeight: '600' },
+  card: {
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.md,
+    gap: spacing.sm,
+    ...shadows.sm,
+  },
+  orderTop: { gap: 4, alignItems: 'flex-start' },
   orderRowBetween: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     width: '100%',
   },
-  orderNumber: { fontWeight: '900', fontSize: 16, flexShrink: 1 },
+  orderNumber: { fontWeight: '800', fontSize: 15, color: colors.textPrimary, flexShrink: 1 },
   incomingTag: {
-    backgroundColor: '#FEF3C7',
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
+    backgroundColor: colors.warningSurface,
+    borderRadius: borderRadius.xs,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    borderWidth: 1,
+    borderColor: colors.warningBorder,
   },
   incomingTagText: {
-    color: '#92400E',
-    fontWeight: '800',
+    color: colors.warningText,
+    fontWeight: '700',
     fontSize: 11,
   },
   stageTag: {
-    backgroundColor: '#E0E7FF',
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
+    backgroundColor: colors.infoSurface,
+    borderRadius: borderRadius.xs,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    borderWidth: 1,
+    borderColor: colors.infoBorder,
   },
   stageTagText: {
-    color: '#3730A3',
+    color: colors.infoText,
     fontWeight: '800',
     fontSize: 11,
   },
-  status: { color: '#67635B', textTransform: 'capitalize', flexShrink: 1 },
+  driverArrivedBadge: {
+    backgroundColor: colors.successSurface,
+    borderRadius: borderRadius.xs,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    borderWidth: 1,
+    borderColor: colors.successBorder,
+  },
+  driverArrivedBadgeText: {
+    color: colors.successText,
+    fontWeight: '800',
+    fontSize: 11,
+  },
+  statusPill: {
+    backgroundColor: colors.surfaceSubtle,
+    borderRadius: borderRadius.full,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+  },
+  statusPillText: {
+    color: colors.textSecondary,
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'capitalize',
+  },
+  status: { color: colors.textMuted, fontSize: 12, textTransform: 'capitalize' },
   driverInfoText: {
     fontSize: 13,
-    fontWeight: '700',
-    color: '#4B5563',
+    fontWeight: '600',
+    color: colors.textSecondary,
+    marginTop: 2,
   },
   incomingActionRow: {
     flexDirection: 'row',
-    gap: 8,
+    gap: spacing.sm,
     width: '100%',
-    marginTop: 6,
+    marginTop: spacing.xs,
   },
   receiveButton: {
     flex: 2,
-    backgroundColor: '#15803D',
-    borderRadius: 10,
-    minHeight: 42,
+    backgroundColor: colors.success,
+    borderRadius: borderRadius.sm,
+    minHeight: 44,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 12,
+    paddingHorizontal: spacing.md,
   },
   receiveButtonText: {
-    color: '#fff',
-    fontWeight: '900',
+    color: '#FFFFFF',
+    fontWeight: '800',
     fontSize: 13,
   },
   scanSecondaryButton: {
     flex: 1,
-    backgroundColor: '#F3F4F6',
-    borderRadius: 10,
+    backgroundColor: colors.surfaceSubtle,
+    borderRadius: borderRadius.sm,
     borderWidth: 1,
-    borderColor: '#D1D5DB',
-    minHeight: 42,
+    borderColor: colors.borderStrong,
+    minHeight: 44,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 12,
+    paddingHorizontal: spacing.md,
   },
   scanSecondaryButtonText: {
-    color: '#374151',
-    fontWeight: '800',
+    color: colors.textPrimary,
+    fontWeight: '700',
     fontSize: 13,
   },
-  link: { fontWeight: '900', color: '#151515' },
-  muted: { color: '#6D685F', flexShrink: 1 },
-  empty: { backgroundColor: '#EDEAE3', borderRadius: 16, padding: 18 },
-  emptyTitle: { fontWeight: '900', fontSize: 17 },
-  logout: { alignItems: 'center', padding: 14 },
-  logoutText: { fontWeight: '800', color: '#8C2D26' },
-  error: { color: '#9A241E' },
-  successMessage: { color: '#15803D', fontWeight: '700' },
-  rejected: { color: '#982C23', fontWeight: '700' },
-  reassignButton: {
-    minHeight: 44,
-    borderRadius: 12,
-    backgroundColor: '#151515',
+  actionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    marginTop: 4,
+  },
+  link: { fontWeight: '700', color: colors.textPrimary, fontSize: 13 },
+  muted: { color: colors.textMuted, fontSize: 13 },
+  empty: {
+    backgroundColor: colors.surfaceSubtle,
+    borderRadius: borderRadius.md,
+    padding: spacing.lg,
+    alignItems: 'center',
+    gap: 4,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  emptyTitle: { fontWeight: '800', fontSize: 15, color: colors.textPrimary },
+  logout: {
     alignItems: 'center',
     justifyContent: 'center',
+    padding: spacing.md,
+    minHeight: 48,
+    marginTop: spacing.md,
   },
-  reassignText: { color: '#fff', fontWeight: '900' },
-  driverList: { gap: 8, paddingTop: 4 },
-  driverListTitle: { fontWeight: '900', fontSize: 16 },
-  driverOption: {
-    padding: 12,
-    borderRadius: 12,
+  logoutText: { fontWeight: '700', color: colors.dangerText, fontSize: 14 },
+  errorBanner: {
+    backgroundColor: colors.dangerSurface,
     borderWidth: 1,
-    borderColor: '#D8D3CA',
-    backgroundColor: '#FAF9F6',
+    borderColor: colors.dangerBorder,
+    borderRadius: borderRadius.sm,
+    padding: spacing.md,
+    gap: spacing.xs,
   },
-  driverName: { fontWeight: '900' },
+  error: { color: colors.dangerText, fontSize: 13, fontWeight: '600' },
+  retryButton: {
+    alignSelf: 'flex-start',
+    backgroundColor: colors.danger,
+    borderRadius: borderRadius.xs,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    marginTop: spacing.xs,
+  },
+  retryText: { color: '#FFFFFF', fontWeight: '700', fontSize: 12 },
+  successBanner: {
+    backgroundColor: colors.successSurface,
+    borderWidth: 1,
+    borderColor: colors.successBorder,
+    borderRadius: borderRadius.sm,
+    padding: spacing.md,
+  },
+  successMessage: { color: colors.successText, fontWeight: '700', fontSize: 13 },
+  reassignSection: {
+    gap: spacing.xs,
+    marginTop: spacing.xs,
+  },
+  rejected: { color: colors.dangerText, fontWeight: '700', fontSize: 13 },
+  reassignButton: {
+    minHeight: 44,
+    borderRadius: borderRadius.sm,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.md,
+  },
+  reassignText: { color: '#FFFFFF', fontWeight: '800', fontSize: 13 },
+  driverList: { gap: spacing.xs, paddingTop: spacing.xs },
+  driverListTitle: { fontWeight: '800', fontSize: 14, color: colors.textPrimary },
+  driverOption: {
+    padding: spacing.md,
+    borderRadius: borderRadius.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceSubtle,
+    minHeight: 44,
+    justifyContent: 'center',
+  },
+  driverName: { fontWeight: '800', color: colors.textPrimary, fontSize: 13 },
   driverSection: {
-    backgroundColor: '#F3EFEB',
-    borderRadius: 12,
-    padding: 12,
-    gap: 8,
-    marginTop: 4,
+    backgroundColor: colors.surfaceSubtle,
+    borderRadius: borderRadius.sm,
+    padding: spacing.md,
+    gap: spacing.xs,
+    marginTop: spacing.xs,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   driverNameText: {
     fontWeight: '800',
-    fontSize: 14,
-    color: '#151515',
+    fontSize: 13,
+    color: colors.textPrimary,
   },
   driverEnRouteText: {
     fontSize: 12,
-    color: '#2563EB',
+    color: colors.infoText,
     fontWeight: '700',
   },
   driverArrivedText: {
     fontSize: 12,
-    color: '#15803D',
+    color: colors.successText,
     fontWeight: '800',
   },
   handoverButton: {
-    backgroundColor: '#176E47',
-    borderRadius: 10,
-    minHeight: 40,
+    backgroundColor: colors.success,
+    borderRadius: borderRadius.sm,
+    minHeight: 44,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 16,
+    paddingHorizontal: spacing.md,
+    marginTop: spacing.xs,
   },
   handoverButtonText: {
-    color: '#fff',
-    fontWeight: '900',
+    color: '#FFFFFF',
+    fontWeight: '800',
     fontSize: 13,
   },
   handoverSuccessBadge: {
-    backgroundColor: '#E7F4ED',
-    borderRadius: 8,
-    padding: 8,
+    backgroundColor: colors.successSurface,
+    borderRadius: borderRadius.xs,
+    padding: spacing.sm,
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.successBorder,
   },
   handoverSuccessText: {
-    color: '#176E47',
+    color: colors.successText,
     fontWeight: '800',
     fontSize: 12,
   },
 });
+

@@ -1,6 +1,7 @@
 import React, {useCallback, useState} from 'react';
 import {useFocusEffect} from '@react-navigation/native';
-import {ActivityIndicator, SafeAreaView, ScrollView, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
+import {ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
+import {SafeAreaView} from 'react-native-safe-area-context';
 import {getMyPackages, getPackages} from '../services/packagesApi';
 import type {CustomerPackage, PackageOffer} from '../services/packagesApi';
 import {formatMoney} from '../utils/orderPricing';

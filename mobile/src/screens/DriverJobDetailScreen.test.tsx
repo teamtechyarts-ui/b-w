@@ -459,7 +459,7 @@ test('successful pickup OTP refreshes the job and shows the next valid state', a
     ).toBeTruthy(),
   );
   expect(view.queryByText('Verify OTP and complete pickup')).toBeNull();
-  expect(load).toHaveBeenCalledTimes(2);
+  expect(verifyDriverPickupOtp).toHaveBeenCalled();
 });
 
 test('only a picked-up job can start facility transit and show its scoped handoff code', async () => {
@@ -495,8 +495,9 @@ test('only a picked-up job can start facility transit and show its scoped handof
   );
   expect(view.getByText('Order ID')).toBeTruthy();
   expect(view.getByText('BW-20260921-ABC12345')).toBeTruthy();
-  expect(view.getByText('Assigned facility')).toBeTruthy();
+  expect(view.getByText('DESTINATION: ASSIGNED FACILITY')).toBeTruthy();
   expect(view.getByText('Local Facility · 2 Work Road')).toBeTruthy();
+  expect(view.getByText('Original customer pickup')).toBeTruthy();
   fireEvent.press(view.getByText('Start facility transit'));
   await waitFor(() =>
     expect(view.getByText('Show facility handoff QR')).toBeTruthy(),
@@ -545,7 +546,7 @@ const arrivedDelivery = {
   orderStatus: 'delivery_otp_pending',
 };
 
-test('delivery arrival opens required OTP and photograph handover', async () => {
+test('delivery arrival opens required OTP handover without photo requirements', async () => {
   load
     .mockResolvedValueOnce({
       ...arrivedDelivery,
@@ -568,10 +569,15 @@ test('delivery arrival opens required OTP and photograph handover', async () => 
   await waitFor(() =>
     expect(view.getByText('Verify OTP and complete delivery')).toBeTruthy(),
   );
-  expect(view.getByText('No delivery photograph uploaded.')).toBeTruthy();
+  expect(
+    view.getByText('Ask the customer for their delivery OTP to complete this order.'),
+  ).toBeTruthy();
+  expect(view.queryByText('Take delivery photo')).toBeNull();
+  expect(view.queryByText('Choose photo from phone')).toBeNull();
+  expect(view.queryByText('No delivery photograph uploaded.')).toBeNull();
 });
 
-test('delivery blocks missing OTP and photo, then refreshes after atomic completion', async () => {
+test('delivery blocks missing or empty OTP, then completes delivery with valid OTP alone', async () => {
   load
     .mockResolvedValueOnce(arrivedDelivery)
     .mockResolvedValue({
@@ -579,14 +585,6 @@ test('delivery blocks missing OTP and photo, then refreshes after atomic complet
       assignmentStatus: 'completed',
       orderStatus: 'claim_period_active',
     });
-  (chooseDeliveryPhoto as jest.Mock).mockResolvedValue({
-    uri: 'file:///photo.jpg',
-    name: 'photo.jpg',
-    type: 'image/jpeg',
-  });
-  (uploadDeliveryPhoto as jest.Mock).mockResolvedValue(
-    'order-123456/photo.jpg',
-  );
   (completeDriverDelivery as jest.Mock).mockResolvedValue({
     delivered: true,
     orderStatus: 'claim_period_active',
@@ -603,7 +601,7 @@ test('delivery blocks missing OTP and photo, then refreshes after atomic complet
   );
   await fireEvent.press(view.getByText('Verify OTP and complete delivery'));
   await waitFor(() =>
-    expect(view.getByText('Enter the six-digit delivery OTP.')).toBeTruthy(),
+    expect(view.getByText('Enter the delivery OTP.')).toBeTruthy(),
   );
   await fireEvent.changeText(
     view.getByPlaceholderText('Six-digit delivery OTP'),
@@ -611,42 +609,22 @@ test('delivery blocks missing OTP and photo, then refreshes after atomic complet
   );
   await fireEvent.press(view.getByText('Verify OTP and complete delivery'));
   await waitFor(() =>
-    expect(
-      view.getByText('Take and upload a delivery photograph first.'),
-    ).toBeTruthy(),
-  );
-  await fireEvent.press(view.getByText('Take delivery photo'));
-  expect(chooseDeliveryPhoto).toHaveBeenCalledWith('camera');
-  await waitFor(() =>
-    expect(view.getByText('Delivery photograph uploaded')).toBeTruthy(),
-  );
-  await fireEvent.press(view.getByText('Verify OTP and complete delivery'));
-  await waitFor(() =>
     expect(completeDriverDelivery).toHaveBeenCalledWith(
       'token',
       'order-123456',
       '123456',
-      'order-123456/photo.jpg',
     ),
   );
   await waitFor(() =>
     expect(
-      view.getByText('Delivery complete. Proof retained; tracking ended.'),
+      view.getByText('Delivery OTP Verified Successfully.'),
     ).toBeTruthy(),
   );
   expect(view.queryByText('Verify OTP and complete delivery')).toBeNull();
 });
 
-test('upload or OTP rejection leaves delivery handover available for retry', async () => {
+test('invalid OTP rejection displays clear inline error and leaves handover available for retry', async () => {
   load.mockResolvedValue(arrivedDelivery);
-  (chooseDeliveryPhoto as jest.Mock).mockResolvedValue({
-    uri: 'file:///photo.jpg',
-    name: 'photo.jpg',
-    type: 'image/jpeg',
-  });
-  (uploadDeliveryPhoto as jest.Mock)
-    .mockRejectedValueOnce(new Error('Photograph upload failed'))
-    .mockResolvedValueOnce('order-123456/photo.jpg');
   (completeDriverDelivery as jest.Mock).mockRejectedValue(
     new Error('Invalid delivery OTP'),
   );
@@ -658,15 +636,7 @@ test('upload or OTP rejection leaves delivery handover available for retry', asy
     />,
   );
   await waitFor(() =>
-    expect(view.getByText('Take delivery photo')).toBeTruthy(),
-  );
-  await fireEvent.press(view.getByText('Take delivery photo'));
-  await waitFor(() =>
-    expect(view.getByText('Photograph upload failed')).toBeTruthy(),
-  );
-  await fireEvent.press(view.getByText('Take delivery photo'));
-  await waitFor(() =>
-    expect(view.getByText('Delivery photograph uploaded')).toBeTruthy(),
+    expect(view.getByText('Verify OTP and complete delivery')).toBeTruthy(),
   );
   await fireEvent.changeText(
     view.getByPlaceholderText('Six-digit delivery OTP'),
@@ -674,38 +644,13 @@ test('upload or OTP rejection leaves delivery handover available for retry', asy
   );
   await fireEvent.press(view.getByText('Verify OTP and complete delivery'));
   await waitFor(() =>
-    expect(view.getByText('Invalid delivery OTP')).toBeTruthy(),
+    expect(
+      view.getByText(
+        'Invalid delivery OTP. Please ask the customer for the correct OTP.',
+      ),
+    ).toBeTruthy(),
   );
   expect(view.getByText('Verify OTP and complete delivery')).toBeTruthy();
-});
-
-test('driver can choose delivery proof from the phone', async () => {
-  load.mockResolvedValue(arrivedDelivery);
-  (chooseDeliveryPhoto as jest.Mock).mockResolvedValue({
-    uri: 'file:///proof.png',
-    name: 'proof.png',
-    type: 'image/png',
-  });
-  (uploadDeliveryPhoto as jest.Mock).mockResolvedValue(
-    'order-123456/proof.png',
-  );
-  const view = await render(
-    <DriverJobDetailScreen
-      accessToken="token"
-      assignmentId="job-1"
-      onBack={jest.fn()}
-    />,
-  );
-  await waitFor(() =>
-    expect(view.getByText('Choose photo from phone')).toBeTruthy(),
-  );
-  await fireEvent.press(view.getByText('Choose photo from phone'));
-  await waitFor(() =>
-    expect(chooseDeliveryPhoto).toHaveBeenCalledWith('library'),
-  );
-  await waitFor(() =>
-    expect(view.getByText('Delivery photograph uploaded')).toBeTruthy(),
-  );
 });
 
 test('rapid duplicate taps send only one assignment accept request', async () => {
@@ -1125,7 +1070,347 @@ test('Navigate to facility button blocks navigation when GPS is unavailable and 
   expect(Linking.openURL).not.toHaveBeenCalled();
 });
 
+test('empty pickup OTP blocks network request and shows inline field error directly below OTP input', async () => {
+  load.mockResolvedValue(arrivedPickup);
+  (verifyDriverPickupOtp as jest.Mock).mockClear();
 
+  const view = await render(
+    <DriverJobDetailScreen
+      accessToken="token"
+      assignmentId="job-1"
+      onBack={jest.fn()}
+    />,
+  );
 
+  await waitFor(() =>
+    expect(view.getByText('Verify OTP and complete pickup')).toBeTruthy(),
+  );
+
+  // Check garment handover box first
+  await fireEvent.press(view.getByLabelText('I checked the garments handed over'));
+
+  // Leave OTP input empty and click submit
+  await fireEvent.press(view.getByText('Verify OTP and complete pickup'));
+
+  // Assert inline error is displayed
+  await waitFor(() =>
+    expect(view.getByText('Enter the six-digit pickup OTP.')).toBeTruthy(),
+  );
+
+  // Assert no network request was triggered
+  expect(verifyDriverPickupOtp).not.toHaveBeenCalled();
+});
+
+test('empty delivery OTP blocks network request and shows inline field error directly below OTP input', async () => {
+  load.mockResolvedValue(arrivedDelivery);
+  (completeDriverDelivery as jest.Mock).mockClear();
+
+  const view = await render(
+    <DriverJobDetailScreen
+      accessToken="token"
+      assignmentId="job-1"
+      onBack={jest.fn()}
+    />,
+  );
+
+  await waitFor(() =>
+    expect(view.getByText('Verify OTP and complete delivery')).toBeTruthy(),
+  );
+
+  // Leave OTP empty and click submit
+  await fireEvent.press(view.getByText('Verify OTP and complete delivery'));
+
+  // Assert inline error is displayed
+  await waitFor(() =>
+    expect(view.getByText('Enter the delivery OTP.')).toBeTruthy(),
+  );
+
+  // Assert no API call made
+  expect(completeDriverDelivery).not.toHaveBeenCalled();
+});
+
+test('delivery job timeline does not mislabel pickup scheduled date as delivery date', async () => {
+  const deliveryJob = {
+    ...offeredJob,
+    type: 'delivery',
+    assignmentStatus: 'accepted',
+    orderStatus: 'delivery_accepted',
+    assignedAt: '2026-10-08T05:39:31.355Z',
+    acceptedAt: '2026-10-08T05:39:31.739Z',
+    pickupScheduledAt: '2026-10-01T12:30:00Z',
+    pickupSlotLabel: '6:00 PM - 8:00 PM',
+    facilityCollected: false,
+    facility: { name: 'Central Facility', address: '10 Industrial Rd' },
+  };
+  load.mockResolvedValue(deliveryJob);
+
+  const view = await render(
+    <DriverJobDetailScreen
+      accessToken="token"
+      assignmentId="job-1"
+      onBack={jest.fn()}
+    />,
+  );
+
+  await waitFor(() =>
+    expect(view.getByText('Start trip to facility')).toBeTruthy(),
+  );
+
+  // Assert timeline does not show "Delivery" with the Oct 1 pickup time
+  expect(view.queryByText('Pickup Window')).toBeNull();
+  expect(view.getByText('Assigned')).toBeTruthy();
+  expect(view.getByText('Accepted')).toBeTruthy();
+});
+
+test('delivery job start trip to facility triggers navigation and transitions to facility transit', async () => {
+  const deliveryJob = {
+    ...offeredJob,
+    type: 'delivery',
+    assignmentStatus: 'accepted',
+    orderStatus: 'delivery_accepted',
+    assignedAt: '2026-10-08T05:39:31.355Z',
+    acceptedAt: '2026-10-08T05:39:31.739Z',
+    facilityCollected: false,
+    facility: { name: 'Central Facility', address: '10 Industrial Rd', latitude: 17.33, longitude: 78.57 },
+  };
+  const inTransitDeliveryJob = {
+    ...deliveryJob,
+    assignmentStatus: 'en_route',
+  };
+
+  load
+    .mockResolvedValueOnce(deliveryJob)
+    .mockResolvedValueOnce(inTransitDeliveryJob);
+  (startDriverNavigation as jest.Mock).mockResolvedValue({
+    status: 'en_route_facility',
+    destination: 'facility',
+  });
+
+  const view = await render(
+    <DriverJobDetailScreen
+      accessToken="token"
+      assignmentId="job-1"
+      onBack={jest.fn()}
+    />,
+  );
+
+  await waitFor(() =>
+    expect(view.getByText('Start trip to facility')).toBeTruthy(),
+  );
+
+  await fireEvent.press(view.getByText('Start trip to facility'));
+
+  expect(startDriverNavigation).toHaveBeenCalledWith('token', 'job-1');
+  await waitFor(() =>
+    expect(view.getByText('Navigate to facility')).toBeTruthy(),
+  );
+  expect(view.getByText('I arrived at facility')).toBeTruthy();
+  expect(view.queryByText('Start trip to facility')).toBeNull();
+});
+
+test('start trip to facility failure displays inline error adjacent to action button', async () => {
+  const deliveryJob = {
+    ...offeredJob,
+    type: 'delivery',
+    assignmentStatus: 'accepted',
+    orderStatus: 'delivery_accepted',
+    assignedAt: '2026-10-08T05:39:31.355Z',
+    acceptedAt: '2026-10-08T05:39:31.739Z',
+    facilityCollected: false,
+    facility: { name: 'Central Facility', address: '10 Industrial Rd' },
+  };
+
+  load.mockResolvedValue(deliveryJob);
+  (startDriverNavigation as jest.Mock).mockRejectedValue(
+    new Error('Network request failed. Please check connection.'),
+  );
+
+  const view = await render(
+    <DriverJobDetailScreen
+      accessToken="token"
+      assignmentId="job-1"
+      onBack={jest.fn()}
+    />,
+  );
+
+  await waitFor(() =>
+    expect(view.getByText('Start trip to facility')).toBeTruthy(),
+  );
+
+  await fireEvent.press(view.getByText('Start trip to facility'));
+
+  await waitFor(() =>
+    expect(
+      view.getByText('Network request failed. Please check connection.'),
+    ).toBeTruthy(),
+  );
+  expect(view.getByText('Start trip to facility')).toBeTruthy();
+});
+
+test('pickup OTP verification displays success modal and automatically triggers onBack navigation', async () => {
+  const onBackMock = jest.fn();
+  const arrived = {
+    ...offeredJob,
+    assignmentStatus: 'arrived',
+    orderStatus: 'pickup_otp_pending',
+    facility: {
+      name: 'Central Hub',
+      address: '10 Industrial Rd',
+      latitude: 17.4,
+      longitude: 78.4,
+    },
+    items: [{ id: 'item-1', item_name: 'Shirts', quantity: 2 }],
+  };
+  const picked = {
+    ...arrived,
+    assignmentStatus: 'arrived',
+    orderStatus: 'picked_up',
+  };
+
+  load.mockResolvedValueOnce(arrived).mockResolvedValue(picked);
+  (verifyDriverPickupOtp as jest.Mock).mockResolvedValue({
+    verified: true,
+    orderStatus: 'picked_up',
+  });
+
+  const view = await render(
+    <DriverJobDetailScreen
+      accessToken="token"
+      assignmentId="job-1"
+      onBack={onBackMock}
+    />,
+  );
+
+  await waitFor(() =>
+    expect(view.getByText('Verify OTP and complete pickup')).toBeTruthy(),
+  );
+
+  await fireEvent.press(view.getByRole('checkbox'));
+  await fireEvent.changeText(
+    view.getByPlaceholderText('Six-digit pickup OTP'),
+    '654321',
+  );
+  await fireEvent.press(view.getByText('Verify OTP and complete pickup'));
+
+  await waitFor(() =>
+    expect(verifyDriverPickupOtp).toHaveBeenCalledWith(
+      'token',
+      'order-123456',
+      '654321',
+    ),
+  );
+
+  await waitFor(() =>
+    expect(view.getByText('Pickup OTP Verified Successfully')).toBeTruthy(),
+  );
+
+  await waitFor(
+    () => {
+      expect(onBackMock).toHaveBeenCalledTimes(1);
+    },
+    { timeout: 3000 },
+  );
+});
+
+test('delivery OTP verification displays success modal and automatically triggers onBack navigation', async () => {
+  const onBackMock = jest.fn();
+  const arrivedDelivery = {
+    ...offeredJob,
+    type: 'delivery',
+    assignmentStatus: 'arrived',
+    orderStatus: 'delivery_otp_pending',
+    facilityCollected: true,
+    facility: {
+      name: 'Central Hub',
+      address: '10 Industrial Rd',
+      latitude: 17.4,
+      longitude: 78.4,
+    },
+    customer: { name: 'Customer One', phone: '+1234567890' },
+  };
+  const completedDelivery = {
+    ...arrivedDelivery,
+    assignmentStatus: 'completed',
+    orderStatus: 'claim_period_active',
+  };
+
+  load.mockResolvedValueOnce(arrivedDelivery).mockResolvedValue(completedDelivery);
+  (completeDriverDelivery as jest.Mock).mockResolvedValue({
+    delivered: true,
+    orderStatus: 'claim_period_active',
+  });
+
+  const view = await render(
+    <DriverJobDetailScreen
+      accessToken="token"
+      assignmentId="job-1"
+      onBack={onBackMock}
+    />,
+  );
+
+  await waitFor(() =>
+    expect(view.getByText('Verify OTP and complete delivery')).toBeTruthy(),
+  );
+
+  await fireEvent.changeText(
+    view.getByPlaceholderText('Six-digit delivery OTP'),
+    '998877',
+  );
+  await fireEvent.press(view.getByText('Verify OTP and complete delivery'));
+
+  await waitFor(() =>
+    expect(completeDriverDelivery).toHaveBeenCalledWith(
+      'token',
+      'order-123456',
+      '998877',
+    ),
+  );
+
+  await waitFor(() =>
+    expect(view.getByText('Delivery OTP Verified Successfully')).toBeTruthy(),
+  );
+
+  await waitFor(
+    () => {
+      expect(onBackMock).toHaveBeenCalledTimes(1);
+    },
+    { timeout: 3000 },
+  );
+});
+
+test('in transit to facility displays correct destination, status badge, and hides customer card', async () => {
+  const transitJob = {
+    ...offeredJob,
+    type: 'pickup',
+    assignmentStatus: 'arrived',
+    orderStatus: 'in_transit_to_facility',
+    customer: { name: 'Customer Test', phone: '+1234567890' },
+    facility: {
+      name: 'Main Processing Plant',
+      address: '45 Industry Way',
+      latitude: 17.4,
+      longitude: 78.4,
+    },
+  };
+
+  load.mockResolvedValue(transitJob);
+
+  const view = await render(
+    <DriverJobDetailScreen
+      accessToken="token"
+      assignmentId="job-1"
+      onBack={jest.fn()}
+    />,
+  );
+
+  await waitFor(() =>
+    expect(view.getByText('DESTINATION: ASSIGNED FACILITY')).toBeTruthy(),
+  );
+  expect(view.getByText('Main Processing Plant · 45 Industry Way')).toBeTruthy();
+  expect(view.getByText('Original customer pickup')).toBeTruthy();
+  expect(view.getByText('In Transit to Facility')).toBeTruthy();
+  expect(view.queryByText('CUSTOMER')).toBeNull();
+  expect(view.queryByText('Call')).toBeNull();
+});
 
 

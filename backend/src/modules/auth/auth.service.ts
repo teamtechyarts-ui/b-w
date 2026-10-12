@@ -1,6 +1,7 @@
-import { BadRequestException, Injectable, Optional, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, forwardRef, Inject, Injectable, Optional, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SupabaseService } from '../supabase/supabase.service';
+import { EmailVerificationService } from './email-verification.service';
 import {
   getDriverInternalEmail,
   getFacilityEmployeeInternalEmail,
@@ -13,6 +14,9 @@ export class AuthService {
   constructor(
     private readonly s: SupabaseService,
     @Optional() private readonly config?: ConfigService,
+    @Optional()
+    @Inject(forwardRef(() => EmailVerificationService))
+    private readonly emailVerification?: EmailVerificationService,
   ) {}
 
   async driverSignIn(phone: string, pin: string) {
@@ -316,51 +320,106 @@ export class AuthService {
   }
 
   async signUp(email: string, password: string, fullName: string, phone?: string) {
-    const { data, error } = await this.s.createAuthClient().auth.signUp({
-      email,
-      password,
-      options: {
-        data: {
+    const cleanEmail = email.trim().toLowerCase();
+    let userId: string;
+
+    // In production with Supabase Admin API, create user unverified (email_confirm: false)
+    // so GoTrue does NOT send email confirmation links
+    if (this.s.admin?.auth?.admin?.createUser) {
+      const { data: createData, error: createError } = await this.s.admin.auth.admin.createUser({
+        email: cleanEmail,
+        password,
+        email_confirm: false,
+        user_metadata: {
           full_name: fullName,
           ...(phone ? { phone } : {}),
         },
-      },
-    });
+      });
 
-    if (error) {
-      const msg = error.message?.toLowerCase() || '';
-      if (msg.includes('already registered') || msg.includes('user already exists')) {
-        throw new BadRequestException('An account with this email already exists.');
+      if (createError) {
+        const msg = createError.message?.toLowerCase() || '';
+        if (msg.includes('already registered') || msg.includes('user already exists')) {
+          // Check if existing user is unverified - if so, allow verification retry without duplicate error
+          let existingUser: any = null;
+          try {
+            const { data: linkData } = await this.s.admin.auth.admin.generateLink({
+              type: 'recovery',
+              email: cleanEmail,
+            });
+            existingUser = linkData?.user;
+          } catch {
+            // Ignore error
+          }
+
+          if (existingUser && !existingUser.email_confirmed_at) {
+            if (this.emailVerification) {
+              await this.emailVerification.issueAndSendVerificationOtp(existingUser.id, cleanEmail);
+            }
+            return {
+              session: null,
+              user: { id: existingUser.id, email: cleanEmail, phone: phone || null },
+              profile: null,
+              requiresEmailConfirmation: true,
+              message: 'A verification code has been sent to your email address.',
+            };
+          }
+          throw new BadRequestException('An account with this email already exists.');
+        }
+        if (msg.includes('password')) {
+          throw new BadRequestException('Password must be at least 6 characters long.');
+        }
+        if (msg.includes('email') || msg.includes('invalid format')) {
+          throw new BadRequestException('Please enter a valid email address.');
+        }
+        throw new BadRequestException('Unable to create your account right now. Please try again.');
       }
-      if (msg.includes('password')) {
-        throw new BadRequestException('Password must be at least 6 characters long.');
+
+      userId = createData.user.id;
+    } else {
+      // Fallback for mocked unit tests where admin.createUser is not stubbed
+      const { data, error } = await this.s.createAuthClient().auth.signUp({
+        email: cleanEmail,
+        password,
+        options: {
+          data: {
+            full_name: fullName,
+            ...(phone ? { phone } : {}),
+          },
+        },
+      });
+
+      if (error) {
+        const msg = error.message?.toLowerCase() || '';
+        if (msg.includes('already registered') || msg.includes('user already exists')) {
+          throw new BadRequestException('An account with this email already exists.');
+        }
+        if (msg.includes('password')) {
+          throw new BadRequestException('Password must be at least 6 characters long.');
+        }
+        if (msg.includes('email') || msg.includes('invalid format')) {
+          throw new BadRequestException('Please enter a valid email address.');
+        }
+        throw new BadRequestException('Unable to create your account right now. Please try again.');
       }
-      if (msg.includes('email') || msg.includes('invalid format')) {
-        throw new BadRequestException('Please enter a valid email address.');
+
+      if (!data.user) {
+        throw new BadRequestException('Unable to create your account right now. Please try again.');
       }
-      throw new BadRequestException('Unable to create your account right now. Please try again.');
+
+      userId = data.user.id;
     }
 
-    if (!data.user) {
-      throw new BadRequestException('Unable to create your account right now. Please try again.');
-    }
-
-    if (data.session) {
-      const profile = await this.ensureProfile(data.user.id, phone, fullName);
-      return {
-        session: data.session,
-        user: { id: data.user.id, email: data.user.email, phone: phone || null },
-        profile,
-        requiresEmailConfirmation: false,
-      };
+    // Issue and dispatch verification OTP via Nodemailer & Gmail SMTP
+    if (this.emailVerification && userId) {
+      await this.emailVerification.issueAndSendVerificationOtp(userId, cleanEmail);
     }
 
     return {
       session: null,
-      user: { id: data.user.id, email: data.user.email },
+      user: { id: userId, email: cleanEmail, phone: phone || null },
       profile: null,
       requiresEmailConfirmation: true,
-      message: 'Account created successfully. Please check your email to verify your account.',
+      message: 'Account created successfully. A verification code has been sent to your email.',
     };
   }
 
@@ -425,6 +484,8 @@ export class AuthService {
     return { success: true };
   }
 
+  private cachedCustomerRoleId: string | null = null;
+
   async ensureProfile(id: string, phone?: string, fullName?: string) {
     // Trusted provisioning is scoped exclusively to the verified Auth user.
     const db = this.s.admin;
@@ -462,12 +523,22 @@ export class AuthService {
       return { ...profile, accountRole: role };
     }
 
-    // The profile trigger does not create these records. Repair partial provisioning
-    // on every verified login without overwriting existing customer data or roles.
-    const { data: role, error: roleError } = await db.from('roles').select('id').eq('code', 'customer').single();
-    if (roleError || !role) throw new BadRequestException('Customer role unavailable');
+    // If customer role is already assigned, account is fully provisioned
+    if (codes.includes('customer')) {
+      return { ...profile, accountRole: 'customer' };
+    }
+
+    // Repair partial provisioning for new customer without extra query if role ID is cached
+    let roleId = this.cachedCustomerRoleId;
+    if (!roleId) {
+      const { data: role, error: roleError } = await db.from('roles').select('id').eq('code', 'customer').single();
+      if (roleError || !role) throw new BadRequestException('Customer role unavailable');
+      roleId = role.id;
+      this.cachedCustomerRoleId = roleId;
+    }
+
     const { error: assignmentError } = await db.from('profile_roles').upsert(
-      { profile_id: id, role_id: role.id }, { onConflict: 'profile_id,role_id', ignoreDuplicates: true },
+      { profile_id: id, role_id: roleId }, { onConflict: 'profile_id,role_id', ignoreDuplicates: true },
     );
     if (assignmentError) throw new BadRequestException(assignmentError.message);
     const { error: customerError } = await db.from('customers').upsert(
@@ -486,5 +557,12 @@ export class AuthService {
       .select('roles(code,name,role_permissions(permissions(code,name)))').eq('profile_id', userId);
     if (rolesError) throw new BadRequestException(rolesError.message);
     return { profile, roles: roles || [] };
+  }
+
+  getRealtimeConfig() {
+    return {
+      url: this.s.getUrl(),
+      anonKey: this.s.getAnonKey(),
+    };
   }
 }

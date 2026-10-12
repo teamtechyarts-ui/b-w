@@ -6,13 +6,13 @@ import {
   Modal,
   Platform,
   RefreshControl,
-  SafeAreaView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
+import {SafeAreaView} from 'react-native-safe-area-context';
 import {
   AdminCatalogue,
   CatalogueCategory,
@@ -28,6 +28,7 @@ import {
 } from '../services/adminCatalogueApi';
 import {FacilityChoice, listAdminFacilities} from '../services/adminStaffApi';
 import AppIcon from '../components/AppIcon';
+import {isMalformedCategoryName} from '../utils/categoryQuality';
 
 type Props = {
   accessToken: string;
@@ -165,7 +166,7 @@ const ServiceCard = React.memo(function ServiceCard({
           accessibilityLabel={`More actions for ${item.name}`}
           style={styles.overflowBtn}
           onPress={() => onOpenActions(item)}>
-          <Text style={styles.overflowBtnText}>⋮</Text>
+          <AppIcon name="more-vertical" size={16} color="#64748B" />
         </TouchableOpacity>
       </View>
     </View>
@@ -383,7 +384,7 @@ export default function AdminCatalogueScreen({accessToken, onBack}: Props) {
   }, [data?.categories, editingService, serviceCategorySearchQuery]);
 
   // Handlers for Add/Edit Service
-  const openAddServiceModal = () => {
+  const openAddServiceModal = useCallback(() => {
     setEditingService(null);
     setServiceName('');
     setServiceDescription('');
@@ -395,7 +396,8 @@ export default function AdminCatalogueScreen({accessToken, onBack}: Props) {
     setServiceCategorySearchQuery('');
     setFormCategoryPickerOpen(false);
     setServiceModalOpen(true);
-  };
+  }, [data?.categories]);
+
 
   const openEditServiceModal = useCallback(
     (item: CatalogueService) => {
@@ -564,6 +566,10 @@ export default function AdminCatalogueScreen({accessToken, onBack}: Props) {
       setCategoryError('Category name is required.');
       return;
     }
+    if (isMalformedCategoryName(categoryName)) {
+      setCategoryError('Please enter a valid category name (at least 2 letters/numbers).');
+      return;
+    }
     setSaving(true);
     setCategoryError('');
     try {
@@ -654,7 +660,7 @@ export default function AdminCatalogueScreen({accessToken, onBack}: Props) {
   };
 
   // Policy Save Handler
-  const handleSavePolicy = async () => {
+  const handleSavePolicy = useCallback(async () => {
     if (!fee || !threshold || !gst || !minimum) {
       setError('Please fill out all checkout policy fields.');
       return;
@@ -676,7 +682,8 @@ export default function AdminCatalogueScreen({accessToken, onBack}: Props) {
     } finally {
       setPolicySaving(false);
     }
-  };
+  }, [fee, threshold, gst, minimum, accessToken, load]);
+
 
   // Action Menu trigger from card
   const handleOpenActions = useCallback((item: CatalogueService) => {
@@ -727,7 +734,8 @@ export default function AdminCatalogueScreen({accessToken, onBack}: Props) {
             accessibilityLabel="Back to admin dashboard"
             style={styles.backButton}
             onPress={onBack}>
-            <Text style={styles.backButtonText}>← Admin</Text>
+            <AppIcon name="arrow-left" size={14} color="#344054" />
+            <Text style={styles.backButtonText}>Admin</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -771,7 +779,7 @@ export default function AdminCatalogueScreen({accessToken, onBack}: Props) {
             <Text style={styles.categoryDropdownText} numberOfLines={1}>
               {selectedCategoryName}
             </Text>
-            <Text style={styles.dropdownChevron}>›</Text>
+            <AppIcon name="chevron-down" size={16} color="#667085" />
           </TouchableOpacity>
         </View>
 
@@ -850,82 +858,7 @@ export default function AdminCatalogueScreen({accessToken, onBack}: Props) {
           </TouchableOpacity>
         </View>
 
-        {/* Result Count Banner */}
-        <View style={styles.resultCountRow}>
-          <Text style={styles.resultCountText}>
-            {filteredServices.length}{' '}
-            {filteredServices.length === 1 ? 'service found' : 'services found'}
-          </Text>
-          {searchQuery || categoryFilter !== 'all' || statusFilter !== 'all' ? (
-            <TouchableOpacity
-              accessibilityRole="button"
-              accessibilityLabel="Reset all filters"
-              onPress={() => {
-                setSearchQuery('');
-                setCategoryFilter('all');
-                setStatusFilter('all');
-              }}>
-              <Text style={styles.clearFiltersLink}>Reset filters</Text>
-            </TouchableOpacity>
-          ) : null}
-        </View>
-      </View>
-    );
-  }, [
-    data,
-    totalServices,
-    activeServices,
-    searchQuery,
-    selectedCategoryName,
-    statusFilter,
-    filteredServices.length,
-    categoryFilter,
-    onBack,
-  ]);
-
-  // List Empty Component
-  const listEmpty = useMemo(() => {
-    if (loading) return null;
-    return (
-      <View style={styles.emptyState}>
-        <AppIcon name="info" size={32} color="#94A3B8" />
-        <Text style={styles.emptyStateTitle}>No services found</Text>
-        <Text style={styles.emptyStateSubtitle}>
-          {searchQuery || statusFilter !== 'all' || categoryFilter !== 'all'
-            ? 'Try changing your search or filters.'
-            : 'Get started by creating your first laundry service.'}
-        </Text>
-        {searchQuery || statusFilter !== 'all' || categoryFilter !== 'all' ? (
-          <TouchableOpacity
-            accessibilityRole="button"
-            accessibilityLabel="Clear filters"
-            style={styles.emptyStateBtn}
-            onPress={() => {
-              setSearchQuery('');
-              setCategoryFilter('all');
-              setStatusFilter('all');
-            }}>
-            <Text style={styles.emptyStateBtnText}>Clear filters</Text>
-          </TouchableOpacity>
-        ) : (
-          <TouchableOpacity
-            accessibilityRole="button"
-            accessibilityLabel="Add service"
-            style={styles.emptyStateBtn}
-            onPress={openAddServiceModal}>
-            <Text style={styles.emptyStateBtnText}>+ Add service</Text>
-          </TouchableOpacity>
-        )}
-      </View>
-    );
-  }, [loading, searchQuery, statusFilter, categoryFilter]);
-
-  // List Footer Component: Collapsible Policy & Recent Activity
-  const listFooter = useMemo(() => {
-    if (!data) return null;
-    return (
-      <View style={styles.footerContainer}>
-        {/* CHECKOUT POLICY ACCORDION */}
+        {/* CHECKOUT POLICY ACCORDION (MOVED TO TOP) */}
         <View style={styles.footerAccordionCard}>
           <TouchableOpacity
             accessibilityRole="button"
@@ -938,7 +871,11 @@ export default function AdminCatalogueScreen({accessToken, onBack}: Props) {
                 Delivery fees, free threshold, GST & minimum order
               </Text>
             </View>
-            <Text style={styles.accordionChevron}>{policyExpanded ? '▲' : '▼'}</Text>
+            <AppIcon
+              name={policyExpanded ? 'chevron-up' : 'chevron-down'}
+              size={16}
+              color="#64748B"
+            />
           </TouchableOpacity>
 
           {policyExpanded ? (
@@ -1028,7 +965,7 @@ export default function AdminCatalogueScreen({accessToken, onBack}: Props) {
           ) : null}
         </View>
 
-        {/* RECENT ACTIVITY ACCORDION */}
+        {/* RECENT ACTIVITY ACCORDION (MOVED TO TOP) */}
         <View style={styles.footerAccordionCard}>
           <TouchableOpacity
             accessibilityRole="button"
@@ -1039,7 +976,11 @@ export default function AdminCatalogueScreen({accessToken, onBack}: Props) {
               <Text style={styles.accordionTitle}>Recent Activity</Text>
               <Text style={styles.accordionSubtitle}>Audit trail of catalogue modifications</Text>
             </View>
-            <Text style={styles.accordionChevron}>{activityExpanded ? '▲' : '▼'}</Text>
+            <AppIcon
+              name={activityExpanded ? 'chevron-up' : 'chevron-down'}
+              size={16}
+              color="#64748B"
+            />
           </TouchableOpacity>
 
           {activityExpanded ? (
@@ -1068,10 +1009,38 @@ export default function AdminCatalogueScreen({accessToken, onBack}: Props) {
             </View>
           ) : null}
         </View>
+
+        {/* Result Count Banner */}
+        <View style={styles.resultCountRow}>
+          <Text style={styles.resultCountText}>
+            {filteredServices.length}{' '}
+            {filteredServices.length === 1 ? 'service found' : 'services found'}
+          </Text>
+          {searchQuery || categoryFilter !== 'all' || statusFilter !== 'all' ? (
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="Reset all filters"
+              onPress={() => {
+                setSearchQuery('');
+                setCategoryFilter('all');
+                setStatusFilter('all');
+              }}>
+              <Text style={styles.clearFiltersLink}>Reset filters</Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
       </View>
     );
   }, [
     data,
+    totalServices,
+    activeServices,
+    searchQuery,
+    selectedCategoryName,
+    statusFilter,
+    filteredServices.length,
+    categoryFilter,
+    onBack,
     policyExpanded,
     activityExpanded,
     fee,
@@ -1079,7 +1048,51 @@ export default function AdminCatalogueScreen({accessToken, onBack}: Props) {
     gst,
     minimum,
     policySaving,
+    handleSavePolicy,
+    openAddServiceModal,
   ]);
+
+  // List Empty Component
+  const listEmpty = useMemo(() => {
+    if (loading) return null;
+    return (
+      <View style={styles.emptyState}>
+        <AppIcon name="info" size={32} color="#94A3B8" />
+        <Text style={styles.emptyStateTitle}>No services found</Text>
+        <Text style={styles.emptyStateSubtitle}>
+          {searchQuery || statusFilter !== 'all' || categoryFilter !== 'all'
+            ? 'Try changing your search or filters.'
+            : 'Get started by creating your first laundry service.'}
+        </Text>
+        {searchQuery || statusFilter !== 'all' || categoryFilter !== 'all' ? (
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel="Clear filters"
+            style={styles.emptyStateBtn}
+            onPress={() => {
+              setSearchQuery('');
+              setCategoryFilter('all');
+              setStatusFilter('all');
+            }}>
+            <Text style={styles.emptyStateBtnText}>Clear filters</Text>
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel="Add service"
+            style={styles.emptyStateBtn}
+            onPress={openAddServiceModal}>
+            <Text style={styles.emptyStateBtnText}>+ Add service</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    );
+  }, [loading, searchQuery, statusFilter, categoryFilter, openAddServiceModal]);
+
+  // List Footer Component
+  const listFooter = useMemo(() => {
+    return null;
+  }, []);
 
   return (
     <SafeAreaView style={styles.page}>
@@ -1115,8 +1128,13 @@ export default function AdminCatalogueScreen({accessToken, onBack}: Props) {
         {loading && !data ? (
           <View style={styles.loadingWrapper}>
             <View style={styles.topNavigation}>
-              <TouchableOpacity style={styles.backButton} onPress={onBack}>
-                <Text style={styles.backButtonText}>← Admin</Text>
+              <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel="Back to admin dashboard"
+                style={styles.backButton}
+                onPress={onBack}>
+                <AppIcon name="arrow-left" size={14} color="#344054" />
+                <Text style={styles.backButtonText}>Admin</Text>
               </TouchableOpacity>
             </View>
             <Text style={styles.pageTitle}>Service Catalogue</Text>
@@ -1127,9 +1145,9 @@ export default function AdminCatalogueScreen({accessToken, onBack}: Props) {
             data={filteredServices}
             keyExtractor={item => item.id}
             renderItem={renderServiceItem}
-            ListHeaderComponent={listHeader}
-            ListEmptyComponent={listEmpty}
-            ListFooterComponent={listFooter}
+            ListHeaderComponent={listHeader || undefined}
+            ListEmptyComponent={listEmpty || undefined}
+            ListFooterComponent={listFooter || undefined}
             style={styles.flatListStyle}
             contentContainerStyle={styles.listContentContainer}
             initialNumToRender={8}
@@ -1226,7 +1244,7 @@ export default function AdminCatalogueScreen({accessToken, onBack}: Props) {
                         onPress={() => {
                           setActiveCategoryMenu(item as CatalogueCategory);
                         }}>
-                        <Text style={styles.categoryItemActionText}>⋮</Text>
+                        <AppIcon name="more-vertical" size={16} color="#667085" />
                       </TouchableOpacity>
                     ) : null}
                   </View>
@@ -1290,7 +1308,7 @@ export default function AdminCatalogueScreen({accessToken, onBack}: Props) {
                     <Text style={styles.actionMenuLabel}>Edit category</Text>
                     <Text style={styles.actionMenuSub}>Change category name & description</Text>
                   </View>
-                  <Text style={styles.actionMenuArrow}>›</Text>
+                  <AppIcon name="chevron-right" size={16} color="#94A3B8" />
                 </TouchableOpacity>
 
                 <TouchableOpacity
@@ -1303,7 +1321,7 @@ export default function AdminCatalogueScreen({accessToken, onBack}: Props) {
                     <Text style={[styles.actionMenuLabel, styles.textDanger]}>Delete category</Text>
                     <Text style={styles.actionMenuSub}>Remove category from active list</Text>
                   </View>
-                  <Text style={styles.actionMenuArrow}>›</Text>
+                  <AppIcon name="chevron-right" size={16} color="#94A3B8" />
                 </TouchableOpacity>
               </View>
             ) : null}
@@ -1418,7 +1436,7 @@ export default function AdminCatalogueScreen({accessToken, onBack}: Props) {
                     <Text style={styles.actionMenuLabel}>Edit service</Text>
                     <Text style={styles.actionMenuSub}>Change name, category, unit, details</Text>
                   </View>
-                  <Text style={styles.actionMenuArrow}>›</Text>
+                  <AppIcon name="chevron-right" size={16} color="#94A3B8" />
                 </TouchableOpacity>
 
                 <TouchableOpacity
@@ -1431,7 +1449,7 @@ export default function AdminCatalogueScreen({accessToken, onBack}: Props) {
                     <Text style={styles.actionMenuLabel}>Set price</Text>
                     <Text style={styles.actionMenuSub}>Update global or facility rate</Text>
                   </View>
-                  <Text style={styles.actionMenuArrow}>›</Text>
+                  <AppIcon name="chevron-right" size={16} color="#94A3B8" />
                 </TouchableOpacity>
 
                 <TouchableOpacity
@@ -1444,7 +1462,7 @@ export default function AdminCatalogueScreen({accessToken, onBack}: Props) {
                     <Text style={styles.actionMenuLabel}>Package eligibility</Text>
                     <Text style={styles.actionMenuSub}>Link customer packages</Text>
                   </View>
-                  <Text style={styles.actionMenuArrow}>›</Text>
+                  <AppIcon name="chevron-right" size={16} color="#94A3B8" />
                 </TouchableOpacity>
 
                 <TouchableOpacity
@@ -1473,7 +1491,7 @@ export default function AdminCatalogueScreen({accessToken, onBack}: Props) {
                         : 'Make visible to customers'}
                     </Text>
                   </View>
-                  <Text style={styles.actionMenuArrow}>›</Text>
+                  <AppIcon name="chevron-right" size={16} color="#94A3B8" />
                 </TouchableOpacity>
 
                 <TouchableOpacity
@@ -1486,7 +1504,7 @@ export default function AdminCatalogueScreen({accessToken, onBack}: Props) {
                     <Text style={[styles.actionMenuLabel, styles.textDanger]}>Delete service</Text>
                     <Text style={styles.actionMenuSub}>Remove this service from catalogue</Text>
                   </View>
-                  <Text style={styles.actionMenuArrow}>›</Text>
+                  <AppIcon name="chevron-right" size={16} color="#94A3B8" />
                 </TouchableOpacity>
               </View>
             ) : null}
@@ -1727,7 +1745,7 @@ export default function AdminCatalogueScreen({accessToken, onBack}: Props) {
                           <Text style={styles.formCategoryTriggerText} numberOfLines={1}>
                             {formSelectedCategoryName}
                           </Text>
-                          <Text style={styles.dropdownChevron}>›</Text>
+                          <AppIcon name="chevron-down" size={16} color="#667085" />
                         </TouchableOpacity>
                       </View>
 
@@ -2186,6 +2204,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: '#E4E7EC',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
   backButtonText: {
     fontSize: 14,

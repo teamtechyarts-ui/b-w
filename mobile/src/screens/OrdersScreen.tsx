@@ -6,7 +6,6 @@ import React, {
 import {
   FlatList,
   RefreshControl,
-  SafeAreaView,
   StatusBar,
   StyleSheet,
   Text,
@@ -14,6 +13,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import {SafeAreaView} from 'react-native-safe-area-context';
 
 import {useFocusEffect} from '@react-navigation/native';
 import AppIcon from '../components/AppIcon';
@@ -31,6 +31,8 @@ import {getOrders} from '../services/ordersApi';
 import {CustomerOrder, isPastOrder} from '../types/order';
 import {filterOrderHistory} from '../utils/orderHistory';
 import {formatMoney} from '../utils/orderPricing';
+import {useCustomerRealtime} from '../hooks/useRealtime';
+import {RealtimeEventPayload} from '../services/realtimeService';
 
 type OrdersScreenProps = {
   accessToken: string;
@@ -64,26 +66,65 @@ export default function OrdersScreen({
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [refreshNotice, setRefreshNotice] = useState<string | null>(null);
+
+  const inFlightRef = React.useRef(false);
+  const ordersRef = React.useRef(orders);
+  ordersRef.current = orders;
 
   const loadOrders = useCallback(
     async (isRefresh = false) => {
+      if (inFlightRef.current) return;
+      inFlightRef.current = true;
       try {
         if (isRefresh) {
           setRefreshing(true);
-        } else {
+        } else if (ordersRef.current.length === 0) {
           setLoading(true);
         }
         setError(null);
-        const result = await getOrders(accessToken);
+        setRefreshNotice(null);
+        const result = await getOrders(accessToken, { forceRefresh: isRefresh });
         setOrders(result);
       } catch (loadError: any) {
-        setError(loadError?.message || 'Unable to load orders.');
+        if (ordersRef.current.length === 0) {
+          setError(loadError?.message || 'Unable to load orders.');
+        } else {
+          setRefreshNotice('Unable to refresh orders right now. Showing cached list.');
+        }
       } finally {
         setLoading(false);
         setRefreshing(false);
+        inFlightRef.current = false;
       }
     },
     [accessToken],
+  );
+
+  useCustomerRealtime(
+    null,
+    useCallback(
+      (event: RealtimeEventPayload) => {
+        if (event.orderId && event.status) {
+          setOrders(prevOrders => {
+            const index = prevOrders.findIndex(o => o.id === event.orderId);
+            if (index !== -1) {
+              const updated = [...prevOrders];
+              updated[index] = {
+                ...updated[index],
+                current_status: event.status as any,
+                updated_at: event.timestamp,
+              };
+              return updated;
+            }
+            return prevOrders;
+          });
+        }
+        loadOrders(true);
+      },
+      [loadOrders],
+    ),
+    accessToken,
   );
 
   useFocusEffect(
@@ -114,6 +155,8 @@ export default function OrdersScreen({
     );
 
     const orderNumber = order.order_number || order.id.slice(0, 8);
+    const isPast = isPastOrder(order.current_status);
+    const isDelivered = ['delivered', 'claim_period_active', 'completed'].includes(order.current_status);
 
     return (
       <TouchableOpacity
@@ -125,7 +168,7 @@ export default function OrdersScreen({
         onPress={() => onOpenOrder(order.id)}>
         <View style={styles.orderTopRow}>
           <View style={styles.flex}>
-            <Text style={styles.orderNumberLabel}>ORDER NUMBER</Text>
+            <Text style={styles.orderNumberLabel}>ORDER</Text>
             <Text style={styles.orderNumber}>{orderNumber}</Text>
           </View>
           <OrderStatusBadge status={order.current_status} />
@@ -133,26 +176,44 @@ export default function OrdersScreen({
 
         <View style={styles.divider} />
 
-        <View style={styles.orderInfoRow}>
-          <View style={styles.orderInfoBlock}>
-            <Text style={styles.infoLabel}>Scheduled Pickup</Text>
-            <Text style={styles.infoValue}>
-              {formatOrderDateTime(order.pickup_scheduled_at)}
-            </Text>
-            {order.pickup_slot_label ? (
-              <Text style={styles.slotText}>{order.pickup_slot_label}</Text>
-            ) : null}
-          </View>
+        {isPast ? (
+          <View style={styles.orderInfoRow}>
+            <View style={styles.orderInfoBlock}>
+              <Text style={styles.infoLabel}>{isDelivered ? 'Delivered' : 'Order Date'}</Text>
+              <Text style={styles.infoValue}>
+                {formatOrderDateTime(order.delivered_at || order.updated_at || order.created_at)}
+              </Text>
+            </View>
 
-          <View style={styles.orderInfoBlockRight}>
-            <Text style={styles.infoLabel}>Total Amount</Text>
-            <Text style={styles.amount}>₹{formatMoney(order.total_amount)}</Text>
+            <View style={styles.orderInfoBlockRight}>
+              <Text style={styles.infoLabel}>Total</Text>
+              <Text style={styles.amount}>
+                {itemCount} {itemCount === 1 ? 'item' : 'items'} · ₹{formatMoney(order.total_amount)}
+              </Text>
+            </View>
           </View>
-        </View>
+        ) : (
+          <View style={styles.orderInfoRow}>
+            <View style={styles.orderInfoBlock}>
+              <Text style={styles.infoLabel}>Scheduled Pickup</Text>
+              <Text style={styles.infoValue}>
+                {formatOrderDateTime(order.pickup_scheduled_at)}
+              </Text>
+              {order.pickup_slot_label ? (
+                <Text style={styles.slotText}>{order.pickup_slot_label}</Text>
+              ) : null}
+            </View>
+
+            <View style={styles.orderInfoBlockRight}>
+              <Text style={styles.infoLabel}>Total Amount</Text>
+              <Text style={styles.amount}>₹{formatMoney(order.total_amount)}</Text>
+            </View>
+          </View>
+        )}
 
         <View style={styles.orderFooter}>
           <Text style={styles.itemCount}>
-            {itemCount} {itemCount === 1 ? 'garment' : 'garments'}
+            {itemCount} {itemCount === 1 ? 'item' : 'items'}
           </Text>
 
           <View style={styles.viewDetailsRow}>
@@ -229,6 +290,13 @@ export default function OrdersScreen({
           </Text>
         </TouchableOpacity>
       </View>
+
+      {refreshNotice ? (
+        <View style={styles.noticeBanner}>
+          <AppIcon name="alert" size={14} color={colors.warningText} />
+          <Text style={styles.noticeText}>{refreshNotice}</Text>
+        </View>
+      ) : null}
 
       {loading && !refreshing ? (
         <StateView type="loading" message="Loading your orders..." />
@@ -459,5 +527,23 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '800',
     color: colors.primary,
+  },
+  noticeBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    backgroundColor: colors.warningSurface,
+    borderColor: colors.warningBorder,
+    borderWidth: 1,
+    borderRadius: borderRadius.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.sm,
+  },
+  noticeText: {
+    fontSize: 12,
+    color: colors.warningText,
+    fontWeight: '600',
   },
 });

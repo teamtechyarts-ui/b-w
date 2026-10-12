@@ -2,7 +2,6 @@ import React, {useCallback, useEffect, useState} from 'react';
 import {
   ActivityIndicator,
   RefreshControl,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -10,6 +9,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import {SafeAreaView} from 'react-native-safe-area-context';
 import NativeQrScannerButton from '../components/NativeQrScannerButton';
 import AppIcon from '../components/AppIcon';
 import {
@@ -25,6 +25,8 @@ import {
   getDriverProfile,
   setDriverAvailability,
 } from '../services/driverProfileApi';
+import {useDriverRealtime} from '../hooks/useRealtime';
+import {RealtimeEventPayload} from '../services/realtimeService';
 
 type Props = {
   accessToken: string;
@@ -95,7 +97,7 @@ function AvailableJobQueue({
                 Facility: {job.facility?.name ?? 'Facility unavailable'}
               </Text>
               <Text style={styles.address}>{formatDriverAddress(job.address)}</Text>
-              {job.pickupScheduledAt ? (
+              {type === 'pickup' && job.pickupScheduledAt ? (
                 <Text style={styles.meta}>
                   Scheduled: {new Date(job.pickupScheduledAt).toLocaleString()}{' '}
                   {job.pickupSlotLabel ?? ''}
@@ -230,6 +232,29 @@ export default function DriverDashboardScreen({
     [accessToken],
   );
 
+  useDriverRealtime(
+    profile?.id,
+    useCallback(
+      (event: RealtimeEventPayload) => {
+        if (event.eventType === 'JOB_CLAIMED' && event.orderId) {
+          setDashboard(prev => {
+            if (!prev) return prev;
+            return {
+              ...prev,
+              availablePickups: (prev.availablePickups || []).filter(j => j.orderId !== event.orderId),
+              availableDeliveries: (prev.availableDeliveries || []).filter(j => j.orderId !== event.orderId),
+            };
+
+          });
+        }
+        load(true);
+      },
+      [load],
+    ),
+    accessToken,
+    !!accessToken,
+  );
+
   useEffect(() => {
     load();
   }, [load]);
@@ -314,7 +339,7 @@ export default function DriverDashboardScreen({
               style={styles.icon}
               onPress={onNotifications}
             >
-              <AppIcon name="alert" size={18} color="#111827" />
+              <AppIcon name="bell" size={18} color="#111827" />
             </TouchableOpacity>
             <TouchableOpacity
               accessibilityRole="button"
@@ -322,7 +347,7 @@ export default function DriverDashboardScreen({
               style={styles.icon}
               onPress={onProfile}
             >
-              <AppIcon name="shield" size={18} color="#111827" />
+              <AppIcon name="user" size={18} color="#111827" />
             </TouchableOpacity>
           </View>
         </View>

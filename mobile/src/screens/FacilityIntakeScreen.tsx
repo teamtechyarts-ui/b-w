@@ -1,7 +1,6 @@
 import React, { useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -9,6 +8,9 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import AppIcon from '../components/AppIcon';
+import { colors, spacing, borderRadius, typography, shadows } from '../theme/designSystem';
 import {
   IntakePreview,
   confirmFacilityReceipt,
@@ -39,6 +41,7 @@ export default function FacilityIntakeScreen({
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const lock = useRef(false);
+
   const lookupQr = async (scannedCode: string) => {
     if (lock.current) return;
     const token = scannedCode.trim();
@@ -67,6 +70,7 @@ export default function FacilityIntakeScreen({
       setBusy(false);
     }
   };
+
   const lookupOrder = async () => {
     if (lock.current) return;
     const normalized = orderNumber.trim().toUpperCase();
@@ -96,6 +100,7 @@ export default function FacilityIntakeScreen({
       setBusy(false);
     }
   };
+
   const confirm = async () => {
     if (lock.current || !preview || !receiptInput) return;
     lock.current = true;
@@ -128,27 +133,41 @@ export default function FacilityIntakeScreen({
       setBusy(false);
     }
   };
+
   return (
-    <SafeAreaView style={styles.page}>
-      <ScrollView contentContainerStyle={styles.content}>
-        <TouchableOpacity accessibilityRole="button" onPress={onBack}>
-          <Text style={styles.link}>← Back</Text>
-        </TouchableOpacity>
-        <Text style={styles.eyebrow}>SECURE HANDOFF</Text>
-        <Text style={styles.title}>Receive an order</Text>
+    <SafeAreaView style={styles.page} edges={['top', 'left', 'right', 'bottom']}>
+      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        <View style={styles.header}>
+          <TouchableOpacity
+            accessibilityRole="button"
+            style={styles.backButton}
+            onPress={onBack}
+          >
+            <AppIcon name="arrow-left" size={16} color={colors.primary} />
+            <Text style={styles.link}>← Back</Text>
+          </TouchableOpacity>
+          <View style={styles.headerTitleGroup}>
+            <Text style={styles.eyebrow}>SECURE HANDOFF</Text>
+            <Text style={styles.title}>Receive an order</Text>
+          </View>
+        </View>
+
         <Text style={styles.help}>
           Scan the driver’s handoff QR or enter the order ID shown on the Driver
-          screen. Review the physical items before accepting the order.
+          screen. Review physical items before accepting.
         </Text>
+
         <NativeQrScannerButton
           label="Scan driver’s handoff QR"
           onScanned={lookupQr}
         />
+
         <View style={styles.divider}>
           <View style={styles.line} />
           <Text style={styles.or}>OR ENTER ORDER ID</Text>
           <View style={styles.line} />
         </View>
+
         <TextInput
           accessibilityLabel="Order ID"
           autoCapitalize="characters"
@@ -160,54 +179,73 @@ export default function FacilityIntakeScreen({
             setError('');
           }}
           placeholder="BW-20260921-ABC12345"
+          placeholderTextColor={colors.textSubtle}
           style={styles.input}
         />
+
         <TouchableOpacity
           accessibilityRole="button"
           style={styles.secondaryButton}
           disabled={busy}
-          onPress={() => {
-            lookupOrder();
-          }}
+          onPress={lookupOrder}
         >
           <Text style={styles.secondaryText}>Find order by ID</Text>
         </TouchableOpacity>
+
         {busy ? (
-          <ActivityIndicator accessibilityLabel="Checking facility intake" />
+          <ActivityIndicator accessibilityLabel="Checking facility intake" color={colors.primary} />
         ) : null}
+
         {error ? (
-          <Text accessibilityRole="alert" style={styles.error}>
-            {error}
-          </Text>
+          <View style={styles.errorBanner}>
+            <Text accessibilityRole="alert" style={styles.error}>
+              {error}
+            </Text>
+          </View>
         ) : null}
+
         {success ? (
-          <Text accessibilityLiveRegion="polite">{success}</Text>
+          <View style={styles.successBanner}>
+            <Text accessibilityLiveRegion="polite" style={styles.successMessage}>{success}</Text>
+          </View>
         ) : null}
+
         {preview ? (
           <View style={styles.card}>
-            <Text style={styles.heading}>Order {preview.orderNumber}</Text>
-            <Text>Assigned facility: {preview.facility.name}</Text>
-            <Text>Status: {preview.orderStatus.replace(/_/g, ' ')}</Text>
-            <Text style={styles.heading}>Physical handover items</Text>
-            {preview.items.length ? (
-              preview.items.map((item, index) => (
-                <Text key={`${item.item_name}-${index}`}>
-                  {item.quantity} × {item.item_name}
-                  {item.weight_kg ? ` · ${item.weight_kg} kg` : ''}
+            <View style={styles.previewHeader}>
+              <Text style={styles.heading}>Order {preview.orderNumber}</Text>
+              <View style={styles.statusPill}>
+                <Text style={styles.statusPillText}>
+                  {preview.orderStatus.replace(/_/g, ' ')}
                 </Text>
-              ))
-            ) : (
-              <Text>
-                No item details recorded. Check with dispatch before confirming.
-              </Text>
-            )}
+              </View>
+            </View>
+            <Text style={styles.facilityName}>Assigned facility: {preview.facility.name}</Text>
+            <Text style={styles.status}>Status: {preview.orderStatus.replace(/_/g, ' ')}</Text>
+
+            <View style={styles.itemsSection}>
+              <Text style={styles.itemsHeading}>Physical handover items</Text>
+              {preview.items.length ? (
+                preview.items.map((item, index) => (
+                  <View key={`${item.item_name}-${index}`} style={styles.itemRow}>
+                    <Text style={styles.itemText}>
+                      {item.quantity} × {item.item_name}
+                      {item.weight_kg ? ` · ${item.weight_kg} kg` : ''}
+                    </Text>
+                  </View>
+                ))
+              ) : (
+                <Text style={styles.muted}>
+                  No item details recorded. Check with dispatch before confirming.
+                </Text>
+              )}
+            </View>
+
             <TouchableOpacity
               accessibilityRole="button"
-              style={styles.primaryButton}
+              style={[styles.primaryButton, (busy || !preview.items.length) && styles.buttonDisabled]}
               disabled={busy || !preview.items.length}
-              onPress={() => {
-                confirm();
-              }}
+              onPress={confirm}
             >
               <Text style={styles.primaryText}>Confirm physical receipt</Text>
             </TouchableOpacity>
@@ -217,53 +255,121 @@ export default function FacilityIntakeScreen({
     </SafeAreaView>
   );
 }
+
 const styles = StyleSheet.create({
-  page: { flex: 1, backgroundColor: '#F7F6F2' },
-  content: { padding: 18, gap: 16, paddingBottom: 36 },
+  page: { flex: 1, backgroundColor: colors.background },
+  content: { padding: spacing.md, gap: spacing.md, paddingBottom: spacing.xxxl },
+  header: { gap: spacing.xs, paddingVertical: spacing.xs },
+  backButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    alignSelf: 'flex-start',
+    minHeight: 36,
+  },
+  headerTitleGroup: { marginTop: 2 },
   eyebrow: {
     fontSize: 11,
-    letterSpacing: 1.4,
+    letterSpacing: 1.2,
     fontWeight: '800',
-    color: '#67635B',
+    color: colors.textMuted,
   },
-  title: { fontSize: 30, fontWeight: '900' },
-  heading: { fontSize: 19, fontWeight: '900' },
-  help: { color: '#67635B', lineHeight: 21 },
-  link: { fontWeight: '800' },
+  title: { fontSize: 22, fontWeight: '800', color: colors.textPrimary, marginTop: 2 },
+  heading: { fontSize: 16, fontWeight: '800', color: colors.textPrimary },
+  help: { color: colors.textSecondary, fontSize: 13, lineHeight: 19 },
+  link: { fontWeight: '700', color: colors.textPrimary },
   input: {
     borderWidth: 1,
-    borderColor: '#CFCAC0',
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 12,
+    borderColor: colors.borderStrong,
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    fontSize: 14,
+    color: colors.textPrimary,
+    minHeight: 44,
   },
   card: {
     borderWidth: 1,
-    borderColor: '#E2DED6',
-    backgroundColor: '#fff',
-    borderRadius: 18,
-    padding: 16,
-    gap: 10,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.md,
+    padding: spacing.md,
+    gap: spacing.sm,
+    ...shadows.sm,
   },
-  divider: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  line: { height: 1, flex: 1, backgroundColor: '#D7D2C9' },
-  or: { fontSize: 10, letterSpacing: 1, fontWeight: '800', color: '#777' },
-  primaryButton: {
-    minHeight: 50,
-    backgroundColor: '#151515',
-    borderRadius: 14,
-    justifyContent: 'center',
+  previewHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
   },
-  primaryText: { color: '#fff', fontWeight: '900' },
-  secondaryButton: {
-    minHeight: 48,
+  statusPill: {
+    backgroundColor: colors.surfaceSubtle,
+    borderRadius: borderRadius.full,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
     borderWidth: 1,
-    borderColor: '#151515',
-    borderRadius: 14,
+    borderColor: colors.border,
+  },
+  statusPillText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.textSecondary,
+    textTransform: 'capitalize',
+  },
+  facilityName: { fontSize: 13, color: colors.textSecondary },
+  status: { fontSize: 13, color: colors.textMuted, textTransform: 'capitalize' },
+  itemsSection: {
+    gap: 4,
+    backgroundColor: colors.surfaceSubtle,
+    padding: spacing.sm,
+    borderRadius: borderRadius.sm,
+    marginTop: spacing.xs,
+  },
+  itemsHeading: { fontSize: 13, fontWeight: '800', color: colors.textPrimary, marginBottom: 2 },
+  itemRow: { paddingVertical: 2 },
+  itemText: { fontSize: 13, color: colors.textPrimary, fontWeight: '600' },
+  muted: { fontSize: 12, color: colors.textMuted },
+  divider: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginVertical: spacing.xs },
+  line: { height: 1, flex: 1, backgroundColor: colors.border },
+  or: { fontSize: 10, letterSpacing: 1, fontWeight: '800', color: colors.textMuted },
+  primaryButton: {
+    minHeight: 48,
+    backgroundColor: colors.primary,
+    borderRadius: borderRadius.md,
     justifyContent: 'center',
     alignItems: 'center',
+    paddingHorizontal: spacing.lg,
+    marginTop: spacing.xs,
   },
-  secondaryText: { fontWeight: '900' },
-  error: { color: '#9A241E' },
+  primaryText: { color: '#FFFFFF', fontWeight: '800', fontSize: 14 },
+  secondaryButton: {
+    minHeight: 44,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.md,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: spacing.md,
+  },
+  secondaryText: { fontWeight: '700', color: colors.textPrimary, fontSize: 13 },
+  buttonDisabled: { opacity: 0.5 },
+  errorBanner: {
+    backgroundColor: colors.dangerSurface,
+    borderWidth: 1,
+    borderColor: colors.dangerBorder,
+    borderRadius: borderRadius.sm,
+    padding: spacing.md,
+  },
+  error: { color: colors.dangerText, fontSize: 13, fontWeight: '600' },
+  successBanner: {
+    backgroundColor: colors.successSurface,
+    borderWidth: 1,
+    borderColor: colors.successBorder,
+    borderRadius: borderRadius.sm,
+    padding: spacing.md,
+  },
+  successMessage: { color: colors.successText, fontWeight: '700', fontSize: 13 },
 });
+

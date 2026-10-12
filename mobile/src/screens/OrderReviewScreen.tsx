@@ -14,7 +14,6 @@ import {borderRadius, colors, shadows, spacing, typography} from '../theme/desig
 
 import {
   ActivityIndicator,
-  SafeAreaView,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -22,6 +21,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import {SafeAreaView} from 'react-native-safe-area-context';
 
 import type {AddressItem} from '../types/address';
 import type {CartItem} from '../types/service';

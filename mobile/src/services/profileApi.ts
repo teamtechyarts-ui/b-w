@@ -1,6 +1,6 @@
 import {apiRequest} from './api';
 
-export type CustomerProfile = {id: string; full_name: string | null; phone: string | null};
+export type CustomerProfile = {id: string; full_name: string | null; phone: string | null; email?: string | null};
 export type CustomerRecord = {id: string; profile_id: string; profiles: CustomerProfile};
 
 export function customerNameFromProfile(value: unknown): string | null {
@@ -23,3 +23,9 @@ export async function updateCustomerName(accessToken: string, fullName: string):
   if (issue) throw new Error(issue);
   return apiRequest<CustomerProfile>('/customers/me', {method: 'PATCH', accessToken, body: {fullName: fullName.trim()}});
 }
+export const deleteCustomerAccount = (accessToken: string) =>
+  apiRequest<{deleted: boolean; message: string}>('/customers/me', {
+    method: 'DELETE',
+    accessToken,
+  });
+

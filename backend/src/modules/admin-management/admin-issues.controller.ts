@@ -21,7 +21,7 @@ class RefundRequestDto {
 export class AdminIssuesController {
   constructor(private readonly issues: AdminIssuesService) {}
   @Get() overview() { return this.issues.overview(); }
-  @Get('orders/:orderId') order(@Param('orderId', ParseUUIDPipe) id: string) { return this.issues.order(id); }
+  @Get('orders/:orderId') order(@Param('orderId') id: string) { return this.issues.order(id); }
   @Post('orders/:orderId/claims/:claimId/decision') claim(@Req() req: any, @Param('orderId', ParseUUIDPipe) orderId: string,
     @Param('claimId', ParseUUIDPipe) claimId: string, @Body() body: ClaimDecisionDto) {
     return this.issues.claimDecision(req.user.id, orderId, claimId, body.status, body.notes);

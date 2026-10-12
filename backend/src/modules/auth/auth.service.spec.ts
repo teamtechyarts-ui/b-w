@@ -205,38 +205,16 @@ describe('AuthService provisioning', () => {
   });
 
   describe('Customer Email/Password Authentication', () => {
-    it('signs up customer with immediate session and provisions customer profile', async () => {
+    it('signs up customer in unverified state requiring email confirmation OTP', async () => {
       const f = fixture();
       const result = await f.service.signUp('test@example.com', 'SecurePass123!', 'John Doe', '+16505550101');
-      expect(f.createAuthClient).toHaveBeenCalledTimes(1);
-      expect(f.signUp).toHaveBeenCalledWith({
-        email: 'test@example.com',
-        password: 'SecurePass123!',
-        options: {
-          data: {
-            full_name: 'John Doe',
-            phone: '+16505550101',
-          },
-        },
-      });
-      expect(result.requiresEmailConfirmation).toBe(false);
-      expect(result.session).toEqual(f.session);
-      expect(result.profile.accountRole).toBe('customer');
-      expect(f.calls).toContain('customers');
-    });
-
-    it('signs up customer when email confirmation is required', async () => {
-      const f = fixture();
-      f.signUp.mockResolvedValueOnce({
-        data: { user: { id: 'unconfirmed-user', email: 'pending@example.com' }, session: null },
-        error: null,
-      });
-      const result = await f.service.signUp('pending@example.com', 'SecurePass123!', 'Jane Doe');
       expect(result.requiresEmailConfirmation).toBe(true);
       expect(result.session).toBeNull();
-      expect(result.message).toContain('check your email to verify');
-      expect(f.calls).toHaveLength(0); // ensureProfile not called until verified
+      expect(result.profile).toBeNull();
+      expect(result.message).toContain('verification code');
+      expect(f.calls).toHaveLength(0); // Profile is not provisioned until email is verified
     });
+
 
     it('translates duplicate email error into friendly user-facing message', async () => {
       const f = fixture();

@@ -4,7 +4,7 @@ import {
   ForbiddenException,
   NotFoundException,
 } from "@nestjs/common";
-import { OrdersService } from "./orders.service";
+import { OrdersService, invalidateCustomerCache, getCustomerCacheSize } from "./orders.service";
 import { validate } from "class-validator";
 import { CreateOrderDto } from "./dto/create-order.dto";
 
@@ -679,4 +679,109 @@ describe("OrdersService pincode-based laundry serviceability", () => {
     expect(result.facilityId).toBe("fac-1");
   });
 });
+
+describe("OrdersService customerIdCache and isolation", () => {
+  beforeEach(() => {
+    invalidateCustomerCache();
+  });
+
+  it("caches customer ID and reuses it on subsequent calls", async () => {
+    const fromMock = jest.fn((table: string) => {
+      if (table === "customers") {
+        return {
+          select: jest.fn().mockReturnThis(),
+          eq: jest.fn().mockReturnThis(),
+          maybeSingle: jest.fn().mockResolvedValue({ data: { id: "cust-123" }, error: null }),
+        };
+      }
+      if (table === "customer_addresses") {
+        return {
+          select: jest.fn().mockReturnThis(),
+          eq: jest.fn().mockReturnThis(),
+          maybeSingle: jest.fn().mockResolvedValue({
+            data: { id: "addr-1", postal_code: "500068" },
+            error: null,
+          }),
+        };
+      }
+      if (table === "facility_service_pincodes") {
+        return {
+          select: jest.fn().mockReturnThis(),
+          eq: jest.fn().mockResolvedValue({
+            data: [{ facility_id: "fac-1", pincode: "500068" }],
+            error: null,
+          }),
+        };
+      }
+      if (table === "facilities") {
+        return {
+          select: jest.fn().mockReturnThis(),
+          in: jest.fn().mockReturnThis(),
+          eq: jest.fn().mockResolvedValue({
+            data: [{ id: "fac-1", name: "Central", is_active: true }],
+            error: null,
+          }),
+        };
+      }
+      return { select: jest.fn().mockReturnThis(), eq: jest.fn().mockResolvedValue({ data: null, error: null }) };
+    });
+
+    const supabaseMock: any = { admin: { from: fromMock } };
+    const service = new OrdersService(supabaseMock);
+
+    // First call: resolves customer ID from database
+    await service.checkServiceability("profile-user-a", "addr-1");
+    expect(fromMock).toHaveBeenCalledWith("customers");
+    expect(getCustomerCacheSize()).toBe(1);
+
+    // Second call: served from in-memory cache
+    fromMock.mockClear();
+    await service.checkServiceability("profile-user-a", "addr-1");
+    expect(fromMock).not.toHaveBeenCalledWith("customers");
+
+    // Invalidation clears specific profile
+    invalidateCustomerCache("profile-user-a");
+    expect(getCustomerCacheSize()).toBe(0);
+
+    // Call after invalidation queries DB again
+    await service.checkServiceability("profile-user-a", "addr-1");
+    expect(fromMock).toHaveBeenCalledWith("customers");
+  });
+
+  it("enforces tenant/customer isolation in listMine", async () => {
+    let capturedCustomerId: string | null = null;
+    const fromMock = jest.fn((table: string) => {
+      if (table === "customers") {
+        return {
+          select: jest.fn().mockReturnThis(),
+          eq: jest.fn().mockReturnThis(),
+          maybeSingle: jest.fn().mockResolvedValue({ data: { id: "customer-owned-id" }, error: null }),
+        };
+      }
+      if (table === "orders") {
+        return {
+          select: jest.fn().mockReturnThis(),
+          eq: jest.fn((col: string, val: string) => {
+            if (col === "customer_id") capturedCustomerId = val;
+            return {
+              order: jest.fn().mockResolvedValue({
+                data: [{ id: "order-1", customer_id: "customer-owned-id" }],
+                error: null,
+              }),
+            };
+          }),
+        };
+      }
+      return {};
+    });
+
+    const supabaseMock: any = { admin: { from: fromMock } };
+    const service = new OrdersService(supabaseMock);
+
+    const orders = await service.listMine("profile-user-b");
+    expect(orders).toHaveLength(1);
+    expect(capturedCustomerId).toBe("customer-owned-id");
+  });
+});
+
 

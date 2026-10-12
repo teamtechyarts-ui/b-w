@@ -8,6 +8,7 @@ import {
   View,
 } from 'react-native';
 import AppIcon from '../components/AppIcon';
+import { colors, spacing, borderRadius, typography, shadows } from '../theme/designSystem';
 import {
   ProcessingHistory,
   ProcessingStage,
@@ -16,6 +17,7 @@ import {
   recordFacilityQualityDecision,
   startFacilityStage,
 } from '../services/facilityProcessingApi';
+import {useOrderRealtime} from '../hooks/useRealtime';
 
 const labels: Record<ProcessingStage, string> = {
   washing: 'Wash',
@@ -24,7 +26,9 @@ const labels: Record<ProcessingStage, string> = {
   folding: 'Fold',
   packaging: 'Pack',
 };
+
 const workflow = ['Wash', 'Dry', 'Iron', 'Fold', 'Pack', 'QC'] as const;
+
 type Props = {
   accessToken: string;
   orderId: string;
@@ -32,12 +36,13 @@ type Props = {
   items?: Array<{ id: string; item_name: string }>;
   packingReady?: boolean;
 };
+
 export default function FacilityProcessingPanel({
   accessToken,
   orderId,
   onChanged,
   items = [],
-  packingReady = true,
+  packingReady = false,
 }: Props) {
   const [history, setHistory] = useState<ProcessingHistory | null>(null);
   const [loading, setLoading] = useState(true);
@@ -48,6 +53,7 @@ export default function FacilityProcessingPanel({
   const [defectCode, setDefectCode] = useState('');
   const [affectedItemIds, setAffectedItemIds] = useState<string[]>([]);
   const lock = useRef(false);
+
   const refresh = useCallback(async () => {
     setLoading(true);
     setError('');
@@ -64,9 +70,21 @@ export default function FacilityProcessingPanel({
       setLoading(false);
     }
   }, [accessToken, orderId]);
+
+  useOrderRealtime(
+    orderId,
+    useCallback(() => {
+      refresh();
+      onChanged();
+    }, [refresh, onChanged]),
+    accessToken,
+    !!accessToken && !!orderId,
+  );
+
   useEffect(() => {
     refresh();
   }, [refresh]);
+
   const act = async (action: () => Promise<unknown>, success: string) => {
     if (lock.current) return;
     lock.current = true;
@@ -87,6 +105,7 @@ export default function FacilityProcessingPanel({
       setBusy(false);
     }
   };
+
   const decide = (approved: boolean) => {
     if (
       approved &&
@@ -113,21 +132,22 @@ export default function FacilityProcessingPanel({
         : 'QC failed. Rewash is required.',
     );
   };
-function formatTimestamp(isoString?: string | null): string {
-  if (!isoString) return '';
-  try {
-    const d = new Date(isoString);
-    if (isNaN(d.getTime())) return isoString;
-    return d.toLocaleString(undefined, {
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  } catch {
-    return isoString;
+
+  function formatTimestamp(isoString?: string | null): string {
+    if (!isoString) return '';
+    try {
+      const d = new Date(isoString);
+      if (isNaN(d.getTime())) return isoString;
+      return d.toLocaleString(undefined, {
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    } catch {
+      return isoString;
+    }
   }
-}
 
   const stepState = (label: (typeof workflow)[number]) => {
     const stageType: Record<string, ProcessingStage> = {
@@ -148,50 +168,58 @@ function formatTimestamp(isoString?: string | null): string {
     ].includes(history?.orderStatus ?? '');
 
     if (label === 'QC') {
-      if (history?.qualityDecisions?.some(item => item.approved) || isPostQc) {
+      if (
+        (history?.qualityDecisions?.some(item => item.approved) &&
+          !history?.rewashCycle) ||
+        isPostQc
+      ) {
         return 'complete';
       }
       return history?.canQualityCheck ? 'active' : 'waiting';
     }
-    if (label === 'Pack') {
-      const stage = history?.stages
-        .filter(item => item.operation_type === 'packaging')
-        .at(-1);
-      if (stage?.completed_at || packingReady || isPostQc) return 'complete';
-      if (stage || history?.nextStage === 'packaging') return 'active';
-      return 'waiting';
-    }
+
+    const opType = stageType[label];
     const stage = history?.stages
-      .filter(item => item.operation_type === stageType[label])
-      .at(-1);
+      ?.filter(item => item.operation_type === opType)
+      ?.at(-1);
+
     if (stage?.completed_at || isPostQc) return 'complete';
-    if (stage || history?.nextStage === stageType[label]) return 'active';
+    if ((stage && !stage.completed_at) || history?.nextStage === opType)
+      return 'active';
     return 'waiting';
   };
+
   return (
     <View style={styles.panel}>
       <Text style={styles.heading}>Processing workflow</Text>
-      <View style={styles.stepper}>
+
+      {/* Modern Compact Stepper */}
+      <View style={styles.stepper} accessibilityLabel="Processing stages stepper">
         {workflow.map((label, index) => {
           const state = stepState(label);
           return (
             <React.Fragment key={label}>
-              <View style={styles.stepWrap}>
+              <View style={styles.stepWrap} testID={`step-${label.toLowerCase()}-${state}`}>
                 <View
                   style={[
                     styles.stepDot,
                     state === 'complete' && styles.stepComplete,
                     state === 'active' && styles.stepActive,
                   ]}
+                  accessibilityLabel={`${label} stage: ${state}`}
                 >
-                  <Text
-                    style={[
-                      styles.stepNumber,
-                      state !== 'waiting' && styles.stepNumberActive,
-                    ]}
-                  >
-                    {state === 'complete' ? <AppIcon name="check" size={10} color="#FFFFFF" /> : index + 1}
-                  </Text>
+                  {state === 'complete' ? (
+                    <AppIcon name="check" size={12} color="#FFFFFF" strokeWidth={3} />
+                  ) : (
+                    <Text
+                      style={[
+                        styles.stepNumber,
+                        state !== 'waiting' && styles.stepNumberActive,
+                      ]}
+                    >
+                      {index + 1}
+                    </Text>
+                  )}
                 </View>
                 <Text
                   style={[
@@ -203,15 +231,26 @@ function formatTimestamp(isoString?: string | null): string {
                 </Text>
               </View>
               {index < workflow.length - 1 ? (
-                <View style={styles.connector} />
+                <View
+                  style={[
+                    styles.connector,
+                    stepState(workflow[index + 1]) !== 'waiting' && styles.connectorActive,
+                  ]}
+                />
               ) : null}
             </React.Fragment>
           );
         })}
       </View>
+
       {loading ? (
-        <ActivityIndicator accessibilityLabel="Loading processing history" />
+        <ActivityIndicator
+          accessibilityLabel="Loading processing history"
+          color={colors.primary}
+          style={styles.loader}
+        />
       ) : null}
+
       {error ? (
         <View style={styles.errorCard}>
           <Text accessibilityRole="alert" style={styles.errorText}>
@@ -228,15 +267,24 @@ function formatTimestamp(isoString?: string | null): string {
           </TouchableOpacity>
         </View>
       ) : null}
-      {message ? <Text accessibilityLiveRegion="polite">{message}</Text> : null}
+
+      {message ? (
+        <View style={styles.successBanner}>
+          <Text accessibilityLiveRegion="polite" style={styles.successMessage}>
+            {message}
+          </Text>
+        </View>
+      ) : null}
+
       {history?.openDiscrepancies ? (
         <View style={styles.blockAlert}>
           <Text style={styles.alertTitle}>Processing paused</Text>
-          <Text accessibilityRole="alert">
+          <Text accessibilityRole="alert" style={styles.alertText}>
             Resolve all intake discrepancies before processing.
           </Text>
         </View>
       ) : null}
+
       {history && !history.stages.length ? (
         <View style={styles.initialStateCard}>
           <Text style={styles.initialStateTitle}>Ready to start processing</Text>
@@ -245,43 +293,8 @@ function formatTimestamp(isoString?: string | null): string {
           </Text>
         </View>
       ) : null}
-      {history?.stages.map(stage => (
-        <View key={stage.id} style={styles.stageCard}>
-          <Text style={styles.stageTitle}>
-            Cycle {stage.rewash_cycle ?? 0} · {labels[stage.operation_type]} ·{' '}
-            {stage.completed_at ? 'Completed' : 'In progress'}
-          </Text>
-          <Text style={styles.stageTime}>
-            Started: {formatTimestamp(stage.started_at)}
-          </Text>
-          {stage.completed_at ? (
-            <Text style={styles.stageTime}>
-              Completed: {formatTimestamp(stage.completed_at)}
-            </Text>
-          ) : null}
-          {stage.completed_at || history.orderStatus !== 'processing' ? null : (
-            <TouchableOpacity
-              accessibilityRole="button"
-              style={styles.completeButton}
-              disabled={busy}
-              onPress={() => {
-                act(
-                  () => completeFacilityStage(accessToken, stage.id),
-                  `${labels[stage.operation_type]} completed.`,
-                );
-              }}
-            >
-              {busy ? (
-                <ActivityIndicator color="#151515" size="small" />
-              ) : (
-                <Text style={styles.completeButtonText}>
-                  Complete {labels[stage.operation_type]}
-                </Text>
-              )}
-            </TouchableOpacity>
-          )}
-        </View>
-      ))}
+
+      {/* Primary Action Button for Next Stage */}
       {history?.nextStage && !history.openDiscrepancies ? (
         <TouchableOpacity
           accessibilityRole="button"
@@ -296,7 +309,7 @@ function formatTimestamp(isoString?: string | null): string {
           }}
         >
           {busy ? (
-            <ActivityIndicator color="#fff" size="small" />
+            <ActivityIndicator color="#FFFFFF" size="small" />
           ) : (
             <Text style={styles.actionButtonText}>
               Start {labels[history.nextStage]}
@@ -304,59 +317,114 @@ function formatTimestamp(isoString?: string | null): string {
           )}
         </TouchableOpacity>
       ) : null}
+
+      {/* Stages in progress & history */}
+      {history?.stages.map(stage => (
+        <View key={stage.id} style={styles.stageCard}>
+          <View style={styles.stageHeaderRow}>
+            <Text style={styles.stageTitle}>
+              Cycle {stage.rewash_cycle ?? 0} · {labels[stage.operation_type]} ·{' '}
+              {stage.completed_at ? 'Completed' : 'In progress'}
+            </Text>
+          </View>
+
+          <Text style={styles.stageTime}>
+            Started: {formatTimestamp(stage.started_at)}
+          </Text>
+          {stage.completed_at ? (
+            <Text style={styles.stageTime}>
+              Completed: {formatTimestamp(stage.completed_at)}
+            </Text>
+          ) : null}
+
+          {stage.completed_at || history.orderStatus !== 'processing' ? null : (
+            <TouchableOpacity
+              accessibilityRole="button"
+              style={styles.completeButton}
+              disabled={busy}
+              onPress={() => {
+                act(
+                  () => completeFacilityStage(accessToken, stage.id),
+                  `${labels[stage.operation_type]} completed.`,
+                );
+              }}
+            >
+              {busy ? (
+                <ActivityIndicator color={colors.primary} size="small" />
+              ) : (
+                <Text style={styles.completeButtonText}>
+                  Complete {labels[stage.operation_type]}
+                </Text>
+              )}
+            </TouchableOpacity>
+          )}
+        </View>
+      ))}
+
       {history?.qualityDecisions?.length ? (
-        <Text style={styles.heading}>QC history</Text>
+        <Text style={styles.sectionTitle}>QC history</Text>
       ) : null}
       {history?.qualityDecisions?.map(decision => (
         <View key={decision.id} style={styles.stageCard}>
-          <Text style={styles.stageTitle}>
-            Cycle {decision.cycle_number} ·{' '}
-            {decision.approved ? 'Passed' : 'Failed — rewash required'}
-          </Text>
+          <View style={styles.stageHeaderRow}>
+            <Text style={styles.stageTitle}>
+              Cycle {decision.cycle_number} ·{' '}
+              {decision.approved ? 'Passed' : 'Failed — rewash required'}
+            </Text>
+          </View>
           <Text style={styles.stageTime}>
             Decided: {formatTimestamp(decision.created_at)}
           </Text>
           {decision.defect_code ? (
-            <Text>Defect: {decision.defect_code}</Text>
+            <Text style={styles.qcDetail}>Defect: {decision.defect_code}</Text>
           ) : null}
-          {decision.reason ? <Text>Reason: {decision.reason}</Text> : null}
+          {decision.reason ? <Text style={styles.qcDetail}>Reason: {decision.reason}</Text> : null}
           {decision.affected_item_ids.length ? (
-            <Text>Affected items: {decision.affected_item_ids.length}</Text>
+            <Text style={styles.qcDetail}>Affected items: {decision.affected_item_ids.length}</Text>
           ) : (
-            <Text>Applies to whole order</Text>
+            <Text style={styles.qcDetail}>Applies to whole order</Text>
           )}
         </View>
       ))}
+
       {history?.canQualityCheck ? (
-        <View style={styles.panel}>
+        <View style={styles.qcPanel}>
           <View style={styles.qcHeader}>
             <Text style={styles.heading}>Quality inspection</Text>
-            <Text style={styles.cycle}>Cycle {history.rewashCycle ?? 0}</Text>
+            <View style={styles.cycleBadge}>
+              <Text style={styles.cycle}>Cycle {history.rewashCycle ?? 0}</Text>
+            </View>
           </View>
           <TextInput
             accessibilityLabel="QC reason"
             value={reason}
             onChangeText={setReason}
             placeholder="Defect or inspection notes"
+            placeholderTextColor={colors.textSubtle}
             multiline
-            style={styles.input}
+            style={[styles.input, styles.qcInput]}
           />
           <Text style={styles.defectHeading}>For a failed inspection, select one defect:</Text>
-          {['stain', 'damage', 'finish', 'missing', 'other'].map(code => (
-            <TouchableOpacity
-              key={code}
-              accessibilityRole="radio"
-              accessibilityLabel={code}
-              accessibilityState={{ selected: defectCode === code }}
-              style={styles.radioRow}
-              onPress={() => setDefectCode(code)}
-            >
-              <View style={[styles.radioCircle, defectCode === code && styles.radioCircleSelected]}>
-                {defectCode === code ? <View style={styles.radioInner} /> : null}
-              </View>
-              <Text style={styles.radioLabel}>{code}</Text>
-            </TouchableOpacity>
-          ))}
+          <View style={styles.defectGrid}>
+            {['stain', 'damage', 'finish', 'missing', 'other'].map(code => (
+              <TouchableOpacity
+                key={code}
+                accessibilityRole="radio"
+                accessibilityLabel={code}
+                accessibilityState={{ selected: defectCode === code }}
+                style={[styles.radioRow, defectCode === code && styles.radioRowSelected]}
+                onPress={() => setDefectCode(code)}
+              >
+                <View style={[styles.radioCircle, defectCode === code && styles.radioCircleSelected]}>
+                  {defectCode === code ? <View style={styles.radioInner} /> : null}
+                </View>
+                <Text style={[styles.radioLabel, defectCode === code && styles.radioLabelSelected]}>
+                  {code}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
           <Text style={styles.defectHeading}>
             Choose affected items, or leave all unchecked for the whole order:
           </Text>
@@ -376,259 +444,377 @@ function formatTimestamp(isoString?: string | null): string {
               }
             >
               <View style={[styles.itemCheckBox, affectedItemIds.includes(item.id) && styles.itemCheckBoxChecked]}>
-                {affectedItemIds.includes(item.id) ? <AppIcon name="check" size={10} color="#FFFFFF" /> : null}
+                {affectedItemIds.includes(item.id) ? (
+                  <AppIcon name="check" size={10} color="#FFFFFF" strokeWidth={3} />
+                ) : null}
               </View>
               <Text style={styles.itemCheckText}>
                 {item.item_name}
               </Text>
             </TouchableOpacity>
           ))}
+
           {!packingReady ? (
-            <Text>
+            <Text style={styles.warningHint}>
               Confirm final packing before QC can make this order ready.
             </Text>
           ) : null}
-          <TouchableOpacity
-            accessibilityRole="button"
-            style={styles.passButton}
-            disabled={busy || !packingReady}
-            onPress={() => decide(true)}
-          >
-            <Text style={styles.passText}>Pass QC</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            accessibilityRole="button"
-            style={styles.failButton}
-            disabled={busy || (history.rewashCycle ?? 0) >= 2}
-            onPress={() => decide(false)}
-          >
-            <Text style={styles.failText}>Fail QC — require rewash</Text>
-          </TouchableOpacity>
+
+          <View style={styles.qcActionGroup}>
+            <TouchableOpacity
+              accessibilityRole="button"
+              style={[styles.passButton, (!packingReady || busy) && styles.buttonDisabled]}
+              disabled={busy || !packingReady}
+              onPress={() => decide(true)}
+            >
+              <Text style={styles.passText}>Pass QC</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              accessibilityRole="button"
+              style={[
+                styles.failButton,
+                (busy || (history.rewashCycle ?? 0) >= 2) && styles.buttonDisabled,
+              ]}
+              disabled={busy || (history.rewashCycle ?? 0) >= 2}
+              onPress={() => decide(false)}
+            >
+              <Text style={styles.failText}>Fail QC — require rewash</Text>
+            </TouchableOpacity>
+          </View>
+
           {(history.rewashCycle ?? 0) >= 2 ? (
-            <Text>
-              Rewash limit reached. Reconciliation notes are required for final
-              approval.
+            <Text style={styles.warningHint}>
+              Rewash limit reached. Reconciliation notes are required for final approval.
             </Text>
           ) : null}
         </View>
       ) : null}
+
       {history?.orderStatus === 'rework_required' ? (
-        <Text>QC failed. Start a new washing cycle after reconciliation.</Text>
+        <View style={styles.reworkBanner}>
+          <Text style={styles.reworkText}>QC failed. Start a new washing cycle after reconciliation.</Text>
+        </View>
       ) : null}
     </View>
   );
 }
+
 const styles = StyleSheet.create({
-  panel: { gap: 10, paddingVertical: 14 },
-  heading: { fontSize: 19, fontWeight: '900' },
+  panel: { gap: spacing.sm, paddingVertical: spacing.sm },
+  heading: { fontSize: 17, fontWeight: '800', color: colors.textPrimary },
+  sectionTitle: { fontSize: 15, fontWeight: '800', color: colors.textPrimary, marginTop: spacing.xs },
+  loader: { marginVertical: spacing.sm },
   stepper: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    marginVertical: 8,
+    marginVertical: spacing.xs,
+    backgroundColor: colors.surface,
+    padding: spacing.md,
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    ...shadows.sm,
   },
-  stepWrap: { alignItems: 'center', width: 38, gap: 5 },
+  stepWrap: { alignItems: 'center', width: 36, gap: 4 },
   stepDot: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
     backgroundColor: '#E4E0D8',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  stepComplete: { backgroundColor: '#176E47' },
-  stepActive: { backgroundColor: '#151515' },
-  stepNumber: { fontWeight: '900', color: '#777' },
-  stepNumberActive: { color: '#fff' },
-  stepLabel: { fontSize: 10, fontWeight: '800', color: '#777' },
-  stepLabelActive: { color: '#151515' },
-  connector: { height: 2, flex: 1, backgroundColor: '#D7D2C9', marginTop: 14 },
+  stepComplete: { backgroundColor: colors.success },
+  stepActive: { backgroundColor: colors.primary },
+  stepNumber: { fontWeight: '800', color: colors.textMuted, fontSize: 11 },
+  stepNumberActive: { color: '#FFFFFF' },
+  stepLabel: { fontSize: 10, fontWeight: '700', color: colors.textMuted },
+  stepLabelActive: { color: colors.textPrimary, fontWeight: '800' },
+  connector: { height: 2, flex: 1, backgroundColor: colors.border, marginBottom: 16 },
+  connectorActive: { backgroundColor: colors.success },
   blockAlert: {
-    backgroundColor: '#FFF1CF',
+    backgroundColor: colors.warningSurface,
     borderWidth: 1,
-    borderColor: '#E6C46A',
-    borderRadius: 14,
-    padding: 13,
+    borderColor: colors.warningBorder,
+    borderRadius: borderRadius.md,
+    padding: spacing.md,
     gap: 4,
   },
-  alertTitle: { fontWeight: '900' },
+  alertTitle: { fontWeight: '800', fontSize: 14, color: colors.warningText },
+  alertText: { fontSize: 13, color: colors.warningText },
   initialStateCard: {
-    backgroundColor: '#EEF4FF',
+    backgroundColor: colors.infoSurface,
     borderWidth: 1,
-    borderColor: '#C7D9F8',
-    borderRadius: 14,
-    padding: 14,
+    borderColor: colors.infoBorder,
+    borderRadius: borderRadius.md,
+    padding: spacing.md,
     gap: 4,
-    marginVertical: 6,
   },
   initialStateTitle: {
-    fontSize: 16,
-    fontWeight: '900',
-    color: '#1E3A8A',
+    fontSize: 15,
+    fontWeight: '800',
+    color: colors.infoText,
   },
   initialStateText: {
     fontSize: 13,
-    color: '#3B5998',
+    color: colors.textSecondary,
   },
   stageCard: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: '#E2DED6',
-    borderRadius: 14,
-    padding: 14,
-    gap: 6,
-    marginVertical: 4,
+    borderColor: colors.border,
+    borderRadius: borderRadius.md,
+    padding: spacing.md,
+    gap: 4,
+    ...shadows.sm,
+  },
+  stageHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   stageTitle: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '800',
-    color: '#151515',
+    color: colors.textPrimary,
   },
+  stagePill: {
+    borderRadius: borderRadius.full,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+  },
+  stagePillActive: { backgroundColor: colors.infoSurface },
+  stagePillComplete: { backgroundColor: colors.successSurface },
+  stagePillDanger: { backgroundColor: colors.dangerSurface },
+  stagePillText: { fontSize: 11, fontWeight: '700', color: colors.textSecondary },
   stageTime: {
     fontSize: 12,
-    color: '#67635B',
+    color: colors.textMuted,
+  },
+  qcDetail: {
+    fontSize: 13,
+    color: colors.textSecondary,
   },
   actionButton: {
-    backgroundColor: '#151515',
-    borderRadius: 13,
+    backgroundColor: colors.primary,
+    borderRadius: borderRadius.md,
     minHeight: 48,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 16,
-    marginVertical: 6,
+    paddingHorizontal: spacing.lg,
+    marginVertical: spacing.xs,
+    ...shadows.sm,
   },
   actionButtonText: {
-    color: '#fff',
-    fontWeight: '900',
+    color: '#FFFFFF',
+    fontWeight: '800',
     fontSize: 15,
   },
   completeButton: {
-    backgroundColor: '#EDEAE3',
-    borderRadius: 10,
-    minHeight: 40,
+    backgroundColor: colors.surfaceSubtle,
+    borderRadius: borderRadius.sm,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+    minHeight: 44,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 14,
-    marginTop: 6,
+    paddingHorizontal: spacing.md,
+    marginTop: spacing.xs,
   },
   completeButtonText: {
-    color: '#151515',
+    color: colors.textPrimary,
     fontWeight: '800',
     fontSize: 13,
   },
   errorCard: {
-    backgroundColor: '#FDF2F2',
+    backgroundColor: colors.dangerSurface,
     borderWidth: 1,
-    borderColor: '#F8B4B4',
-    borderRadius: 12,
-    padding: 12,
-    gap: 8,
+    borderColor: colors.dangerBorder,
+    borderRadius: borderRadius.md,
+    padding: spacing.md,
+    gap: spacing.xs,
   },
   errorText: {
-    color: '#9A241E',
-    fontWeight: '700',
+    color: colors.dangerText,
+    fontWeight: '600',
     fontSize: 13,
   },
   retryButton: {
     alignSelf: 'flex-start',
-    backgroundColor: '#9A241E',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    backgroundColor: colors.danger,
+    borderRadius: borderRadius.xs,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
   },
   retryButtonText: {
-    color: '#fff',
-    fontWeight: '800',
+    color: '#FFFFFF',
+    fontWeight: '700',
     fontSize: 12,
+  },
+  successBanner: {
+    backgroundColor: colors.successSurface,
+    borderWidth: 1,
+    borderColor: colors.successBorder,
+    borderRadius: borderRadius.sm,
+    padding: spacing.md,
+  },
+  successMessage: { color: colors.successText, fontWeight: '700', fontSize: 13 },
+  qcPanel: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: borderRadius.md,
+    padding: spacing.md,
+    gap: spacing.sm,
+    marginTop: spacing.xs,
+    ...shadows.sm,
   },
   qcHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  cycle: { fontWeight: '800', color: '#67635B' },
+  cycleBadge: {
+    backgroundColor: colors.surfaceSubtle,
+    borderRadius: borderRadius.full,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  cycle: { fontWeight: '700', color: colors.textSecondary, fontSize: 11 },
   input: {
     borderWidth: 1,
-    borderColor: '#CFCAC0',
-    borderRadius: 12,
-    padding: 11,
-    backgroundColor: '#fff',
+    borderColor: colors.borderStrong,
+    borderRadius: borderRadius.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    backgroundColor: colors.surface,
+    fontSize: 14,
+    color: colors.textPrimary,
+  },
+  qcInput: {
+    minHeight: 60,
+    textAlignVertical: 'top',
   },
   passButton: {
-    backgroundColor: '#176E47',
-    borderRadius: 13,
+    backgroundColor: colors.success,
+    borderRadius: borderRadius.md,
     minHeight: 48,
     alignItems: 'center',
     justifyContent: 'center',
+    paddingHorizontal: spacing.lg,
   },
-  passText: { color: '#fff', fontWeight: '900' },
+  passText: { color: '#FFFFFF', fontWeight: '800', fontSize: 14 },
   defectHeading: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '700',
-    color: '#374151',
-    marginTop: 4,
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
+  defectGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.xs,
   },
   radioRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 6,
-    gap: 8,
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    borderRadius: borderRadius.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceSubtle,
+    gap: 6,
+    minHeight: 36,
+  },
+  radioRowSelected: {
+    borderColor: colors.primary,
+    backgroundColor: colors.surface,
   },
   radioCircle: {
-    width: 16,
-    height: 16,
-    borderRadius: 8,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
     borderWidth: 1.5,
-    borderColor: '#9CA3AF',
+    borderColor: colors.textMuted,
     alignItems: 'center',
     justifyContent: 'center',
   },
   radioCircleSelected: {
-    borderColor: '#111827',
+    borderColor: colors.primary,
   },
   radioInner: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#111827',
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.primary,
   },
   radioLabel: {
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: '600',
-    color: '#1F2937',
+    color: colors.textSecondary,
+    textTransform: 'capitalize',
+  },
+  radioLabelSelected: {
+    color: colors.textPrimary,
+    fontWeight: '700',
   },
   itemCheckRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 6,
-    gap: 8,
+    paddingVertical: spacing.xs,
+    gap: spacing.sm,
+    minHeight: 36,
   },
   itemCheckBox: {
-    width: 16,
-    height: 16,
+    width: 18,
+    height: 18,
     borderRadius: 4,
     borderWidth: 1.5,
-    borderColor: '#9CA3AF',
+    borderColor: colors.textMuted,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.surface,
   },
   itemCheckBoxChecked: {
-    backgroundColor: '#111827',
-    borderColor: '#111827',
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
   },
   itemCheckText: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
-    color: '#1F2937',
+    color: colors.textPrimary,
+  },
+  warningHint: {
+    fontSize: 12,
+    color: colors.warningText,
+    fontWeight: '600',
+  },
+  qcActionGroup: {
+    gap: spacing.xs,
+    marginTop: spacing.xs,
   },
   failButton: {
-    borderColor: '#B94A40',
+    borderColor: colors.danger,
     borderWidth: 1,
-    borderRadius: 13,
-    minHeight: 48,
+    borderRadius: borderRadius.md,
+    minHeight: 44,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: colors.surface,
   },
-  failText: { color: '#9A241E', fontWeight: '900' },
+  failText: { color: colors.dangerText, fontWeight: '800', fontSize: 13 },
+  buttonDisabled: { opacity: 0.5 },
+  reworkBanner: {
+    backgroundColor: colors.warningSurface,
+    padding: spacing.md,
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderColor: colors.warningBorder,
+  },
+  reworkText: { color: colors.warningText, fontSize: 13, fontWeight: '600' },
 });
+

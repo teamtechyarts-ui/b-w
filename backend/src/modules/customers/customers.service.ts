@@ -7,6 +7,8 @@ import {
 } from "@nestjs/common";
 import { SupabaseService } from "../supabase/supabase.service";
 import { CreateAddressDto, UpdateCustomerDto } from "./dto/customer.dto";
+import { invalidateAuthSessionsForUser } from "../../common/guards/supabase-auth.guard";
+import { invalidateCustomerCache } from "../orders/orders.service";
 
 @Injectable()
 export class CustomersService {
@@ -215,4 +217,86 @@ export class CustomersService {
       deleted: true,
     };
   }
+
+  async deleteAccount(userId: string) {
+    const c = await this.customer(userId);
+
+    const { data: activeOrders, error: orderErr } = await this.s.admin
+      .from("orders")
+      .select("id, current_status")
+      .eq("customer_id", c.id)
+      .in("current_status", [
+        "placed",
+        "pickup_assigned",
+        "picked_up",
+        "in_facility",
+        "processing",
+        "packed",
+        "delivery_assigned",
+      ]);
+
+    if (orderErr) {
+      throw new BadRequestException("Unable to verify active order status.");
+    }
+
+    if (activeOrders && activeOrders.length > 0) {
+      throw new ConflictException(
+        "Cannot delete account while you have active orders in progress. Please wait until your orders are completed or cancelled.",
+      );
+    }
+
+    await this.s.admin.from("device_tokens").delete().eq("profile_id", userId);
+    await this.s.admin.from("push_devices").delete().eq("profile_id", userId);
+
+    const { data: addresses } = await this.s.admin
+      .from("customer_addresses")
+      .select("id")
+      .eq("customer_id", c.id);
+
+    if (addresses && addresses.length > 0) {
+      for (const addr of addresses) {
+        try {
+          await this.s.admin
+            .from("customer_addresses")
+            .delete()
+            .eq("id", addr.id);
+        } catch {
+          // Keep historical address record if referenced by completed orders
+        }
+      }
+    }
+
+    await this.s.admin
+      .from("profiles")
+      .update({
+        full_name: "Deleted Customer",
+        phone: null,
+        avatar_path: null,
+        is_active: false,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", userId);
+
+    try {
+      await this.s.admin.auth.admin.deleteUser(userId);
+    } catch {
+      try {
+        await this.s.admin.auth.admin.updateUserById(userId, {
+          ban_duration: "876000h",
+        });
+      } catch {
+        // Fail-safe
+      }
+    }
+
+    // Invalidate any in-memory auth guard sessions and customer ID mappings
+    invalidateAuthSessionsForUser(userId);
+    invalidateCustomerCache(userId);
+
+    return {
+      deleted: true,
+      message: "Account and associated personal data deleted successfully.",
+    };
+  }
 }
+

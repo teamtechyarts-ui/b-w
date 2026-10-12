@@ -26,8 +26,93 @@ export class FacilityService {
   ) {}
 
   private async triggerDeliveryAssignment(orderId: string) {
-    // Under availability-based driver dispatch architecture, ready_for_delivery orders
-    // automatically enter the available delivery job pool for drivers to claim.
+    try {
+      const { data: order } = await this.db()
+        .from("orders")
+        .select("id,order_number,current_status,facility_id,customer_id")
+        .eq("id", orderId)
+        .maybeSingle();
+
+      const payload = {
+        eventType: "ORDER_STATUS_CHANGED",
+        entityId: orderId,
+        orderId,
+        orderNumber: order?.order_number,
+        status: "ready_for_delivery",
+        facilityId: order?.facility_id,
+        jobType: "delivery",
+        timestamp: new Date().toISOString(),
+      };
+
+      if (typeof this.supabase?.broadcastEvent === "function") {
+        await Promise.allSettled([
+          this.supabase.broadcastEvent("orders:all", "ORDER_STATUS_CHANGED", payload),
+          this.supabase.broadcastEvent("driver:available", "JOB_AVAILABLE", payload),
+          this.supabase.broadcastEvent("jobs:drivers", "JOB_AVAILABLE", payload),
+          this.supabase.broadcastEvent("admin:operations", "ORDER_STATUS_CHANGED", payload),
+          this.supabase.broadcastEvent(`order:${orderId}`, "ORDER_STATUS_CHANGED", payload),
+          order?.facility_id
+            ? this.supabase.broadcastEvent(`facility:${order.facility_id}`, "ORDER_STATUS_CHANGED", payload)
+            : Promise.resolve(),
+          order?.customer_id
+            ? this.supabase.broadcastEvent(`customer:${order.customer_id}`, "ORDER_STATUS_CHANGED", payload)
+            : Promise.resolve(),
+        ]);
+      }
+    } catch {
+      // Safe catch
+    }
+  }
+
+  private async broadcastFacilityEvent(
+    facilityId: string | null | undefined,
+    orderId: string,
+    eventType: string,
+    extra: Record<string, any> = {},
+  ) {
+    try {
+      if (typeof this.supabase?.broadcastEvent !== "function") return;
+      const { data: order } = await this.db()
+        .from("orders")
+        .select("id,order_number,current_status,facility_id,customer_id")
+        .eq("id", orderId)
+        .maybeSingle();
+
+      const fId = facilityId || order?.facility_id;
+      const status = order?.current_status ?? extra.status ?? "updated";
+      const payload = {
+        eventType,
+        entityId: orderId,
+        orderId,
+        orderNumber: order?.order_number,
+        status,
+        facilityId: fId,
+        timestamp: new Date().toISOString(),
+        ...extra,
+      };
+
+      const broadcasts: Promise<any>[] = [
+        this.supabase.broadcastEvent("orders:all", eventType, payload),
+        this.supabase.broadcastEvent("admin:operations", eventType, payload),
+        this.supabase.broadcastEvent(`order:${orderId}`, eventType, payload),
+        this.supabase.broadcastEvent("facility:all", eventType, payload),
+      ];
+
+      if (fId) {
+        broadcasts.push(
+          this.supabase.broadcastEvent(`facility:${fId}`, eventType, payload),
+        );
+      }
+      if (order?.customer_id) {
+        broadcasts.push(
+          this.supabase.broadcastEvent(`customer:${order.customer_id}`, "ORDER_STATUS_CHANGED", payload),
+        );
+      }
+
+      await Promise.allSettled(broadcasts);
+    } catch {
+      // Safe catch
+    }
   }
 
   private db() {
@@ -76,6 +161,7 @@ export class FacilityService {
         "rework_required",
         "ready_for_delivery",
         "delivery_assigned",
+        "delivery_accepted",
         "delivery_failed",
       ])
       .order("updated_at", { ascending: false })
@@ -89,9 +175,12 @@ export class FacilityService {
 
     const readyOrderIds = queue
       .filter((order) =>
-        ["ready_for_delivery", "delivery_assigned", "delivery_failed"].includes(
-          order.current_status,
-        ),
+        [
+          "ready_for_delivery",
+          "delivery_assigned",
+          "delivery_accepted",
+          "delivery_failed",
+        ].includes(order.current_status),
       )
       .map((order) => order.id);
 
@@ -105,6 +194,7 @@ export class FacilityService {
 
     const pickupAssignmentByOrder = new Map<string, any>();
     const deliveryAssignmentByOrder = new Map<string, any>();
+    const driverNavEventsByOrder = new Map<string, any[]>();
     const driverNames = new Map<string, string>();
     const processingStages = new Map<string, string>();
     const handedOverOrders = new Map<string, string>();
@@ -142,7 +232,13 @@ export class FacilityService {
           .from("driver_navigation_events")
           .select("order_id,event_type,created_at")
           .in("order_id", readyOrderIds)
-          .in("event_type", ["facility_dispatch", "driver_collection_confirmed"]),
+          .in("event_type", [
+            "navigate_facility",
+            "arrived_at_facility",
+            "facility_dispatch",
+            "driver_collection_confirmed",
+          ])
+          .order("created_at", { ascending: true }),
       ]);
 
       if (assignmentResult.error) {
@@ -163,6 +259,9 @@ export class FacilityService {
         } else if (op.event_type === "driver_collection_confirmed") {
           collectedOrders.set(op.order_id, op.created_at);
         }
+        const list = driverNavEventsByOrder.get(op.order_id) ?? [];
+        list.push(op);
+        driverNavEventsByOrder.set(op.order_id, list);
       }
     }
 
@@ -202,6 +301,25 @@ export class FacilityService {
         ? driverNames.get(pickupAssignment.driver_id) || "Assigned Driver"
         : null;
 
+      let effectiveDriverStatus = deliveryAssignment?.status ?? null;
+      if (deliveryAssignment && deliveryAssignment.status === "accepted") {
+        const navOps = driverNavEventsByOrder.get(order.id) ?? [];
+        let arrivedAtFacility = false;
+        let enRouteToFacility = false;
+        for (const navOp of navOps) {
+          if (navOp.event_type === "arrived_at_facility") {
+            arrivedAtFacility = true;
+          } else if (navOp.event_type === "navigate_facility") {
+            enRouteToFacility = true;
+          }
+        }
+        if (arrivedAtFacility) {
+          effectiveDriverStatus = "arrived";
+        } else if (enRouteToFacility) {
+          effectiveDriverStatus = "en_route";
+        }
+      }
+
       return {
         ...order,
         pickupDriverName,
@@ -219,7 +337,7 @@ export class FacilityService {
               id: deliveryAssignment.id,
               driverId: deliveryAssignment.driver_id,
               driverName: driverNames.get(deliveryAssignment.driver_id) || "Assigned Driver",
-              status: deliveryAssignment.status,
+              status: effectiveDriverStatus,
               rejectionReason: deliveryAssignment.rejection_reason ?? null,
               handedOver: handedOverOrders.has(order.id),
               handedOverAt: handedOverOrders.get(order.id) ?? null,
@@ -250,9 +368,12 @@ export class FacilityService {
           ),
         ).length,
         ready: queue.filter((order) =>
-          ["ready_for_delivery", "delivery_assigned", "delivery_failed"].includes(
-            order.current_status,
-          ),
+          [
+            "ready_for_delivery",
+            "delivery_assigned",
+            "delivery_accepted",
+            "delivery_failed",
+          ].includes(order.current_status),
         ).length,
       },
       orders: dashboardOrders,
@@ -405,12 +526,19 @@ export class FacilityService {
       throw new BadRequestException(insertError.message);
     }
 
-    return {
+    const result = {
       orderId,
       handedOver: true,
       driverId: assignment.driver_id,
       handedOverAt: now,
     };
+
+    await this.broadcastFacilityEvent(access.facilityId, orderId, "FACILITY_HANDOVER", {
+      driverId: assignment.driver_id,
+      handedOver: true,
+    });
+
+    return result;
   }
 
   async reassignDelivery(
@@ -446,6 +574,9 @@ export class FacilityService {
     if (error || !data?.assignment) {
       throw new ConflictException(error?.message ?? "Unable to reassign delivery");
     }
+    await this.broadcastFacilityEvent(access.facilityId, orderId, "DELIVERY_REASSIGNED", {
+      newDriverId,
+    });
     return data;
   }
 
@@ -649,7 +780,7 @@ export class FacilityService {
       );
     }
 
-    return {
+    const result = {
       orderId: receipt.orderId,
       operationId: receipt.operationId,
       facilityStatus: receipt.facilityStatus,
@@ -657,6 +788,13 @@ export class FacilityService {
       pickupAssignmentStatus: receipt.pickupAssignmentStatus,
       received: receipt.received,
     };
+
+    await this.broadcastFacilityEvent(null, receipt.orderId, "FACILITY_INTAKE", {
+      status: receipt.orderStatus,
+      facilityStatus: receipt.facilityStatus,
+    });
+
+    return result;
   }
 
   async receiveByOrderNumber(
@@ -724,6 +862,11 @@ export class FacilityService {
         verificationError?.message ?? "Unable to record facility verification",
       );
     }
+
+    await this.broadcastFacilityEvent(access.facilityId, orderId, "FACILITY_VERIFICATION", {
+      status: "verification",
+      facilityStatus: "verification",
+    });
 
     return {
       orderId,
@@ -831,6 +974,11 @@ export class FacilityService {
     } else {
       data = intakeRes;
     }
+
+    await this.broadcastFacilityEvent(access.facilityId, orderId, "FACILITY_VERIFICATION", {
+      status: data.orderStatus,
+      facilityStatus: "verification",
+    });
 
     return {
       orderId,
@@ -1116,6 +1264,9 @@ export class FacilityService {
     );
     if (error || !data)
       this.throwProcessingRpcError(error, "Unable to confirm packing");
+    await this.broadcastFacilityEvent(access.facilityId, orderId, "FACILITY_PACKING_CONFIRMED", {
+      status: order.current_status,
+    });
     return data;
   }
 
@@ -1228,7 +1379,7 @@ export class FacilityService {
       this.throwProcessingRpcError(error, "Unable to start processing");
     }
 
-    return {
+    const result = {
       ...created,
       operationId: created.operationId ?? created.id,
       previousFacilityStatus:
@@ -1236,6 +1387,13 @@ export class FacilityService {
       facilityStatus: created.facilityStatus ?? processType,
       orderStatus: created.orderStatus ?? "processing",
     };
+
+    await this.broadcastFacilityEvent(access.facilityId, orderId, "PROCESSING_STAGE_STARTED", {
+      status: result.orderStatus,
+      stage: processType,
+    });
+
+    return result;
   }
 
   async completeProcessing(profileId: string, operationId: string) {
@@ -1285,6 +1443,11 @@ export class FacilityService {
         "Unable to complete processing operation",
       );
     }
+
+    await this.broadcastFacilityEvent(access.facilityId, order.id, "PROCESSING_STAGE_COMPLETED", {
+      status: order.current_status,
+      stage: operation.current_status,
+    });
 
     return {
       ...updated,
@@ -1383,6 +1546,11 @@ export class FacilityService {
 
     if (qualityOperation.orderStatus === "ready_for_delivery") {
       await this.triggerDeliveryAssignment(orderId);
+    } else {
+      await this.broadcastFacilityEvent(access.facilityId, orderId, "QC_DECIDED", {
+        status: qualityOperation.orderStatus,
+        approved,
+      });
     }
 
     return {

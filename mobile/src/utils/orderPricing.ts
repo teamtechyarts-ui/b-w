@@ -100,7 +100,10 @@ export function calculateCheckoutPricing(
 }
 
 export function formatMoney(
-  value: number,
+  value: number | string | null | undefined,
 ) {
-  return value.toFixed(2);
+  const amount = Number(value ?? 0);
+  if (Number.isNaN(amount)) return '0.00';
+  return amount.toFixed(2);
 }
+

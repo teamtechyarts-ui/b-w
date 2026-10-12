@@ -1,26 +1,32 @@
 import React from 'react';
 import {
-  SafeAreaView,
   StatusBar,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
+import {SafeAreaView} from 'react-native-safe-area-context';
+import BrandLogo from '../components/BrandLogo';
+
+import PrivacyPolicyModal from '../components/PrivacyPolicyModal';
 
 type WelcomeScreenProps = {
   onGetStarted: () => void;
+  onOpenPrivacy?: () => void;
 };
 
 export default function WelcomeScreen({
   onGetStarted,
+  onOpenPrivacy,
 }: WelcomeScreenProps) {
+  const [showPrivacy, setShowPrivacy] = React.useState(false);
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" />
 
       <View style={styles.content}>
-        <Text style={styles.logo}>B&W</Text>
+        <BrandLogo width={200} containerStyle={styles.logoContainer} />
 
         <Text style={styles.title}>
           Bright & White
@@ -43,9 +49,23 @@ export default function WelcomeScreen({
         </TouchableOpacity>
       </View>
 
-      <Text style={styles.footer}>
-        Clean clothes. Simple life.
-      </Text>
+      <View style={styles.footerRow}>
+        <Text style={styles.footer}>
+          Clean clothes. Simple life.
+        </Text>
+        <TouchableOpacity
+          accessibilityRole="link"
+          accessibilityLabel="Privacy Policy"
+          onPress={() => onOpenPrivacy ? onOpenPrivacy() : setShowPrivacy(true)}
+          style={styles.privacyButton}>
+          <Text style={styles.privacyLink}>Privacy Policy</Text>
+        </TouchableOpacity>
+      </View>
+
+      <PrivacyPolicyModal
+        visible={showPrivacy}
+        onClose={() => setShowPrivacy(false)}
+      />
     </SafeAreaView>
   );
 }
@@ -63,10 +83,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 30,
   },
 
-  logo: {
-    fontSize: 42,
-    fontWeight: '800',
-    marginBottom: 18,
+  logoContainer: {
+    marginBottom: 20,
+    alignSelf: 'center',
   },
 
   title: {
@@ -103,10 +122,27 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 
+  footerRow: {
+    alignItems: 'center',
+    paddingBottom: 20,
+    gap: 6,
+  },
+
   footer: {
     textAlign: 'center',
-    paddingBottom: 20,
     fontSize: 13,
     color: '#666666',
+  },
+
+  privacyButton: {
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+  },
+
+  privacyLink: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#6B7280',
+    textDecorationLine: 'underline',
   },
 });

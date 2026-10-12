@@ -1,5 +1,6 @@
 import React, {useCallback, useEffect, useState} from 'react';
-import {ActivityIndicator, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View} from 'react-native';
+import {ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View} from 'react-native';
+import {SafeAreaView} from 'react-native-safe-area-context';
 import {DriverProfile, getDriverProfile, updateDriverName} from '../services/driverProfileApi';
 
 type Props = {accessToken: string; onLogout: () => Promise<void>; onBack?: () => void};

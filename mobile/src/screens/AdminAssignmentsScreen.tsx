@@ -2,13 +2,13 @@ import React, {useCallback, useEffect, useMemo, useState} from 'react';
 import {
   ActivityIndicator,
   RefreshControl,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
+import {SafeAreaView} from 'react-native-safe-area-context';
 import {
   AdminAssignmentDetail,
   AdminAssignmentOverview,
@@ -20,6 +20,7 @@ import {
   reassignAdminDriver,
 } from '../services/adminAssignmentsApi';
 import AppIcon from '../components/AppIcon';
+import {useAdminRealtime} from '../hooks/useRealtime';
 
 type Props = {
   accessToken: string;
@@ -72,6 +73,14 @@ export default function AdminAssignmentsScreen({accessToken, onBack, onOrder}: P
       }
     },
     [accessToken],
+  );
+
+  useAdminRealtime(
+    useCallback(() => {
+      load(selected?.orderId, true);
+    }, [load, selected?.orderId]),
+    accessToken,
+    !!accessToken,
   );
 
   useEffect(() => {
@@ -818,11 +827,23 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: '#EFECE6',
   },
+  summaryStatsRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginVertical: 4,
+  },
+  summaryStatItem: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    backgroundColor: '#F5F3EF',
+  },
   summaryStatInlineText: {
     fontSize: 14,
     fontWeight: '700',
     color: '#151515',
   },
+
   summaryJobsText: {
     fontSize: 15,
     fontWeight: '800',

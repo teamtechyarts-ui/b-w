@@ -1,7 +1,6 @@
 import React, {useEffect, useMemo, useState} from 'react';
 import {
   ActivityIndicator,
-  SafeAreaView,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -9,14 +8,16 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import {SafeAreaView} from 'react-native-safe-area-context';
 
 import AppIcon, {IconName} from '../components/AppIcon';
-import {borderRadius, colors, shadows, spacing, typography} from '../theme/designSystem';
+import {borderRadius, colors, shadows, spacing} from '../theme/designSystem';
 import type {AddressItem} from '../types/address';
 import type {ServiceCategory, ServiceItem} from '../types/service';
 import type {CustomerOrder} from '../types/order';
 import {getOrders} from '../services/ordersApi';
-import {formatMoney} from '../utils/orderPricing';
+import {useCustomerRealtime} from '../hooks/useRealtime';
+import {isMalformedCategoryName} from '../utils/categoryQuality';
 
 type Props = {
   customerName: string | null;
@@ -24,6 +25,7 @@ type Props = {
   servicesError: string;
   services: ServiceItem[];
   categories: ServiceCategory[];
+  selectedCategory?: string | null;
   addresses: AddressItem[];
   selectedAddressId: string | null;
   cartItemCount: number;
@@ -45,33 +47,57 @@ function getCategoryIconName(name: string): IconName {
   const lower = name.toLowerCase();
   if (lower.includes('fold')) return 'fold';
   if (lower.includes('iron') || lower.includes('steam')) return 'iron';
-  if (lower.includes('dry') || lower.includes('coat')) return 'sparkles';
-  if (lower.includes('linen') || lower.includes('bed') || lower.includes('house')) return 'box';
-  if (lower.includes('shoe')) return 'sparkles';
+  if (lower.includes('dry')) return 'hanger';
+  if (lower.includes('linen') || lower.includes('bed') || lower.includes('house') || lower.includes('curtain') || lower.includes('carpet')) return 'bed';
+  if (lower.includes('shoe')) return 'shoe';
   if (lower.includes('premium')) return 'sparkles';
-  if (lower.includes('curtain') || lower.includes('carpet')) return 'box';
   if (lower.includes('add')) return 'plus';
-  return 'wash';
+  if (lower.includes('wash')) return 'wash';
+  return 'sparkles';
 }
 
 export default function HomeScreen(props: Props) {
-  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [internalSelectedCategory, setInternalSelectedCategory] = useState<string | null>(null);
+  const selectedCategory = props.selectedCategory !== undefined ? props.selectedCategory : internalSelectedCategory;
   const [addressMenuOpen, setAddressMenuOpen] = useState(false);
   const [fetchedOrders, setFetchedOrders] = useState<CustomerOrder[]>([]);
 
-  useEffect(() => {
-    let cancelled = false;
-    if (props.accessToken && !props.activeUrgentOrders) {
-      getOrders(props.accessToken)
-        .then(orders => {
-          if (!cancelled && Array.isArray(orders)) setFetchedOrders(orders);
-        })
-        .catch(() => {});
-    }
-    return () => {
-      cancelled = true;
-    };
+  const lastRefreshTimeRef = React.useRef(0);
+
+  const refreshOrders = React.useCallback((force = false) => {
+    if (!props.accessToken || props.activeUrgentOrders) return;
+    const now = Date.now();
+    if (!force && now - lastRefreshTimeRef.current < 1000) return;
+    lastRefreshTimeRef.current = now;
+
+    getOrders(props.accessToken)
+      .then(orders => {
+        if (Array.isArray(orders)) setFetchedOrders(orders);
+      })
+      .catch(() => {});
   }, [props.accessToken, props.activeUrgentOrders]);
+
+  useEffect(() => {
+    refreshOrders();
+  }, [refreshOrders]);
+
+  const handleRealtimeEvent = React.useCallback((event: any) => {
+    if (
+      !event ||
+      event.eventType === 'RECONNECT_RECONCILE' ||
+      event.eventType === 'ORDER_STATUS_CHANGED' ||
+      event.eventType === 'ORDER_CREATED'
+    ) {
+      refreshOrders();
+    }
+  }, [refreshOrders]);
+
+  useCustomerRealtime(
+    null,
+    handleRealtimeEvent,
+    props.accessToken,
+    !!props.accessToken,
+  );
 
   const urgentOrders = useMemo(() => {
     const list = props.activeUrgentOrders || fetchedOrders;
@@ -86,27 +112,18 @@ export default function HomeScreen(props: Props) {
     address => address.id === props.selectedAddressId,
   );
 
-  const visibleServices = useMemo(() => {
-    if (selectedCategory) {
-      return props.services.filter(
-        service => service.categoryName === selectedCategory,
-      );
-    }
-    return [];
-  }, [props.services, selectedCategory]);
+  const displayCategories = useMemo(() => {
+    return props.categories.filter(category => !isMalformedCategoryName(category.name));
+  }, [props.categories]);
 
   const handleCategoryPress = (categoryName: string) => {
-    if (selectedCategory === categoryName) {
-      setSelectedCategory(null);
-    } else {
-      setSelectedCategory(categoryName);
-      props.onOpenCategory?.(categoryName);
-    }
+    setInternalSelectedCategory(categoryName);
+    props.onOpenCategory?.(categoryName);
   };
 
   const handleBookPickupPress = () => {
-    if (props.categories.length > 0) {
-      setSelectedCategory(props.categories[0].name);
+    if (displayCategories.length > 0) {
+      handleCategoryPress(displayCategories[0].name);
     } else if (props.cartItemCount > 0) {
       props.onOpenCart();
     }
@@ -134,7 +151,7 @@ export default function HomeScreen(props: Props) {
               accessibilityLabel="Notifications"
               style={styles.iconButton}
               onPress={props.onOpenNotifications}>
-              <AppIcon name="info" size={20} color={colors.textPrimary} />
+              <AppIcon name="bell" size={20} color={colors.textPrimary} />
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -165,9 +182,12 @@ export default function HomeScreen(props: Props) {
           </View>
           <View style={styles.locationInfo}>
             <Text style={styles.locationEyebrow}>DELIVER TO</Text>
-            <Text numberOfLines={1} style={styles.locationText}>
-              {selectedAddress?.label || selectedAddress?.address_line1 || 'Choose an address'} ▾
-            </Text>
+            <View style={{flexDirection: 'row', alignItems: 'center', gap: 4}}>
+              <Text numberOfLines={1} style={[styles.locationText, {flexShrink: 1}]}>
+                {selectedAddress?.label || selectedAddress?.address_line1 || 'Choose an address'}
+              </Text>
+              <AppIcon name="arrow-down" size={10} color={colors.textPrimary} strokeWidth={2.5} />
+            </View>
           </View>
         </TouchableOpacity>
 
@@ -222,7 +242,6 @@ export default function HomeScreen(props: Props) {
           return (
             <View
               key={order.id}
-              accessibilityRole="region"
               accessibilityLabel={`Driver arrived for Order ${order.order_number}`}
               style={styles.urgentActionCard}>
               <View style={styles.urgentCardHeader}>
@@ -298,7 +317,7 @@ export default function HomeScreen(props: Props) {
         ) : null}
 
         {/* Empty Catalogue State */}
-        {!props.servicesLoading && !props.servicesError && !props.categories.length ? (
+        {!props.servicesLoading && !props.servicesError && !displayCategories.length ? (
           <View style={styles.emptyContainer}>
             <Text style={styles.emptyText}>No services are available right now.</Text>
           </View>
@@ -306,7 +325,7 @@ export default function HomeScreen(props: Props) {
 
         {/* 2-Column Responsive Categories Grid */}
         <View style={styles.categoriesGrid}>
-          {props.categories.map(category => {
+          {displayCategories.map(category => {
             const isSelected = selectedCategory === category.name;
             const iconName = getCategoryIconName(category.name);
             return (
@@ -339,80 +358,6 @@ export default function HomeScreen(props: Props) {
             );
           })}
         </View>
-
-        {/* Active Category Services View */}
-        {selectedCategory ? (
-          <View style={styles.serviceSection}>
-            <View style={styles.selectedCategoryHeader}>
-              <Text style={styles.selectedCategoryTitle}>{selectedCategory}</Text>
-              <TouchableOpacity onPress={() => setSelectedCategory(null)}>
-                <Text style={styles.closeCategoryText}>Close</Text>
-              </TouchableOpacity>
-            </View>
-
-            {visibleServices.length ? (
-              visibleServices.map(service => {
-                const quantity = props.getQuantity(service.id);
-                const priceFormatted =
-                  service.price == null
-                    ? 'Price after inspection'
-                    : `₹${service.price.toFixed(2)} / ${service.pricingUnit}`;
-
-                return (
-                  <View key={service.id} style={styles.serviceCard}>
-                    <View style={styles.serviceInfo}>
-                      <Text style={styles.serviceName}>{service.name}</Text>
-                      {service.description ? (
-                        <Text style={styles.serviceDescription} numberOfLines={2}>
-                          {service.description}
-                        </Text>
-                      ) : null}
-                      <Text style={styles.servicePrice}>{priceFormatted}</Text>
-                    </View>
-
-                    <View style={styles.serviceAction}>
-                      {quantity > 0 ? (
-                        <View style={styles.stepperContainer}>
-                          <TouchableOpacity
-                            accessibilityLabel={`Remove ${service.name}`}
-                            style={styles.stepperButton}
-                            onPress={() => props.onUpdateQuantity(service, -1)}>
-                            <AppIcon name="minus" size={14} color={colors.textPrimary} strokeWidth={2.5} />
-                          </TouchableOpacity>
-                          <Text style={styles.stepperQuantity}>{quantity}</Text>
-                          <TouchableOpacity
-                            accessibilityLabel={`Add ${service.name}`}
-                            style={styles.stepperButton}
-                            onPress={() => props.onUpdateQuantity(service, 1)}>
-                            <AppIcon name="plus" size={14} color={colors.textPrimary} strokeWidth={2.5} />
-                          </TouchableOpacity>
-                        </View>
-                      ) : (
-                        <TouchableOpacity
-                          accessibilityRole="button"
-                          accessibilityLabel={`Add ${service.name}`}
-                          style={styles.addButton}
-                          onPress={() => props.onUpdateQuantity(service, 1)}>
-                          <Text style={styles.addButtonText}>Add</Text>
-                        </TouchableOpacity>
-                      )}
-                    </View>
-                  </View>
-                );
-              })
-            ) : (
-              <View style={styles.emptyContainer}>
-                <Text style={styles.emptyText}>
-                  {props.servicesLoading
-                    ? 'Loading services...'
-                    : props.servicesError
-                    ? 'Retry loading services to continue.'
-                    : 'No services are available in this category.'}
-                </Text>
-              </View>
-            )}
-          </View>
-        ) : null}
       </ScrollView>
     </SafeAreaView>
   );

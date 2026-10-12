@@ -1,7 +1,6 @@
 import React, {useCallback, useEffect, useState} from 'react';
 import {
   ActivityIndicator,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -9,6 +8,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import {SafeAreaView} from 'react-native-safe-area-context';
 import {
   FacilityChoice,
   StaffRecord,
@@ -40,7 +40,7 @@ export default function AdminStaffScreen({accessToken, onBack, onStaff}: Props) 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const [fieldErrors, setFieldErrors] = useState<{fullName?: string; phone?: string; driverPin?: string; confirmDriverPin?: string}>({});
+  const [fieldErrors, setFieldErrors] = useState<{fullName?: string; phone?: string; driverPin?: string; confirmDriverPin?: string; facilityId?: string}>({});
   const [success, setSuccess] = useState('');
   const [phone, setPhone] = useState('');
   const [fullName, setFullName] = useState('');

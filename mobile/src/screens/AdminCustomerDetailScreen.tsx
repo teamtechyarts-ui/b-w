@@ -1,5 +1,6 @@
 import React, {useCallback, useEffect, useState} from 'react';
-import {ActivityIndicator, SafeAreaView, ScrollView, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
+import {ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
+import {SafeAreaView} from 'react-native-safe-area-context';
 import {AdminCustomer, AdminOrderSummary, getAdminCustomer, getAdminCustomerOrders} from '../services/adminManagementApi';
 
 type Props = {accessToken: string; customerId: string; onBack: () => void; onOrder: (id: string) => void};

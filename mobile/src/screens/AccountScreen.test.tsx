@@ -16,6 +16,7 @@ test('customer Account menu routes secondary functions and excludes Loyalty, Ref
     ['Notifications', 'notifications'],
     ['Support', 'support'],
     ['Terms', 'terms'],
+    ['Privacy Policy', 'privacy'],
   ] as const;
 
   destinations.forEach(([label, destination]) => {

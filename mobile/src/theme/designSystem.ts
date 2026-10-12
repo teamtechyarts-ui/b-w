@@ -1,3 +1,5 @@
+import { Platform } from 'react-native';
+
 export const colors = {
   // Backgrounds
   background: '#FAF9F6',
@@ -75,25 +77,40 @@ export const typography = {
 };
 
 export const shadows = {
-  sm: {
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 2,
-    elevation: 1,
-  },
-  md: {
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  lg: {
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
-  },
+  sm: Platform.select({
+    web: {
+      boxShadow: '0 1px 2px rgba(0, 0, 0, 0.04)',
+    },
+    default: {
+      shadowColor: '#000000',
+      shadowOffset: { width: 0, height: 1 },
+      shadowOpacity: 0.04,
+      shadowRadius: 2,
+      elevation: 1,
+    },
+  }) as any,
+  md: Platform.select({
+    web: {
+      boxShadow: '0 2px 4px rgba(0, 0, 0, 0.06)',
+    },
+    default: {
+      shadowColor: '#000000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.06,
+      shadowRadius: 4,
+      elevation: 2,
+    },
+  }) as any,
+  lg: Platform.select({
+    web: {
+      boxShadow: '0 4px 8px rgba(0, 0, 0, 0.10)',
+    },
+    default: {
+      shadowColor: '#000000',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.1,
+      shadowRadius: 8,
+      elevation: 4,
+    },
+  }) as any,
 };

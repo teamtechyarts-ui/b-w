@@ -4,6 +4,8 @@ export type AdminOffer = {id: string; coupon_code: string; name: string; discoun
   discount_value: number | string; minimum_order_amount: number | string; maximum_discount: number | string | null;
   starts_at: string | null; expires_at: string | null; usage_limit: number | null; is_active: boolean;
   eligibility_note: string | null; redeemedCount: number; termsLocked: boolean};
+export type AdminGrowthOffer = AdminOffer;
+
 export type AdminPackage = {id: string; name: string; description: string | null; price: number | string;
   validity_days: number | null; is_active: boolean; soldCount: number; termsLocked: boolean};
 export type AdminGrowthSettings = {referral_enabled: boolean; referral_reward_points: number;

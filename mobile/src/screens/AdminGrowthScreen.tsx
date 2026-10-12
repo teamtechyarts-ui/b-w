@@ -5,7 +5,6 @@ import {
   Modal,
   Platform,
   RefreshControl,
-  SafeAreaView,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -14,6 +13,8 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import {SafeAreaView} from 'react-native-safe-area-context';
+import AppIcon from '../components/AppIcon';
 import {
   AdminGrowthOffer,
   AdminGrowthOverview,
@@ -392,8 +393,9 @@ export default function AdminGrowthScreen({accessToken, onBack}: Props) {
                     {/* Eligibility Note if configured */}
                     {offer.eligibility_note ? (
                       <View style={styles.eligibilityBox}>
+                        <AppIcon name="info" size={14} color="#64748B" />
                         <Text style={styles.eligibilityText}>
-                          ℹ️ {offer.eligibility_note}
+                          {offer.eligibility_note}
                         </Text>
                       </View>
                     ) : null}
@@ -1136,3 +1138,4 @@ const styles = StyleSheet.create({
     color: '#FFF',
   },
 });
+

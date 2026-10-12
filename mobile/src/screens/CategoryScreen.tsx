@@ -2,7 +2,6 @@ import React, {useMemo, useState} from 'react';
 import {
   FlatList,
   Modal,
-  SafeAreaView,
   StatusBar,
   StyleSheet,
   Text,
@@ -10,6 +9,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import {SafeAreaView} from 'react-native-safe-area-context';
 
 import AppIcon, {IconName} from '../components/AppIcon';
 import StateView from '../components/StateView';
@@ -31,6 +31,9 @@ type CategoryScreenProps = {
   services: ServiceItem[];
   cartItemCount: number;
   cartSubtotal: number;
+  servicesLoading?: boolean;
+  servicesError?: string;
+  onRetryServices?: () => void;
   getQuantity: (serviceId: string) => number;
   onBack: () => void;
   onOpenCart: () => void;
@@ -45,28 +48,16 @@ function formatMoney(value: number) {
 }
 
 function categoryIconName(name: string): IconName {
-  switch (name) {
-    case 'Wash & Fold':
-      return 'fold';
-    case 'Wash & Steam Iron':
-      return 'iron';
-    case 'Premium Laundry':
-      return 'sparkles';
-    case 'Wash & Iron':
-      return 'iron';
-    case 'Steam Ironing':
-      return 'iron';
-    case 'Dry Cleaning':
-      return 'sparkles';
-    case 'Household & Linen Care':
-      return 'box';
-    case 'Shoe Cleaning':
-      return 'sparkles';
-    case 'Add-On Services':
-      return 'plus';
-    default:
-      return 'wash';
-  }
+  const lower = name.toLowerCase();
+  if (lower.includes('fold')) return 'fold';
+  if (lower.includes('iron') || lower.includes('steam')) return 'iron';
+  if (lower.includes('dry')) return 'hanger';
+  if (lower.includes('linen') || lower.includes('bed') || lower.includes('house') || lower.includes('curtain') || lower.includes('carpet')) return 'bed';
+  if (lower.includes('shoe')) return 'shoe';
+  if (lower.includes('premium')) return 'sparkles';
+  if (lower.includes('add')) return 'plus';
+  if (lower.includes('wash')) return 'wash';
+  return 'sparkles';
 }
 
 function categoryDescription(name: string) {
@@ -99,6 +90,9 @@ export default function CategoryScreen({
   services,
   cartItemCount,
   cartSubtotal,
+  servicesLoading = false,
+  servicesError = '',
+  onRetryServices,
   getQuantity,
   onBack,
   onOpenCart,
@@ -255,14 +249,36 @@ export default function CategoryScreen({
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
           ListEmptyComponent={
-            <StateView
-              type="empty"
-              icon="search"
-              title="No services found"
-              message={`We couldn't find any services matching "${searchQuery}".`}
-              actionLabel="Clear Search"
-              onAction={() => setSearchQuery('')}
-            />
+            servicesLoading ? (
+              <StateView
+                type="loading"
+                message="Loading services..."
+              />
+            ) : servicesError ? (
+              <StateView
+                type="error"
+                title="Unable to load services"
+                message={servicesError}
+                actionLabel="Try again"
+                onAction={onRetryServices}
+              />
+            ) : searchQuery.trim() ? (
+              <StateView
+                type="empty"
+                icon="search"
+                title="No services found"
+                message={`We couldn't find any services matching "${searchQuery}".`}
+                actionLabel="Clear Search"
+                onAction={() => setSearchQuery('')}
+              />
+            ) : (
+              <StateView
+                type="empty"
+                icon="box"
+                title="No services available"
+                message="No services are currently available in this category."
+              />
+            )
           }
         />
 

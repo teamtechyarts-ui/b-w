@@ -2,7 +2,6 @@ import React, {useState} from 'react';
 import {
   ActivityIndicator,
   Modal,
-  SafeAreaView,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -10,6 +9,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import {SafeAreaView} from 'react-native-safe-area-context';
 
 import type {AddressItem} from '../types/address';
 import CheckoutProgressBar from '../components/CheckoutProgressBar';

@@ -5,6 +5,9 @@ import * as authApi from '../services/authApi';
 
 jest.mock('../services/authApi', () => ({
   signUpCustomer: jest.fn(),
+  verifyEmailOtp: jest.fn(),
+  resendEmailOtp: jest.fn(),
+  signInCustomer: jest.fn(),
 }));
 
 describe('SignUpScreen', () => {
@@ -249,4 +252,117 @@ describe('SignUpScreen', () => {
     });
     expect(onNavigateToLogin).toHaveBeenCalledTimes(1);
   });
+
+  it('allows user to enter 6-digit OTP and successfully verify email', async () => {
+    (authApi.signUpCustomer as jest.Mock).mockResolvedValueOnce({
+      session: null,
+      user: { id: 'usr-unconfirmed', email: 'jane@example.com' },
+      profile: null,
+      requiresEmailConfirmation: true,
+      message: 'Account created successfully. Please check your email to verify your account.',
+    });
+    (authApi.verifyEmailOtp as jest.Mock).mockResolvedValueOnce({
+      verified: true,
+      message: 'Email Verified Successfully',
+      user: { id: 'usr-unconfirmed', email: 'jane@example.com' },
+    });
+    (authApi.signInCustomer as jest.Mock).mockResolvedValueOnce({
+      session: { access_token: 'new-login-token' },
+      user: { id: 'usr-unconfirmed', email: 'jane@example.com' },
+      profile: { id: 'usr-unconfirmed', accountRole: 'customer' },
+    });
+
+    const onSessionEstablished = jest.fn();
+    const view = await render(
+      <SignUpScreen
+        onSessionEstablished={onSessionEstablished}
+        onNavigateToLogin={jest.fn()}
+        onBack={jest.fn()}
+      />,
+    );
+
+    // Fill form and submit
+    await act(async () => {
+      fireEvent.changeText(view.getByPlaceholderText('Full Name'), 'Jane Doe');
+      fireEvent.changeText(view.getByPlaceholderText('Email'), 'jane@example.com');
+      fireEvent.changeText(view.getByPlaceholderText('Mobile Number'), '9876543211');
+      fireEvent.changeText(view.getByPlaceholderText('Password'), 'SecurePass123!');
+      fireEvent.changeText(view.getByPlaceholderText('Confirm Password'), 'SecurePass123!');
+    });
+
+    await act(async () => {
+      fireEvent.press(view.getByText('Sign Up'));
+    });
+
+    // We should now be on the Verify Email screen
+    expect(view.getByText('Verify Your Email')).toBeTruthy();
+    expect(view.getByPlaceholderText('000000')).toBeTruthy();
+    expect(view.getByText('The verification code will expire in 10 minutes.')).toBeTruthy();
+
+    // Enter 6-digit OTP
+    await act(async () => {
+      fireEvent.changeText(view.getByPlaceholderText('000000'), '123456');
+    });
+
+    // Press Verify Email
+    await act(async () => {
+      fireEvent.press(view.getByText('Verify Email'));
+    });
+
+    expect(authApi.verifyEmailOtp).toHaveBeenCalledWith('jane@example.com', '123456');
+    expect(authApi.signInCustomer).toHaveBeenCalledWith({
+      email: 'jane@example.com',
+      password: 'SecurePass123!',
+    });
+    expect(onSessionEstablished).toHaveBeenCalledWith(
+      expect.objectContaining({
+        session: expect.objectContaining({ access_token: 'new-login-token' }),
+      }),
+    );
+  });
+
+  it('displays error on invalid OTP entry', async () => {
+    (authApi.signUpCustomer as jest.Mock).mockResolvedValueOnce({
+      session: null,
+      user: { id: 'usr-unconfirmed', email: 'jane@example.com' },
+      profile: null,
+      requiresEmailConfirmation: true,
+      message: 'Account created successfully. Please check your email to verify your account.',
+    });
+    (authApi.verifyEmailOtp as jest.Mock).mockRejectedValueOnce(
+      new Error('Invalid verification code. Please check and try again.'),
+    );
+
+    const view = await render(
+      <SignUpScreen
+        onSessionEstablished={jest.fn()}
+        onNavigateToLogin={jest.fn()}
+        onBack={jest.fn()}
+      />,
+    );
+
+    await act(async () => {
+      fireEvent.changeText(view.getByPlaceholderText('Full Name'), 'Jane Doe');
+      fireEvent.changeText(view.getByPlaceholderText('Email'), 'jane@example.com');
+      fireEvent.changeText(view.getByPlaceholderText('Mobile Number'), '9876543211');
+      fireEvent.changeText(view.getByPlaceholderText('Password'), 'SecurePass123!');
+      fireEvent.changeText(view.getByPlaceholderText('Confirm Password'), 'SecurePass123!');
+    });
+
+    await act(async () => {
+      fireEvent.press(view.getByText('Sign Up'));
+    });
+
+    // Enter incorrect OTP
+    await act(async () => {
+      fireEvent.changeText(view.getByPlaceholderText('000000'), '999999');
+    });
+
+    await act(async () => {
+      fireEvent.press(view.getByText('Verify Email'));
+    });
+
+    expect(view.getByText('Invalid verification code. Please check and try again.')).toBeTruthy();
+  });
 });
+

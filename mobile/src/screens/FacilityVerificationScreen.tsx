@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  SafeAreaView,
+  KeyboardAvoidingView,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -9,6 +10,9 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import AppIcon from '../components/AppIcon';
+import { colors, spacing, borderRadius, typography, shadows } from '../theme/designSystem';
 import {
   FacilityIntakeDetails,
   IntakeItem,
@@ -19,6 +23,7 @@ import {
 } from '../services/facilityVerificationApi';
 import FacilityProcessingPanel from './FacilityProcessingPanel';
 import FacilityPackingPanel from './FacilityPackingPanel';
+import {useOrderRealtime} from '../hooks/useRealtime';
 
 type Props = {
   accessToken: string;
@@ -53,6 +58,7 @@ export default function FacilityVerificationScreen({
   onBack,
   onChanged,
 }: Props) {
+  const insets = useSafeAreaInsets();
   const [detail, setDetail] = useState<FacilityIntakeDetails | null>(null);
   const [entries, setEntries] = useState<Record<string, Entry>>({});
   const [resolutionNotes, setResolutionNotes] = useState<
@@ -66,6 +72,7 @@ export default function FacilityVerificationScreen({
   const [packingReady, setPackingReady] = useState(false);
   const [workflowRefresh, setWorkflowRefresh] = useState(0);
   const lock = useRef(false);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
@@ -85,11 +92,38 @@ export default function FacilityVerificationScreen({
       setLoading(false);
     }
   }, [accessToken, orderId]);
+
+  useOrderRealtime(
+    orderId,
+    useCallback(
+      (event) => {
+        const nextStatus = event.status || (event as any).payload?.status;
+        if (nextStatus) {
+          setDetail(prev =>
+            prev
+              ? {
+                  ...prev,
+                  orderStatus: nextStatus,
+                }
+              : prev,
+          );
+        }
+        load();
+      },
+
+      [load],
+    ),
+    accessToken,
+    !!accessToken && !!orderId,
+  );
+
   useEffect(() => {
     load();
   }, [load]);
+
   const edit = (id: string, patch: Partial<Entry>) =>
     setEntries(current => ({ ...current, [id]: { ...current[id], ...patch } }));
+
   const submit = async () => {
     if (lock.current || !detail) return;
     setError('');
@@ -156,6 +190,7 @@ export default function FacilityVerificationScreen({
       setBusy(false);
     }
   };
+
   const resolve = async (id: string) => {
     if (lock.current) return;
     const notes = resolutionNotes[id]?.trim();
@@ -183,303 +218,648 @@ export default function FacilityVerificationScreen({
       setBusy(false);
     }
   };
+
   const openCount =
     detail?.discrepancies.filter(item => item.status === 'open').length ?? 0;
+
+  const isVerificationMode = detail?.orderStatus === 'received_at_facility';
+
   return (
-    <SafeAreaView style={styles.page}>
-      <ScrollView contentContainerStyle={styles.content}>
-        <TouchableOpacity accessibilityRole="button" onPress={onBack}>
-          <Text style={styles.link}>← Back</Text>
-        </TouchableOpacity>
-        <Text style={styles.eyebrow}>ORDER WORKFLOW</Text>
-        <Text style={styles.title}>Garment verification</Text>
-        {loading ? (
-          <ActivityIndicator accessibilityLabel="Loading garment verification" />
-        ) : null}
-        {error ? (
-          <Text accessibilityRole="alert" style={styles.error}>
-            {error}
-          </Text>
-        ) : null}
-        {error ? (
-          <TouchableOpacity
-            accessibilityRole="button"
-            onPress={() => {
-              load();
-            }}
-          >
-            <Text style={styles.link}>Retry verification</Text>
-          </TouchableOpacity>
-        ) : null}
-        {message ? (
-          <Text accessibilityLiveRegion="polite">{message}</Text>
-        ) : null}
-        {detail ? (
-          <>
-            <View style={styles.orderSummary}>
-              <Text style={styles.heading}>Order {detail.orderNumber}</Text>
-              <Text style={styles.summaryLine}>{detail.facility.name}</Text>
-              <Text style={styles.status}>
-                {detail.orderStatus.replace(/_/g, ' ')}
+    <SafeAreaView style={styles.page} edges={['top', 'left', 'right', 'bottom']}>
+      <KeyboardAvoidingView
+        style={styles.container}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <ScrollView
+          contentContainerStyle={[
+            styles.content,
+            isVerificationMode && { paddingBottom: 110 + (insets?.bottom ?? 0) },
+          ]}
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Header */}
+          <View style={styles.header}>
+            <TouchableOpacity
+              accessibilityRole="button"
+              style={styles.backButton}
+              onPress={onBack}
+            >
+              <AppIcon name="arrow-left" size={16} color={colors.primary} />
+              <Text style={styles.link}>← Back</Text>
+            </TouchableOpacity>
+            <View style={styles.headerTitleGroup}>
+              <Text style={styles.eyebrow}>ORDER WORKFLOW</Text>
+              <Text style={styles.title}>Garment verification</Text>
+            </View>
+          </View>
+
+          {loading ? (
+            <ActivityIndicator
+              accessibilityLabel="Loading garment verification"
+              color={colors.primary}
+              style={styles.loader}
+            />
+          ) : null}
+
+          {error ? (
+            <View style={styles.errorBanner}>
+              <Text accessibilityRole="alert" style={styles.error}>
+                {error}
+              </Text>
+              {!isVerificationMode ? (
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  style={styles.retryButton}
+                  onPress={() => {
+                    load();
+                  }}
+                >
+                  <Text style={styles.link}>Retry verification</Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+          ) : null}
+
+          {message ? (
+            <View style={styles.successBanner}>
+              <Text accessibilityLiveRegion="polite" style={styles.successMessage}>
+                {message}
               </Text>
             </View>
-            {detail.orderStatus === 'received_at_facility' ? (
-              <>
-                <View style={styles.instruction}>
-                  <Text style={styles.instructionTitle}>
-                    1. Compare the handoff
-                  </Text>
-                  <Text>
-                    Confirm the physical count and weight for each garment. Add
-                    notes only when something differs or is damaged.
-                  </Text>
+          ) : null}
+
+          {detail ? (
+            <>
+              {/* Compact Order Summary Bar */}
+              <View style={styles.orderSummary}>
+                <View style={styles.summaryTopRow}>
+                  <Text style={styles.heading}>Order {detail.orderNumber}</Text>
+                  <View style={styles.statusPill}>
+                    <Text style={styles.statusText}>
+                      {detail.orderStatus.replace(/_/g, ' ')}
+                    </Text>
+                  </View>
                 </View>
-                {detail.items.length ? (
-                  detail.items.map(item => {
-                    const entry = entries[item.id];
-                    return (
-                      <View key={item.id} style={styles.card}>
-                        <Text style={styles.heading}>{item.item_name}</Text>
-                        <Text style={styles.expected}>
-                          Expected: {item.quantity} item
-                          {item.quantity === 1 ? '' : 's'}
-                          {item.weight_kg == null
-                            ? ''
-                            : ` · ${item.weight_kg} kg`}
+                <Text style={styles.summaryLine}>{detail.facility.name}</Text>
+              </View>
+
+              {/* Verification Form */}
+              {isVerificationMode ? (
+                <>
+                  <View style={styles.instruction}>
+                    <Text style={styles.instructionTitle}>1. Compare the handoff</Text>
+                    <Text style={styles.instructionText}>
+                      Confirm physical count and weight for each garment. Add notes only when something differs or is damaged.
+                    </Text>
+                  </View>
+
+                  {detail.items.length ? (
+                    detail.items.map(item => {
+                      const entry = entries[item.id];
+                      const hasDiscrepancy =
+                        entry &&
+                        (Number(entry.quantity) !== item.quantity ||
+                          (item.weight_kg != null &&
+                            entry.weight.trim() !== '' &&
+                            Number(entry.weight) !== Number(item.weight_kg)) ||
+                          entry.damaged);
+
+                      return (
+                        <View key={item.id} style={styles.card}>
+                          <View style={styles.cardHeader}>
+                            <Text style={styles.itemName}>{item.item_name}</Text>
+                            <View style={styles.expectedBadge}>
+                              <Text style={styles.expected}>
+                                Expected: {item.quantity} item{item.quantity === 1 ? '' : 's'}
+                                {item.weight_kg == null ? '' : ` · ${item.weight_kg} kg`}
+                              </Text>
+                            </View>
+                          </View>
+
+                          <View style={styles.fieldGrid}>
+                            <View style={styles.fieldCol}>
+                              <Text style={styles.fieldLabel}>Count received</Text>
+                              <TextInput
+                                accessibilityLabel={`Measured count for ${item.item_name}`}
+                                keyboardType="number-pad"
+                                value={entry?.quantity ?? ''}
+                                onChangeText={quantity => edit(item.id, { quantity })}
+                                style={styles.input}
+                              />
+                            </View>
+
+                            <View style={styles.fieldCol}>
+                              <Text style={styles.fieldLabel}>Weight received</Text>
+                              <TextInput
+                                accessibilityLabel={`Measured weight for ${item.item_name}`}
+                                keyboardType="decimal-pad"
+                                value={entry?.weight ?? ''}
+                                onChangeText={weight => edit(item.id, { weight })}
+                                placeholder="Measured kg, if applicable"
+                                placeholderTextColor={colors.textSubtle}
+                                style={styles.input}
+                              />
+                            </View>
+                          </View>
+
+                          <TouchableOpacity
+                            accessibilityRole="button"
+                            style={[
+                              styles.damageToggle,
+                              entry?.damaged && styles.damageToggleActive,
+                            ]}
+                            onPress={() =>
+                              edit(item.id, { damaged: !entry?.damaged })
+                            }
+                          >
+                            <Text
+                              style={[
+                                styles.link,
+                                styles.damageToggleText,
+                                entry?.damaged && styles.damageToggleTextActive,
+                              ]}
+                            >
+                              {entry?.damaged
+                                ? 'Damaged at receipt: Yes'
+                                : 'Damaged at receipt: No'}
+                            </Text>
+                          </TouchableOpacity>
+
+                          <View style={styles.notesGroup}>
+                            <Text style={[styles.fieldLabel, hasDiscrepancy && styles.fieldLabelRequired]}>
+                              {hasDiscrepancy ? 'Discrepancy note (Required):' : 'Item notes (optional):'}
+                            </Text>
+                            <TextInput
+                              accessibilityLabel={`Discrepancy notes for ${item.item_name}`}
+                              value={entry?.notes ?? ''}
+                              onChangeText={notes => edit(item.id, { notes })}
+                              placeholder="Notes for missing, extra, damaged or weight mismatch"
+                              placeholderTextColor={colors.textSubtle}
+                              multiline
+                              style={[
+                                styles.input,
+                                styles.notesInput,
+                                hasDiscrepancy && !entry?.notes.trim() && styles.inputWarning,
+                              ]}
+                            />
+                          </View>
+                        </View>
+                      );
+                    })
+                  ) : (
+                    <Text style={styles.muted}>No garments are listed for this order.</Text>
+                  )}
+
+                  <View style={styles.overallNotesCard}>
+                    <Text style={styles.fieldLabel}>Overall verification notes (optional)</Text>
+                    <TextInput
+                      accessibilityLabel="Overall verification notes"
+                      value={overallNotes}
+                      onChangeText={setOverallNotes}
+                      placeholder="Overall intake notes (optional)"
+                      placeholderTextColor={colors.textSubtle}
+                      multiline
+                      style={[styles.input, styles.notesInput]}
+                    />
+                  </View>
+                </>
+              ) : null}
+
+              {detail.inspections.length ? (
+                <Text style={styles.recordSummaryText}>
+                  Measured item records: {detail.inspections.length}
+                </Text>
+              ) : null}
+
+              {/* Discrepancies Section */}
+              <View style={styles.discrepancyHeaderRow}>
+                <Text style={styles.heading}>
+                  Intake discrepancies · {openCount} open
+                </Text>
+              </View>
+
+              {detail.discrepancies.length ? (
+                detail.discrepancies.map(discrepancy => (
+                  <View key={discrepancy.id} style={styles.discrepancyCard}>
+                    <View style={styles.discrepancyTop}>
+                      <Text style={styles.discrepancyKind}>
+                        {discrepancy.kind.replace(/_/g, ' ')} · {discrepancy.status}
+                      </Text>
+                      <View style={[styles.discrepancyStatusPill, discrepancy.status === 'open' ? styles.pillOpen : styles.pillResolved]}>
+                        <Text style={styles.discrepancyStatusText}>{discrepancy.status}</Text>
+                      </View>
+                    </View>
+                    <Text style={styles.discrepancyCounts}>
+                      Listed {discrepancy.expected_quantity}; counted {discrepancy.counted_quantity}
+                    </Text>
+                    {discrepancy.notes ? (
+                      <Text style={styles.discrepancyNotes}>{discrepancy.notes}</Text>
+                    ) : null}
+                    {discrepancy.status === 'resolved' ? (
+                      <View style={styles.resolvedBox}>
+                        <Text style={styles.resolvedText}>
+                          Resolution: {discrepancy.resolution_notes}
                         </Text>
-                        <Text style={styles.fieldLabel}>Count received</Text>
+                      </View>
+                    ) : null}
+                    {discrepancy.status === 'open' && detail.role === 'manager' ? (
+                      <View style={styles.managerResolveBox}>
                         <TextInput
-                          accessibilityLabel={`Measured count for ${item.item_name}`}
-                          keyboardType="number-pad"
-                          value={entry?.quantity ?? ''}
-                          onChangeText={quantity => edit(item.id, { quantity })}
-                          style={styles.input}
-                        />
-                        <Text style={styles.fieldLabel}>Weight received</Text>
-                        <TextInput
-                          accessibilityLabel={`Measured weight for ${item.item_name}`}
-                          keyboardType="decimal-pad"
-                          value={entry?.weight ?? ''}
-                          onChangeText={weight => edit(item.id, { weight })}
-                          placeholder="Measured kg, if applicable"
-                          style={styles.input}
+                          accessibilityLabel={`Resolution notes for ${discrepancy.kind}`}
+                          value={resolutionNotes[discrepancy.id] ?? ''}
+                          onChangeText={notes =>
+                            setResolutionNotes(current => ({
+                              ...current,
+                              [discrepancy.id]: notes,
+                            }))
+                          }
+                          placeholder="Resolution notes"
+                          placeholderTextColor={colors.textSubtle}
+                          multiline
+                          style={[styles.input, styles.notesInput]}
                         />
                         <TouchableOpacity
                           accessibilityRole="button"
-                          onPress={() =>
-                            edit(item.id, { damaged: !entry?.damaged })
-                          }
+                          style={styles.resolveButton}
+                          disabled={busy}
+                          onPress={() => {
+                            resolve(discrepancy.id);
+                          }}
                         >
-                          <Text style={styles.link}>
-                            {entry?.damaged
-                              ? 'Damaged at receipt: Yes'
-                              : 'Damaged at receipt: No'}
-                          </Text>
+                          <Text style={[styles.link, styles.resolveButtonText]}>Resolve discrepancy</Text>
                         </TouchableOpacity>
-                        <TextInput
-                          accessibilityLabel={`Discrepancy notes for ${item.item_name}`}
-                          value={entry?.notes ?? ''}
-                          onChangeText={notes => edit(item.id, { notes })}
-                          placeholder="Notes for missing, extra, damaged or weight mismatch"
-                          multiline
-                          style={styles.input}
-                        />
                       </View>
-                    );
-                  })
-                ) : (
-                  <Text>No garments are listed for this order.</Text>
-                )}
-                <TextInput
-                  accessibilityLabel="Overall verification notes"
-                  value={overallNotes}
-                  onChangeText={setOverallNotes}
-                  placeholder="Overall intake notes (optional)"
-                  multiline
-                  style={styles.input}
-                />
-                <TouchableOpacity
-                  accessibilityRole="button"
-                  disabled={busy || !detail.items.length}
-                  onPress={() => {
-                    submit();
-                  }}
-                >
-                  <Text style={styles.link}>Save garment verification</Text>
-                </TouchableOpacity>
-              </>
-            ) : null}
-            {detail.inspections.length ? (
-              <Text>Measured item records: {detail.inspections.length}</Text>
-            ) : null}
-            <Text style={styles.heading}>
-              Intake discrepancies · {openCount} open
-            </Text>
-            {detail.discrepancies.length ? (
-              detail.discrepancies.map(discrepancy => (
-                <View key={discrepancy.id} style={styles.card}>
-                  <Text>
-                    {discrepancy.kind.replace(/_/g, ' ')} · {discrepancy.status}
+                    ) : null}
+                  </View>
+                ))
+              ) : (
+                <Text style={styles.muted}>No intake discrepancies recorded.</Text>
+              )}
+
+              {openCount ? (
+                <View style={styles.discrepancyAlert}>
+                  <Text style={styles.alertTitle}>Action required</Text>
+                  <Text accessibilityRole="alert" style={styles.alertText}>
+                    Processing is blocked until every intake discrepancy is resolved.
                   </Text>
-                  <Text>
-                    Listed {discrepancy.expected_quantity}; counted{' '}
-                    {discrepancy.counted_quantity}
-                  </Text>
-                  <Text>{discrepancy.notes}</Text>
-                  {discrepancy.status === 'resolved' ? (
-                    <Text>Resolution: {discrepancy.resolution_notes}</Text>
-                  ) : null}
-                  {discrepancy.status === 'open' &&
-                  detail.role === 'manager' ? (
-                    <>
-                      <TextInput
-                        accessibilityLabel={`Resolution notes for ${discrepancy.kind}`}
-                        value={resolutionNotes[discrepancy.id] ?? ''}
-                        onChangeText={notes =>
-                          setResolutionNotes(current => ({
-                            ...current,
-                            [discrepancy.id]: notes,
-                          }))
-                        }
-                        placeholder="Resolution notes"
-                        multiline
-                        style={styles.input}
-                      />
-                      <TouchableOpacity
-                        accessibilityRole="button"
-                        disabled={busy}
-                        onPress={() => {
-                          resolve(discrepancy.id);
-                        }}
-                      >
-                        <Text style={styles.link}>Resolve discrepancy</Text>
-                      </TouchableOpacity>
-                    </>
-                  ) : null}
                 </View>
-              ))
-            ) : (
-              <Text>No intake discrepancies recorded.</Text>
-            )}
-            {openCount ? (
-              <View style={styles.discrepancyAlert}>
-                <Text style={styles.alertTitle}>Action required</Text>
-                <Text accessibilityRole="alert">
-                  Processing is blocked until every intake discrepancy is
-                  resolved.
+              ) : null}
+
+              {/* Processing and Packing Panels */}
+              {[
+                'verification',
+                'processing',
+                'rework_required',
+                'ready_for_delivery',
+                'quality_check',
+              ].includes(detail.orderStatus) ? (
+                <>
+                  <FacilityPackingPanel
+                    key={`pack-${workflowRefresh}`}
+                    accessToken={accessToken}
+                    orderId={orderId}
+                    onReadiness={setPackingReady}
+                    onChanged={() => {
+                      onChanged();
+                      load();
+                      setWorkflowRefresh(value => value + 1);
+                    }}
+                  />
+                  <FacilityProcessingPanel
+                    key={`process-${workflowRefresh}`}
+                    accessToken={accessToken}
+                    orderId={orderId}
+                    items={detail.items}
+                    packingReady={packingReady}
+                    onChanged={() => {
+                      onChanged();
+                      load();
+                      setPackingReady(false);
+                      setWorkflowRefresh(value => value + 1);
+                    }}
+                  />
+                </>
+              ) : null}
+            </>
+          ) : !loading && !error ? (
+            <Text style={styles.muted}>Order intake data unavailable.</Text>
+          ) : null}
+        </ScrollView>
+
+        {/* Sticky Bottom Action Bar for Verification Mode */}
+        {isVerificationMode && detail ? (
+          <View
+            style={[
+              styles.stickyBottomBar,
+              { paddingBottom: Math.max(spacing.md, insets?.bottom ?? 0) },
+            ]}
+          >
+            <TouchableOpacity
+              accessibilityRole="button"
+              style={[
+                styles.primarySubmitButton,
+                (busy || !detail.items.length) && styles.submitButtonDisabled,
+              ]}
+              disabled={busy || !detail.items.length}
+              onPress={submit}
+            >
+              {busy ? (
+                <ActivityIndicator color="#FFFFFF" size="small" />
+              ) : (
+                <Text style={styles.primarySubmitText}>
+                  Save garment verification
                 </Text>
-              </View>
-            ) : null}
-            {[
-              'verification',
-              'processing',
-              'rework_required',
-              'ready_for_delivery',
-              'quality_check',
-            ].includes(detail.orderStatus) ? (
-              <>
-                <FacilityPackingPanel
-                  key={`pack-${workflowRefresh}`}
-                  accessToken={accessToken}
-                  orderId={orderId}
-                  onReadiness={setPackingReady}
-                  onChanged={() => {
-                    onChanged();
-                    load();
-                    setWorkflowRefresh(value => value + 1);
-                  }}
-                />
-                <FacilityProcessingPanel
-                  key={`process-${workflowRefresh}`}
-                  accessToken={accessToken}
-                  orderId={orderId}
-                  items={detail.items}
-                  packingReady={packingReady}
-                  onChanged={() => {
-                    onChanged();
-                    load();
-                    setPackingReady(false);
-                    setWorkflowRefresh(value => value + 1);
-                  }}
-                />
-              </>
-            ) : null}
-          </>
-        ) : !loading && !error ? (
-          <Text>Order intake data unavailable.</Text>
+              )}
+            </TouchableOpacity>
+          </View>
         ) : null}
-      </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
+
 const styles = StyleSheet.create({
-  page: { flex: 1, backgroundColor: '#F7F6F2' },
-  content: { padding: 18, gap: 14, paddingBottom: 38 },
+  page: { flex: 1, backgroundColor: colors.background },
+  container: { flex: 1 },
+  content: { padding: spacing.md, gap: spacing.md, paddingBottom: spacing.xxxl },
+  loader: { marginVertical: spacing.md },
+  header: {
+    gap: spacing.xs,
+    paddingVertical: spacing.xs,
+  },
+  backButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    alignSelf: 'flex-start',
+    minHeight: 36,
+    paddingVertical: 4,
+  },
+  headerTitleGroup: { marginTop: 2 },
   eyebrow: {
     fontSize: 11,
-    letterSpacing: 1.4,
+    letterSpacing: 1.2,
     fontWeight: '800',
-    color: '#67635B',
+    color: colors.textMuted,
   },
-  title: { fontSize: 30, fontWeight: '900' },
-  heading: { fontSize: 18, fontWeight: '900', flexShrink: 1 },
+  title: { fontSize: 22, fontWeight: '800', color: colors.textPrimary, marginTop: 2 },
+  heading: { fontSize: 16, fontWeight: '800', color: colors.textPrimary, flexShrink: 1 },
   orderSummary: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: '#E2DED6',
-    borderRadius: 15,
-    padding: 14,
-    gap: 5,
+    borderColor: colors.border,
+    borderRadius: borderRadius.md,
+    padding: spacing.md,
+    gap: 4,
+    ...shadows.sm,
   },
-  summaryLine: { color: '#4F4B45', flexShrink: 1 },
-  status: {
-    alignSelf: 'flex-start',
-    backgroundColor: '#EDEAE3',
-    borderRadius: 16,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    color: '#5D5952',
-    fontWeight: '800',
+  summaryTopRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  summaryLine: { color: colors.textSecondary, fontSize: 13 },
+  statusPill: {
+    backgroundColor: colors.surfaceSubtle,
+    borderRadius: borderRadius.full,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  statusText: {
+    color: colors.textSecondary,
+    fontWeight: '700',
+    fontSize: 11,
     textTransform: 'capitalize',
   },
   instruction: {
-    backgroundColor: '#E8EEF8',
-    borderRadius: 15,
-    padding: 14,
-    gap: 5,
+    backgroundColor: colors.infoSurface,
+    borderRadius: borderRadius.md,
+    padding: spacing.md,
+    gap: 4,
+    borderWidth: 1,
+    borderColor: colors.infoBorder,
   },
-  instructionTitle: { fontWeight: '900', fontSize: 16 },
-  expected: {
-    backgroundColor: '#F1EEE7',
-    borderRadius: 10,
-    padding: 10,
-    fontWeight: '800',
-  },
-  fieldLabel: { fontSize: 12, fontWeight: '800', color: '#67635B' },
+  instructionTitle: { fontWeight: '800', fontSize: 14, color: colors.infoText },
+  instructionText: { fontSize: 13, color: colors.textSecondary, lineHeight: 18 },
   card: {
     borderWidth: 1,
-    borderColor: '#E2DED6',
-    backgroundColor: '#fff',
-    borderRadius: 17,
-    padding: 15,
-    gap: 9,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.md,
+    padding: spacing.md,
+    gap: spacing.sm,
+    ...shadows.sm,
   },
-  input: {
-    borderWidth: 1,
-    borderColor: '#CFCAC0',
-    backgroundColor: '#fff',
-    borderRadius: 11,
-    padding: 11,
+  cardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: spacing.sm,
   },
-  discrepancyAlert: {
-    backgroundColor: '#FFF1CF',
+  itemName: { fontSize: 15, fontWeight: '800', color: colors.textPrimary, flexShrink: 1 },
+  expectedBadge: {
+    backgroundColor: colors.surfaceSubtle,
+    borderRadius: borderRadius.xs,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
     borderWidth: 1,
-    borderColor: '#E6C46A',
-    borderRadius: 14,
-    padding: 14,
+    borderColor: colors.border,
+  },
+  expected: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.textSecondary,
+  },
+  fieldGrid: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  fieldCol: {
+    flex: 1,
     gap: 4,
   },
-  alertTitle: { fontWeight: '900' },
-  link: { fontWeight: '900' },
-  error: { color: '#9A241E' },
+  fieldLabel: { fontSize: 12, fontWeight: '700', color: colors.textSecondary },
+  fieldLabelRequired: { color: colors.warningText, fontWeight: '800' },
+  input: {
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    fontSize: 14,
+    color: colors.textPrimary,
+    minHeight: 44,
+  },
+  inputWarning: {
+    borderColor: colors.warning,
+    backgroundColor: colors.warningSurface,
+  },
+  damageToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: borderRadius.sm,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+    backgroundColor: colors.surfaceSubtle,
+    minHeight: 40,
+  },
+  damageToggleActive: {
+    backgroundColor: colors.dangerSurface,
+    borderColor: colors.dangerBorder,
+  },
+  damageToggleText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.textSecondary,
+  },
+  damageToggleTextActive: {
+    color: colors.dangerText,
+    fontWeight: '800',
+  },
+  notesGroup: {
+    gap: 4,
+    marginTop: 2,
+  },
+  notesInput: {
+    minHeight: 60,
+    textAlignVertical: 'top',
+  },
+  overallNotesCard: {
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.md,
+    padding: spacing.md,
+    gap: 4,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  recordSummaryText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.textMuted,
+  },
+  discrepancyHeaderRow: {
+    marginTop: spacing.xs,
+  },
+  discrepancyCard: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: borderRadius.md,
+    padding: spacing.md,
+    gap: spacing.xs,
+  },
+  discrepancyTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  discrepancyKind: { fontSize: 13, fontWeight: '800', color: colors.textPrimary, textTransform: 'capitalize' },
+  discrepancyStatusPill: {
+    borderRadius: borderRadius.full,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+  },
+  pillOpen: { backgroundColor: colors.warningSurface },
+  pillResolved: { backgroundColor: colors.successSurface },
+  discrepancyStatusText: { fontSize: 11, fontWeight: '700', color: colors.textSecondary, textTransform: 'capitalize' },
+  discrepancyCounts: { fontSize: 13, color: colors.textSecondary },
+  discrepancyNotes: { fontSize: 12, color: colors.textMuted, fontStyle: 'italic' },
+  resolvedBox: {
+    backgroundColor: colors.successSurface,
+    padding: spacing.sm,
+    borderRadius: borderRadius.xs,
+    marginTop: 2,
+  },
+  resolvedText: { fontSize: 12, color: colors.successText, fontWeight: '600' },
+  managerResolveBox: {
+    gap: spacing.xs,
+    marginTop: spacing.xs,
+  },
+  resolveButton: {
+    backgroundColor: colors.primary,
+    borderRadius: borderRadius.sm,
+    minHeight: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  resolveButtonText: { color: '#FFFFFF', fontWeight: '700', fontSize: 13 },
+  discrepancyAlert: {
+    backgroundColor: colors.warningSurface,
+    borderWidth: 1,
+    borderColor: colors.warningBorder,
+    borderRadius: borderRadius.md,
+    padding: spacing.md,
+    gap: 4,
+  },
+  alertTitle: { fontWeight: '800', fontSize: 14, color: colors.warningText },
+  alertText: { fontSize: 13, color: colors.warningText },
+  link: { fontWeight: '700', color: colors.textPrimary },
+  muted: { color: colors.textMuted, fontSize: 13 },
+  errorBanner: {
+    backgroundColor: colors.dangerSurface,
+    borderWidth: 1,
+    borderColor: colors.dangerBorder,
+    borderRadius: borderRadius.sm,
+    padding: spacing.md,
+    gap: spacing.xs,
+  },
+  error: { color: colors.dangerText, fontSize: 13, fontWeight: '600' },
+  retryButton: {
+    alignSelf: 'flex-start',
+    backgroundColor: colors.danger,
+    borderRadius: borderRadius.xs,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+  },
+  retryText: { color: '#FFFFFF', fontWeight: '700', fontSize: 12 },
+  successBanner: {
+    backgroundColor: colors.successSurface,
+    borderWidth: 1,
+    borderColor: colors.successBorder,
+    borderRadius: borderRadius.sm,
+    padding: spacing.md,
+  },
+  successMessage: { color: colors.successText, fontWeight: '700', fontSize: 13 },
+  stickyBottomBar: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: colors.surface,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.sm,
+    gap: spacing.xs,
+    ...shadows.lg,
+  },
+  inlineStickyError: {
+    color: colors.dangerText,
+    fontSize: 12,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  primarySubmitButton: {
+    backgroundColor: colors.primary,
+    borderRadius: borderRadius.md,
+    minHeight: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.lg,
+  },
+  submitButtonDisabled: {
+    opacity: 0.6,
+  },
+  primarySubmitText: {
+    color: '#FFFFFF',
+    fontWeight: '800',
+    fontSize: 15,
+  },
 });
+

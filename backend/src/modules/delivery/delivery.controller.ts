@@ -56,7 +56,7 @@ export class DeliveryController {
     @Body()
     body: {
       otp: string;
-      photoPath: string;
+      photoPath?: string;
       latitude?: number;
       longitude?: number;
     },

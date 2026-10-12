@@ -23,7 +23,7 @@ describe('9F Admin issues', () => {
   it('blocks invalid refund amounts and non-mock Development payment', async () => {
     const {service, maybeSingle} = fixture(); maybeSingle.mockResolvedValue({data: {id: 'p1', provider: 'mock'}, error: null});
     await expect(service.requestRefund('admin', 'o1', 'p1', -1, 'Reason')).rejects.toBeInstanceOf(BadRequestException);
-    maybeSingle.mockResolvedValue({data: {id: 'p1', provider: 'razorpay'}, error: null});
+    maybeSingle.mockResolvedValue({data: {id: 'p1', provider: 'other'}, error: null});
     await expect(service.requestRefund('admin', 'o1', 'p1', 10, 'Reason')).rejects.toBeInstanceOf(ConflictException);
   });
   it('passes scoped mock payment and notes to audited refund request', async () => {

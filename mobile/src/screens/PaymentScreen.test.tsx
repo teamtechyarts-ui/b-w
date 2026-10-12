@@ -7,7 +7,6 @@ const samplePricing: CheckoutPricing = {
   subtotal: 90,
   pickupDeliveryCharge: 40,
   hasFreeDelivery: false,
-  freeDeliveryThreshold: 250,
   amountUntilFreeDelivery: 160,
   discountAmount: 0,
   taxableAmount: 130,

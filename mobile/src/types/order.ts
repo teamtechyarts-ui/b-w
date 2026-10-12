@@ -57,6 +57,8 @@ export type CustomerOrder = {
 
   pickup_scheduled_at: string | null;
   pickup_slot_label: string | null;
+  delivery_scheduled_at?: string | null;
+  delivery_slot_label?: string | null;
 
   subtotal: number | string;
   discount_amount: number | string;
@@ -139,17 +141,24 @@ export const ACTIVE_ORDER_STATUSES = new Set<string>([
   'confirmed',
   'pickup_assigned',
   'pickup_accepted',
+  'en_route_pickup',
+  'pickup_otp_pending',
   'picked_up',
+  'in_transit_to_facility',
   'received_at_facility',
+  'verification',
   'processing',
+  'quality_check',
   'ready_for_delivery',
   'delivery_assigned',
-  'out_for_delivery',
-  'delivered',
-  'claim_period_active',
+  'delivery_accepted',
+  'en_route_delivery',
+  'delivery_otp_pending',
 ]);
 
 export const PAST_ORDER_STATUSES = new Set<string>([
+  'delivered',
+  'claim_period_active',
   'completed',
   'cancelled',
 ]);
@@ -184,22 +193,36 @@ export function orderStatusLabel(
       'Pickup Driver Assigned',
     pickup_accepted:
       'Pickup Accepted',
+    en_route_pickup:
+      'Driver En Route to Pickup',
+    pickup_otp_pending:
+      'Pickup OTP Pending',
     picked_up:
       'Laundry Picked Up',
+    in_transit_to_facility:
+      'In Transit to Facility',
     received_at_facility:
       'Received at Facility',
+    verification:
+      'Intake Verification',
     processing:
       'Cleaning in Progress',
+    quality_check:
+      'Quality Check',
     ready_for_delivery:
       'Ready for Delivery',
     delivery_assigned:
       'Delivery Driver Assigned',
-    out_for_delivery:
+    delivery_accepted:
+      'Delivery Accepted',
+    en_route_delivery:
       'Out for Delivery',
+    delivery_otp_pending:
+      'Delivery OTP Pending',
     delivered:
-      'Delivered',
+      'Completed',
     claim_period_active:
-      'Delivery Review Period',
+      'Completed',
     completed:
       'Completed',
     cancelled:

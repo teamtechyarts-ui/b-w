@@ -10,6 +10,7 @@ import {
   loadSecureSession,
   saveSecureSession,
 } from './secureSessionStorage';
+import {invalidateOrdersCache} from './ordersApi';
 
 type SessionListener = (
   session: StoredSession | null,
@@ -224,6 +225,8 @@ export async function clearSession() {
 
   refreshPromise =
     null;
+
+  invalidateOrdersCache();
 
   await clearSecureSession();
 

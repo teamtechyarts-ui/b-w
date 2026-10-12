@@ -1,8 +1,10 @@
 import React, {useCallback, useEffect, useState} from 'react';
-import {ActivityIndicator, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View} from 'react-native';
+import {ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View} from 'react-native';
+import {SafeAreaView} from 'react-native-safe-area-context';
 import {AdminOrderDetail, canAdminCancelOrder, cancelAdminOrder, getAdminOrder} from '../services/adminManagementApi';
 import QrGraphic from '../components/QrGraphic';
 import {formatPaymentMethod} from '../utils/customerPresentation';
+import {useOrderRealtime} from '../hooks/useRealtime';
 
 type Props = {accessToken: string; orderId: string; onBack: () => void};
 const money = (value: number | string | null | undefined) => `₹${Number(value ?? 0).toFixed(2)}`;
@@ -15,18 +17,47 @@ export default function AdminOrderDetailScreen({accessToken, orderId, onBack}: P
   const [cancelling, setCancelling] = useState(false);
   const [success, setSuccess] = useState('');
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     setError('');
     try {
       const data = await getAdminOrder(accessToken, orderId);
       setDetail(data);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Order details unavailable.');
+      if (!silent) {
+        setError(cause instanceof Error ? cause.message : 'Order details unavailable.');
+      }
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [accessToken, orderId]);
+
+  useOrderRealtime(
+    orderId,
+    useCallback(
+      (event) => {
+        const nextStatus = event.status || (event as any).payload?.status;
+        if (nextStatus) {
+          setDetail(prev =>
+            prev
+              ? {
+                  ...prev,
+                  order: {
+                    ...prev.order,
+                    current_status: nextStatus as any,
+                  },
+                }
+              : prev,
+          );
+        }
+        load(true);
+      },
+
+      [load],
+    ),
+    accessToken,
+    !!accessToken,
+  );
 
   useEffect(() => {
     load();
@@ -72,7 +103,7 @@ export default function AdminOrderDetailScreen({accessToken, orderId, onBack}: P
           ) : null}
         </View>
 
-        <TouchableOpacity accessibilityRole="button" onPress={load} style={styles.refreshLink}>
+        <TouchableOpacity accessibilityRole="button" onPress={() => { load(); }} style={styles.refreshLink}>
           <Text style={styles.linkText}>Refresh order</Text>
         </TouchableOpacity>
 
@@ -86,11 +117,12 @@ export default function AdminOrderDetailScreen({accessToken, orderId, onBack}: P
         {error ? (
           <View style={styles.errorCard}>
             <Text accessibilityRole="alert" style={styles.errorText}>{error}</Text>
-            <TouchableOpacity accessibilityRole="button" onPress={load} style={styles.retryButton}>
+            <TouchableOpacity accessibilityRole="button" onPress={() => { load(); }} style={styles.retryButton}>
               <Text style={styles.retryButtonText}>Retry order</Text>
             </TouchableOpacity>
           </View>
         ) : null}
+
 
         {success ? (
           <View style={styles.successCard}>
@@ -165,8 +197,9 @@ export default function AdminOrderDetailScreen({accessToken, orderId, onBack}: P
                     <View style={styles.infoRow}>
                       <Text style={styles.label}>Assigned At:</Text>
                       <Text style={styles.mutedSmall}>
-                        {new Date(assignment.assigned_at || assignment.created_at).toLocaleString('en-IN')}
+                        {new Date(assignment.assigned_at).toLocaleString('en-IN')}
                       </Text>
+
                     </View>
                   </View>
                 ))}

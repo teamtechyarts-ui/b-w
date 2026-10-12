@@ -11,9 +11,9 @@ CREATE OR REPLACE FUNCTION public.complete_delivery_atomic(
     p_driver_profile_id uuid,
     p_otp_id uuid,
     p_validated_otp_hash text,
-    p_photo_path text,
-    p_latitude numeric,
-    p_longitude numeric
+    p_photo_path text DEFAULT NULL,
+    p_latitude numeric DEFAULT NULL,
+    p_longitude numeric DEFAULT NULL
 )
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -44,14 +44,15 @@ BEGIN
             USING ERRCODE = '22023';
     END IF;
 
-    IF p_photo_path IS NULL
-       OR length(p_photo_path) > 1024
-       OR p_photo_path !~ (
-            '^' || p_order_id::text ||
-            '/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}[.](jpg|jpeg|png|webp)$'
-       ) THEN
-        RAISE EXCEPTION 'Invalid delivery proof path'
-            USING ERRCODE = '22023';
+    IF p_photo_path IS NOT NULL AND p_photo_path <> '' THEN
+        IF length(p_photo_path) > 1024
+           OR p_photo_path !~ (
+                '^' || p_order_id::text ||
+                '/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}[.](jpg|jpeg|png|webp)$'
+           ) THEN
+            RAISE EXCEPTION 'Invalid delivery proof path'
+                USING ERRCODE = '22023';
+        END IF;
     END IF;
 
     IF (p_latitude IS NULL) <> (p_longitude IS NULL)
@@ -140,35 +141,37 @@ BEGIN
             USING ERRCODE = '40001';
     END IF;
 
-    -- Lock Storage metadata so object deletion cannot race this transaction.
-    SELECT so.name
-    INTO v_object_name
-    FROM storage.objects AS so
-    WHERE so.bucket_id = 'delivery-proofs'
-      AND so.name = p_photo_path
-    FOR KEY SHARE;
+    -- If a photo path was provided, lock Storage metadata and insert delivery proof
+    IF p_photo_path IS NOT NULL AND p_photo_path <> '' THEN
+        SELECT so.name
+        INTO v_object_name
+        FROM storage.objects AS so
+        WHERE so.bucket_id = 'delivery-proofs'
+          AND so.name = p_photo_path
+        FOR KEY SHARE;
 
-    IF NOT FOUND THEN
-        RAISE EXCEPTION 'Delivery photograph has not been uploaded'
-            USING ERRCODE = '23514';
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'Delivery photograph has not been uploaded'
+                USING ERRCODE = '23514';
+        END IF;
+
+        INSERT INTO public.delivery_proofs (
+            order_id,
+            driver_id,
+            photo_path,
+            latitude,
+            longitude,
+            delivered_at
+        )
+        VALUES (
+            p_order_id,
+            v_driver_id,
+            p_photo_path,
+            p_latitude,
+            p_longitude,
+            v_now
+        );
     END IF;
-
-    INSERT INTO public.delivery_proofs (
-        order_id,
-        driver_id,
-        photo_path,
-        latitude,
-        longitude,
-        delivered_at
-    )
-    VALUES (
-        p_order_id,
-        v_driver_id,
-        p_photo_path,
-        p_latitude,
-        p_longitude,
-        v_now
-    );
 
     UPDATE public.order_otps
     SET
@@ -196,10 +199,17 @@ BEGIN
             USING ERRCODE = '40001';
     END IF;
 
-    v_delivery_reason := format(
-        'Delivery OTP and mandatory photograph verified (assignment %s)',
-        v_assignment_id
-    );
+    IF p_photo_path IS NOT NULL AND p_photo_path <> '' THEN
+        v_delivery_reason := format(
+            'Delivery OTP and photograph verified (assignment %s)',
+            v_assignment_id
+        );
+    ELSE
+        v_delivery_reason := format(
+            'Delivery OTP verified (assignment %s)',
+            v_assignment_id
+        );
+    END IF;
 
     PERFORM public.change_order_status(
         p_order_id,

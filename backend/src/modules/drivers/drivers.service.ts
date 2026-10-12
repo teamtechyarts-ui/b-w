@@ -323,15 +323,66 @@ export class DriversService {
     const facilities = new Map(
       (facilityResult.data ?? []).map((row) => [row.id, row]),
     );
+    const deliveryOrderIds = assignments
+      .filter((a) => a.assignment_type === "delivery")
+      .map((a) => a.order_id);
+
+    const deliveryNavEventsMap = new Map<string, any[]>();
+    if (deliveryOrderIds.length > 0) {
+      const { data: navEvents } = await this.supabase.admin
+        .from("driver_navigation_events")
+        .select("order_id,event_type,created_at")
+        .in("order_id", deliveryOrderIds)
+        .in("event_type", [
+          "navigate_facility",
+          "arrived_at_facility",
+          "facility_dispatch",
+          "driver_collection_confirmed",
+        ])
+        .order("created_at", { ascending: true });
+
+      for (const ev of navEvents ?? []) {
+        const list = deliveryNavEventsMap.get(ev.order_id) ?? [];
+        list.push(ev);
+        deliveryNavEventsMap.set(ev.order_id, list);
+      }
+    }
+
     const jobs = assignments
       .map((assignment) => {
         const order = orderMap.get(assignment.order_id);
         if (!order) return null;
+        let effectiveStatus = assignment.status;
         if (
-          ACTIVE_ASSIGNMENT_STATUSES.includes(assignment.status) &&
+          assignment.assignment_type === "delivery" &&
+          assignment.status === "accepted"
+        ) {
+          const ops = deliveryNavEventsMap.get(assignment.order_id) ?? [];
+          let inTransitToFacility = false;
+          let arrivedAtFacility = false;
+          let facilityCollected = false;
+          for (const op of ops) {
+            if (op.event_type === "navigate_facility") {
+              inTransitToFacility = true;
+            } else if (op.event_type === "arrived_at_facility") {
+              arrivedAtFacility = true;
+            } else if (op.event_type === "driver_collection_confirmed") {
+              facilityCollected = true;
+            }
+          }
+          if (!facilityCollected) {
+            if (arrivedAtFacility) {
+              effectiveStatus = "arrived";
+            } else if (inTransitToFacility) {
+              effectiveStatus = "en_route";
+            }
+          }
+        }
+        if (
+          ACTIVE_ASSIGNMENT_STATUSES.includes(effectiveStatus) &&
           !operationallyRelevant(
             assignment.assignment_type,
-            assignment.status,
+            effectiveStatus,
             order.current_status,
           )
         )
@@ -345,7 +396,7 @@ export class DriversService {
           orderId: order.id,
           orderNumber: order.order_number,
           type: assignment.assignment_type,
-          assignmentStatus: assignment.status,
+          assignmentStatus: effectiveStatus,
           orderStatus: order.current_status,
           assignedAt: assignment.assigned_at,
           acceptedAt: assignment.accepted_at,
@@ -466,12 +517,47 @@ export class DriversService {
       );
     }
 
+    const finalOrderStatus =
+      accepted?.orderStatus ??
+      (jobType === "pickup" ? "pickup_accepted" : "delivery_accepted");
+
+    const claimPayload = {
+      eventType: "JOB_CLAIMED",
+      entityId: orderId,
+      orderId,
+      driverId: driver.id,
+      jobType,
+      status: finalOrderStatus,
+      timestamp: new Date().toISOString(),
+    };
+
+    if (typeof this.supabase?.broadcastEvent === "function") {
+      const { data: ord } = await this.supabase.admin
+        .from("orders")
+        .select("customer_id")
+        .eq("id", orderId)
+        .maybeSingle();
+
+      const broadcasts: Promise<any>[] = [
+        this.supabase.broadcastEvent("orders:all", "ORDER_STATUS_CHANGED", claimPayload),
+        this.supabase.broadcastEvent("driver:available", "JOB_CLAIMED", claimPayload),
+        this.supabase.broadcastEvent("jobs:drivers", "JOB_CLAIMED", claimPayload),
+        this.supabase.broadcastEvent(`driver:${driver.id}`, "ASSIGNMENT_UPDATED", claimPayload),
+        this.supabase.broadcastEvent("admin:operations", "ORDER_STATUS_CHANGED", claimPayload),
+        this.supabase.broadcastEvent(`order:${orderId}`, "ORDER_STATUS_CHANGED", claimPayload),
+      ];
+      if (ord?.customer_id) {
+        broadcasts.push(
+          this.supabase.broadcastEvent(`customer:${ord.customer_id}`, "ORDER_STATUS_CHANGED", claimPayload),
+        );
+      }
+      await Promise.allSettled(broadcasts);
+    }
+
     return {
       success: true,
       assignment: accepted?.assignment ?? created.assignment,
-      orderStatus:
-        accepted?.orderStatus ??
-        (jobType === "pickup" ? "pickup_accepted" : "delivery_accepted"),
+      orderStatus: finalOrderStatus,
     };
   }
 
@@ -622,21 +708,43 @@ export class DriversService {
     let facilityCollected = false;
     let facilityHandedOverAt: string | null = null;
     let facilityCollectedAt: string | null = null;
+    let effectiveAssignmentStatus = assignment.status;
 
     if (assignment.assignment_type === "delivery") {
       const { data: ops } = await this.supabase.admin
         .from("driver_navigation_events")
         .select("event_type,created_at")
         .eq("order_id", order.id)
-        .in("event_type", ["facility_dispatch", "driver_collection_confirmed"]);
+        .in("event_type", [
+          "navigate_facility",
+          "arrived_at_facility",
+          "facility_dispatch",
+          "driver_collection_confirmed",
+        ])
+        .order("created_at", { ascending: true });
+
+      let inTransitToFacility = false;
+      let arrivedAtFacility = false;
 
       for (const op of ops ?? []) {
-        if (op.event_type === "facility_dispatch") {
+        if (op.event_type === "navigate_facility") {
+          inTransitToFacility = true;
+        } else if (op.event_type === "arrived_at_facility") {
+          arrivedAtFacility = true;
+        } else if (op.event_type === "facility_dispatch") {
           facilityHandedOver = true;
           facilityHandedOverAt = op.created_at;
         } else if (op.event_type === "driver_collection_confirmed") {
           facilityCollected = true;
           facilityCollectedAt = op.created_at;
+        }
+      }
+
+      if (!facilityCollected && assignment.status === "accepted") {
+        if (arrivedAtFacility) {
+          effectiveAssignmentStatus = "arrived";
+        } else if (inTransitToFacility) {
+          effectiveAssignmentStatus = "en_route";
         }
       }
     }
@@ -645,7 +753,7 @@ export class DriversService {
     if (
       operationallyRelevant(
         assignment.assignment_type,
-        assignment.status,
+        effectiveAssignmentStatus,
         order.current_status,
       ) &&
       order.current_status !== "picked_up"
@@ -671,7 +779,7 @@ export class DriversService {
       orderId: order.id,
       orderNumber: order.order_number,
       type: assignment.assignment_type,
-      assignmentStatus: assignment.status,
+      assignmentStatus: effectiveAssignmentStatus,
       orderStatus: order.current_status,
       assignedAt: assignment.assigned_at,
       acceptedAt: assignment.accepted_at,

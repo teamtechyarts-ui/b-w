@@ -141,12 +141,40 @@ describe('OtpService', () => {
     process.env.NODE_ENV = previousNodeEnv;
   });
 
-  it('requires delivery OTP verification to include the delivery photo flow', async () => {
-    const {service, from} = createService();
+  it('creates an OTP when authorized and in valid state', async () => {
+    const rpc = jest.fn().mockResolvedValue({
+      data: {
+        id: 'new-otp-1',
+        otpType: 'pickup',
+        expiresAt: new Date(Date.now() + 600_000).toISOString(),
+      },
+      error: null,
+    });
+    const {service} = createService({rpc, otp: null});
+
+    const result = await service.create('customer-profile', 'order-1', 'pickup');
+    expect(result).toMatchObject({
+      otpId: 'new-otp-1',
+      otpType: 'pickup',
+      delivery: 'local_mock',
+    });
+    expect(rpc).toHaveBeenCalledWith(
+      'create_order_otp_atomic',
+      expect.objectContaining({p_order_id: 'order-1', p_otp_type: 'pickup'}),
+    );
+  });
+
+  it('rejects rapid repeated OTP regeneration within cooldown period', async () => {
+    const recentOtp = {
+      id: 'otp-recent',
+      otp_hash: otpHash('123456'),
+      created_at: new Date(Date.now() - 2_000).toISOString(), // generated 2 seconds ago
+    };
+    const {service} = createService({otp: recentOtp});
 
     await expect(
-      service.verify('driver-profile', 'order-1', 'delivery', '123456'),
-    ).rejects.toBeInstanceOf(ConflictException);
-    expect(from).not.toHaveBeenCalled();
+      service.create('customer-profile', 'order-1', 'pickup'),
+    ).rejects.toThrow(/Please wait/);
   });
 });
+

@@ -71,9 +71,12 @@ export default defineConfig(({ mode }) => {
       port: 5173,
       host: '0.0.0.0',
       cors: true,
+      hmr: {
+        clientPort: 5173,
+      },
       headers: {
         'Access-Control-Allow-Origin': '*',
-        'Content-Security-Policy': "default-src * 'unsafe-inline' 'unsafe-eval' data: blob:; script-src * 'unsafe-inline' 'unsafe-eval'; script-src-elem * 'unsafe-inline' 'unsafe-eval'; connect-src * 'unsafe-inline'; style-src * 'unsafe-inline'; img-src * data: blob:;",
+        'Content-Security-Policy': "default-src * 'unsafe-inline' 'unsafe-eval' data: blob:; script-src * 'unsafe-inline' 'unsafe-eval' blob:; script-src-elem * 'unsafe-inline' 'unsafe-eval' blob:; worker-src 'self' blob:; connect-src * 'unsafe-inline' ws: wss:; style-src * 'unsafe-inline'; font-src * data:; img-src * data: blob:;",
       },
     },
   };

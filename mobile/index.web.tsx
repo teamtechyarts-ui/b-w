@@ -25,6 +25,6 @@ const rootElement = document.getElementById('root');
 if (rootElement) {
   AppRegistry.runApplication(appName, {
     initialProps: {},
-    rootTag: rootElement,
+    rootTag: rootElement as any,
   });
 }

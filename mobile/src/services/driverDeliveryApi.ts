@@ -81,12 +81,11 @@ export async function uploadDeliveryPhoto(token: string, orderId: string, photo:
   return upload.path;
 }
 
-export function completeDriverDelivery(token: string, orderId: string, otp: string, photoPath: string) {
+export function completeDriverDelivery(token: string, orderId: string, otp: string, photoPath?: string) {
   const code = otp.trim();
-  if (!/^\d{6}$/.test(code)) return Promise.reject(new Error('Enter the six-digit delivery OTP.'));
-  if (!photoPath.startsWith(`${orderId}/`)) return Promise.reject(new Error('Upload a delivery photograph before completing delivery.'));
+  if (!code || !/^\d{6}$/.test(code)) return Promise.reject(new Error('Enter the delivery OTP.'));
   return apiRequest<{delivered: boolean; orderStatus: string}>(
     `/orders/${encodeURIComponent(orderId)}/complete-delivery`,
-    {method: 'POST', accessToken: token, body: {otp: code, photoPath}},
+    {method: 'POST', accessToken: token, body: {otp: code, ...(photoPath ? { photoPath } : {})}},
   );
 }

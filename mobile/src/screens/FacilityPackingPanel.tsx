@@ -7,11 +7,13 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { colors, spacing, borderRadius, typography, shadows } from '../theme/designSystem';
 import {
   PackingDetails,
   confirmFacilityPacking,
   getFacilityPacking,
 } from '../services/facilityPackingApi';
+import {useOrderRealtime} from '../hooks/useRealtime';
 
 type Props = {
   accessToken: string;
@@ -19,6 +21,7 @@ type Props = {
   onChanged: () => void;
   onReadiness: (ready: boolean) => void;
 };
+
 export default function FacilityPackingPanel({
   accessToken,
   orderId,
@@ -33,6 +36,7 @@ export default function FacilityPackingPanel({
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const lock = useRef(false);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
@@ -60,9 +64,21 @@ export default function FacilityPackingPanel({
       setLoading(false);
     }
   }, [accessToken, orderId, onReadiness]);
+
+  useOrderRealtime(
+    orderId,
+    useCallback(() => {
+      load();
+      onChanged();
+    }, [load, onChanged]),
+    accessToken,
+    !!accessToken && !!orderId,
+  );
+
   useEffect(() => {
     load();
   }, [load]);
+
   const submit = async () => {
     if (lock.current || !details) return;
     setError('');
@@ -106,55 +122,85 @@ export default function FacilityPackingPanel({
       setBusy(false);
     }
   };
-function formatTimestamp(isoString?: string | null): string {
-  if (!isoString) return '';
-  try {
-    const d = new Date(isoString);
-    if (isNaN(d.getTime())) return isoString;
-    return d.toLocaleString(undefined, {
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  } catch {
-    return isoString;
+
+  function formatTimestamp(isoString?: string | null): string {
+    if (!isoString) return '';
+    try {
+      const d = new Date(isoString);
+      if (isNaN(d.getTime())) return isoString;
+      return d.toLocaleString(undefined, {
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    } catch {
+      return isoString;
+    }
   }
-}
 
   return (
     <View style={styles.panel}>
       <Text style={styles.heading}>
         Final packing · cycle {details?.cycleNumber ?? 0}
       </Text>
+
       {loading ? (
-        <ActivityIndicator accessibilityLabel="Loading final packing" />
+        <ActivityIndicator
+          accessibilityLabel="Loading final packing"
+          color={colors.primary}
+          style={styles.loader}
+        />
       ) : null}
-      {error ? <Text accessibilityRole="alert">{error}</Text> : null}
+
       {error ? (
-        <TouchableOpacity
-          accessibilityRole="button"
-          onPress={() => {
-            load();
-          }}
-        >
-          <Text>Retry packing</Text>
-        </TouchableOpacity>
+        <View style={styles.errorCard}>
+          <Text accessibilityRole="alert" style={styles.errorText}>
+            {error}
+          </Text>
+          <TouchableOpacity
+            accessibilityRole="button"
+            style={styles.retryButton}
+            onPress={() => {
+              load();
+            }}
+          >
+            <Text style={styles.retryText}>Retry packing</Text>
+          </TouchableOpacity>
+        </View>
       ) : null}
-      {message ? <Text accessibilityLiveRegion="polite">{message}</Text> : null}
+
+      {message ? (
+        <View style={styles.successBanner}>
+          <Text accessibilityLiveRegion="polite" style={styles.successMessage}>
+            {message}
+          </Text>
+        </View>
+      ) : null}
+
       {details?.history.map(record => (
         <View key={record.id} style={styles.record}>
-          <Text style={styles.recordTitle}>
-            Cycle {record.cycle_number} · Packing confirmed
+          <View style={styles.recordHeader}>
+            <Text style={styles.recordTitle}>
+              Cycle {record.cycle_number} · Packing confirmed
+            </Text>
+            <View style={styles.confirmedPill}>
+              <Text style={styles.confirmedPillText}>Confirmed</Text>
+            </View>
+          </View>
+          <Text style={styles.recordDetail}>
+            Packed: {formatTimestamp(record.packed_at)}
           </Text>
-          <Text>Packed: {formatTimestamp(record.packed_at)}</Text>
-          <Text>
+          <Text style={styles.recordDetail}>
             Items:{' '}
             {record.items.reduce((sum, item) => sum + item.packed_quantity, 0)}
           </Text>
-          {record.notes ? <Text>Notes: {record.notes}</Text> : null}
+          {record.notes ? (
+            <Text style={styles.recordNotes}>Notes: {record.notes}</Text>
+          ) : null}
         </View>
       ))}
+
       {details && !details.history.length ? (
         <Text style={styles.mutedText}>
           {[
@@ -170,14 +216,15 @@ function formatTimestamp(isoString?: string | null): string {
             : 'No final packing recorded yet.'}
         </Text>
       ) : null}
+
       {details?.canPack ? (
-        <>
-          <Text>
+        <View style={styles.packFormCard}>
+          <Text style={styles.instructionText}>
             Confirm every garment against the Facility-verified intake count.
           </Text>
           {details.items.map(item => (
-            <View key={item.id}>
-              <Text>
+            <View key={item.id} style={styles.itemRow}>
+              <Text style={styles.itemLabel}>
                 {item.item_name} · verified{' '}
                 {item.verifiedQuantity ?? 'unavailable'}
               </Text>
@@ -197,42 +244,137 @@ function formatTimestamp(isoString?: string | null): string {
             value={notes}
             onChangeText={setNotes}
             placeholder="Packing notes (optional)"
+            placeholderTextColor={colors.textSubtle}
             multiline
-            style={styles.input}
+            style={[styles.input, styles.notesInput]}
           />
           <TouchableOpacity
             accessibilityRole="button"
+            style={[styles.submitButton, busy && styles.buttonDisabled]}
             disabled={busy}
-            onPress={() => {
-              submit();
-            }}
+            onPress={submit}
           >
-            <Text>Confirm final packing</Text>
+            {busy ? (
+              <ActivityIndicator color="#FFFFFF" size="small" />
+            ) : (
+              <Text style={styles.submitButtonText}>Confirm final packing</Text>
+            )}
           </TouchableOpacity>
-        </>
+        </View>
       ) : null}
+
       {details &&
       !details.canPack &&
       details.orderStatus === 'processing' &&
       !details.history.some(
         record => record.cycle_number === details.cycleNumber,
       ) ? (
-        <Text>Complete the Pack processing step before final packing.</Text>
+        <View style={styles.infoBox}>
+          <Text style={styles.infoText}>
+            Complete the Pack processing step before final packing.
+          </Text>
+        </View>
       ) : null}
     </View>
   );
 }
+
 const styles = StyleSheet.create({
-  panel: { gap: 10, paddingVertical: 14 },
-  heading: { fontSize: 19, fontWeight: '700' },
-  input: { borderWidth: 1, borderColor: '#bbb', borderRadius: 9, padding: 10 },
+  panel: { gap: spacing.sm, paddingVertical: spacing.sm },
+  heading: { fontSize: 17, fontWeight: '800', color: colors.textPrimary },
+  loader: { marginVertical: spacing.sm },
+  errorCard: {
+    backgroundColor: colors.dangerSurface,
+    borderWidth: 1,
+    borderColor: colors.dangerBorder,
+    borderRadius: borderRadius.sm,
+    padding: spacing.md,
+    gap: spacing.xs,
+  },
+  errorText: { color: colors.dangerText, fontSize: 13, fontWeight: '600' },
+  retryButton: {
+    alignSelf: 'flex-start',
+    backgroundColor: colors.danger,
+    borderRadius: borderRadius.xs,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+  },
+  retryText: { color: '#FFFFFF', fontWeight: '700', fontSize: 12 },
+  successBanner: {
+    backgroundColor: colors.successSurface,
+    borderWidth: 1,
+    borderColor: colors.successBorder,
+    borderRadius: borderRadius.sm,
+    padding: spacing.md,
+  },
+  successMessage: { color: colors.successText, fontWeight: '700', fontSize: 13 },
   record: {
     borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 9,
-    padding: 10,
-    gap: 5,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.md,
+    padding: spacing.md,
+    gap: 4,
+    ...shadows.sm,
   },
-  recordTitle: { fontWeight: '800' },
-  mutedText: { color: '#67635B', fontSize: 13 },
+  recordHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  recordTitle: { fontWeight: '800', fontSize: 14, color: colors.textPrimary },
+  confirmedPill: {
+    backgroundColor: colors.successSurface,
+    borderRadius: borderRadius.full,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+  },
+  confirmedPillText: { fontSize: 11, fontWeight: '700', color: colors.successText },
+  recordDetail: { fontSize: 12, color: colors.textSecondary },
+  recordNotes: { fontSize: 12, color: colors.textMuted, fontStyle: 'italic' },
+  mutedText: { color: colors.textMuted, fontSize: 13 },
+  packFormCard: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: borderRadius.md,
+    padding: spacing.md,
+    gap: spacing.sm,
+    ...shadows.sm,
+  },
+  instructionText: { fontSize: 13, color: colors.textSecondary },
+  itemRow: { gap: 4 },
+  itemLabel: { fontSize: 13, fontWeight: '700', color: colors.textPrimary },
+  input: {
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+    borderRadius: borderRadius.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    backgroundColor: colors.surface,
+    fontSize: 14,
+    color: colors.textPrimary,
+    minHeight: 44,
+  },
+  notesInput: { minHeight: 60, textAlignVertical: 'top' },
+  submitButton: {
+    backgroundColor: colors.primary,
+    borderRadius: borderRadius.md,
+    minHeight: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.lg,
+    marginTop: spacing.xs,
+  },
+  submitButtonText: { color: '#FFFFFF', fontWeight: '800', fontSize: 14 },
+  buttonDisabled: { opacity: 0.5 },
+  infoBox: {
+    backgroundColor: colors.infoSurface,
+    padding: spacing.md,
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderColor: colors.infoBorder,
+  },
+  infoText: { color: colors.infoText, fontSize: 13, fontWeight: '600' },
 });
+

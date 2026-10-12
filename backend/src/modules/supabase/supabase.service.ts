@@ -51,6 +51,39 @@ export class SupabaseService {
     );
   }
 
+  getUrl(): string {
+    return this.url;
+  }
+
+  getAnonKey(): string {
+    return this.anonKey;
+  }
+
+  async broadcastEvent(channelName: string, event: string, payload: any): Promise<void> {
+    try {
+      const sanitized = { ...payload };
+      delete sanitized.pickupOtp;
+      delete sanitized.deliveryOtp;
+      delete sanitized.otp;
+      delete sanitized.driverPin;
+      delete sanitized.pin;
+      delete sanitized.secret;
+      delete sanitized.paymentSecret;
+
+      const ch = this.admin.channel(channelName);
+      await ch.send({
+        type: 'broadcast',
+        event,
+        payload: {
+          ...sanitized,
+          timestamp: new Date().toISOString(),
+        },
+      });
+    } catch {
+      // Broadcast error must not break primary business transaction
+    }
+  }
+
   createAuthClient(): SupabaseClient {
     return createClient(this.url, this.anonKey, {
       auth: { persistSession: false, autoRefreshToken: false },

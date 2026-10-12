@@ -483,6 +483,39 @@ export class LogisticsService {
       );
     }
 
+    try {
+      if (typeof this.supabase?.broadcastEvent === "function" && data?.orderId) {
+        const { data: ord } = await this.db()
+          .from("orders")
+          .select("customer_id,facility_id")
+          .eq("id", data.orderId)
+          .maybeSingle();
+
+        const payload = {
+          eventType: "ORDER_STATUS_CHANGED",
+          entityId: data.orderId,
+          orderId: data.orderId,
+          status: data.orderStatus,
+          driverId,
+          timestamp: new Date().toISOString(),
+        };
+
+        const broadcasts: Promise<any>[] = [
+          this.supabase.broadcastEvent("orders:all", "ORDER_STATUS_CHANGED", payload),
+          this.supabase.broadcastEvent(`order:${data.orderId}`, "ORDER_STATUS_CHANGED", payload),
+          this.supabase.broadcastEvent("admin:operations", "ORDER_STATUS_CHANGED", payload),
+        ];
+        if (ord?.customer_id) {
+          broadcasts.push(
+            this.supabase.broadcastEvent(`customer:${ord.customer_id}`, "ORDER_STATUS_CHANGED", payload),
+          );
+        }
+        await Promise.allSettled(broadcasts);
+      }
+    } catch {
+      // Safe catch
+    }
+
     return data.assignment;
   }
 
@@ -575,6 +608,39 @@ export class LogisticsService {
       );
     }
 
+    try {
+      if (typeof this.supabase?.broadcastEvent === "function" && data?.orderId) {
+        const { data: ord } = await this.db()
+          .from("orders")
+          .select("customer_id,facility_id")
+          .eq("id", data.orderId)
+          .maybeSingle();
+
+        const payload = {
+          eventType: "ORDER_STATUS_CHANGED",
+          entityId: data.orderId,
+          orderId: data.orderId,
+          status: data.orderStatus,
+          driverId,
+          timestamp: new Date().toISOString(),
+        };
+
+        const broadcasts: Promise<any>[] = [
+          this.supabase.broadcastEvent("orders:all", "ORDER_STATUS_CHANGED", payload),
+          this.supabase.broadcastEvent(`order:${data.orderId}`, "ORDER_STATUS_CHANGED", payload),
+          this.supabase.broadcastEvent("admin:operations", "ORDER_STATUS_CHANGED", payload),
+        ];
+        if (ord?.customer_id) {
+          broadcasts.push(
+            this.supabase.broadcastEvent(`customer:${ord.customer_id}`, "ORDER_STATUS_CHANGED", payload),
+          );
+        }
+        await Promise.allSettled(broadcasts);
+      }
+    } catch {
+      // Safe catch
+    }
+
     return {
       assignmentId,
       orderId: data.orderId,
@@ -642,6 +708,39 @@ export class LogisticsService {
       throw new ConflictException(
         error?.message ?? "Unable to mark assignment arrived",
       );
+    }
+
+    try {
+      if (typeof this.supabase?.broadcastEvent === "function" && data?.orderId) {
+        const { data: ord } = await this.db()
+          .from("orders")
+          .select("customer_id,facility_id")
+          .eq("id", data.orderId)
+          .maybeSingle();
+
+        const payload = {
+          eventType: "ORDER_STATUS_CHANGED",
+          entityId: data.orderId,
+          orderId: data.orderId,
+          status: data.orderStatus,
+          driverId,
+          timestamp: new Date().toISOString(),
+        };
+
+        const broadcasts: Promise<any>[] = [
+          this.supabase.broadcastEvent("orders:all", "ORDER_STATUS_CHANGED", payload),
+          this.supabase.broadcastEvent(`order:${data.orderId}`, "ORDER_STATUS_CHANGED", payload),
+          this.supabase.broadcastEvent("admin:operations", "ORDER_STATUS_CHANGED", payload),
+        ];
+        if (ord?.customer_id) {
+          broadcasts.push(
+            this.supabase.broadcastEvent(`customer:${ord.customer_id}`, "ORDER_STATUS_CHANGED", payload),
+          );
+        }
+        await Promise.allSettled(broadcasts);
+      }
+    } catch {
+      // Safe catch
     }
 
     return {
@@ -769,7 +868,7 @@ export class LogisticsService {
 
     const { data: order, error: orderError } = await this.db()
       .from("orders")
-      .select("id,current_status,facility_id")
+      .select("id,current_status,facility_id,customer_id")
       .eq("id", assignment.order_id)
       .maybeSingle();
 
@@ -848,6 +947,37 @@ export class LogisticsService {
       throw new BadRequestException(
         statusError?.message ?? "Unable to start facility transit",
       );
+    }
+
+    try {
+      if (typeof this.supabase?.broadcastEvent === "function") {
+        const payload = {
+          eventType: "ORDER_STATUS_CHANGED",
+          entityId: committed.orderId,
+          orderId: committed.orderId,
+          status: committed.orderStatus,
+          facilityId: order.facility_id,
+          timestamp: new Date().toISOString(),
+        };
+
+        const broadcasts: Promise<any>[] = [
+          this.supabase.broadcastEvent("orders:all", "ORDER_STATUS_CHANGED", payload),
+          this.supabase.broadcastEvent(`order:${committed.orderId}`, "ORDER_STATUS_CHANGED", payload),
+          this.supabase.broadcastEvent("admin:operations", "ORDER_STATUS_CHANGED", payload),
+          this.supabase.broadcastEvent("facility:all", "ORDER_STATUS_CHANGED", payload),
+          this.supabase.broadcastEvent(`facility:${order.facility_id}`, "ORDER_STATUS_CHANGED", payload),
+        ];
+
+        if (order.customer_id) {
+          broadcasts.push(
+            this.supabase.broadcastEvent(`customer:${order.customer_id}`, "ORDER_STATUS_CHANGED", payload),
+          );
+        }
+
+        await Promise.allSettled(broadcasts);
+      }
+    } catch {
+      // Safe catch
     }
 
     return {

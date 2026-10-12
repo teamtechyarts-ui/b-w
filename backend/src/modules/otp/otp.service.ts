@@ -248,6 +248,26 @@ export class OtpService {
       );
     }
 
+    const { data: recentOtp } = await this.db()
+      .from('order_otps')
+      .select('created_at')
+      .eq('order_id', orderId)
+      .eq('otp_type', type)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (recentOtp?.created_at) {
+      const elapsedMs = Date.now() - new Date(recentOtp.created_at).getTime();
+      const COOLDOWN_MS = 10_000;
+      if (elapsedMs < COOLDOWN_MS) {
+        const waitSec = Math.ceil((COOLDOWN_MS - elapsedMs) / 1000);
+        throw new BadRequestException(
+          `Please wait ${waitSec} second${waitSec > 1 ? 's' : ''} before requesting a new OTP.`,
+        );
+      }
+    }
+
     const otp =
       randomInt(
         100000,
@@ -463,6 +483,48 @@ export class OtpService {
         completionError?.message ??
           'Unable to complete pickup OTP verification',
       );
+    }
+
+    try {
+      if (typeof this.supabase?.broadcastEvent === 'function') {
+        const { data: orderData } = await this.db()
+          .from('orders')
+          .select('id,order_number,facility_id,customer_id')
+          .eq('id', orderId)
+          .maybeSingle();
+
+        const payload = {
+          eventType: 'ORDER_STATUS_CHANGED',
+          entityId: orderId,
+          orderId,
+          orderNumber: orderData?.order_number,
+          status: verification.orderStatus,
+          facilityId: orderData?.facility_id,
+          timestamp: new Date().toISOString(),
+        };
+
+        const broadcasts: Promise<any>[] = [
+          this.supabase.broadcastEvent('orders:all', 'ORDER_STATUS_CHANGED', payload),
+          this.supabase.broadcastEvent(`order:${orderId}`, 'ORDER_STATUS_CHANGED', payload),
+          this.supabase.broadcastEvent('admin:operations', 'ORDER_STATUS_CHANGED', payload),
+          this.supabase.broadcastEvent('facility:all', 'ORDER_STATUS_CHANGED', payload),
+        ];
+
+        if (orderData?.facility_id) {
+          broadcasts.push(
+            this.supabase.broadcastEvent(`facility:${orderData.facility_id}`, 'ORDER_STATUS_CHANGED', payload),
+          );
+        }
+        if (orderData?.customer_id) {
+          broadcasts.push(
+            this.supabase.broadcastEvent(`customer:${orderData.customer_id}`, 'ORDER_STATUS_CHANGED', payload),
+          );
+        }
+
+        await Promise.allSettled(broadcasts);
+      }
+    } catch {
+      // Safe catch
     }
 
     return {

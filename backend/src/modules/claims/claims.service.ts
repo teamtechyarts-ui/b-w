@@ -86,6 +86,52 @@ export class ClaimsService {
     return data;
   }
 
+  private async attachSignedUrlsToPhotos(photos: any[]) {
+    return Promise.all(
+      (photos ?? []).map(async (photo: any) => {
+        try {
+          if (!this.db()?.storage) {
+            console.log('[CLAIM_PHOTO_READ]', {
+              claimId: photo.claim_id,
+              photoId: photo.id,
+              storagePath: photo.storage_path,
+              signedUrlGenerated: false,
+              expiresIn: 3600,
+              supabaseError: 'Storage client not available',
+            });
+            return {...photo, signedUrl: null};
+          }
+          const signed = await this.db()
+            .storage.from('customer-claim-photos')
+            .createSignedUrl(photo.storage_path, 3600);
+          const signedUrl = signed.data?.signedUrl ?? null;
+          console.log('[CLAIM_PHOTO_READ]', {
+            claimId: photo.claim_id,
+            photoId: photo.id,
+            storagePath: photo.storage_path,
+            signedUrlGenerated: Boolean(signedUrl),
+            expiresIn: 3600,
+            supabaseError: signed.error?.message ?? null,
+          });
+          return {
+            ...photo,
+            signedUrl,
+          };
+        } catch (err: any) {
+          console.log('[CLAIM_PHOTO_READ]', {
+            claimId: photo.claim_id,
+            photoId: photo.id,
+            storagePath: photo.storage_path,
+            signedUrlGenerated: false,
+            expiresIn: 3600,
+            supabaseError: err?.message ?? 'Unknown storage error',
+          });
+          return {...photo, signedUrl: null};
+        }
+      }),
+    );
+  }
+
   async listForOrder(profileId: string, orderId: string) {
     const customerId = await this.requireOwnedOrder(profileId, orderId);
     const { data, error } = await this.db()
@@ -99,7 +145,15 @@ export class ClaimsService {
       throw new BadRequestException('Unable to load claims');
     }
 
-    return data ?? [];
+    const claims = data ?? [];
+    return Promise.all(
+      claims.map(async (claim: any) => ({
+        ...claim,
+        customer_claim_photos: await this.attachSignedUrlsToPhotos(
+          claim.customer_claim_photos ?? [],
+        ),
+      })),
+    );
   }
 
   async getOne(profileId: string, claimId: string) {
@@ -115,7 +169,12 @@ export class ClaimsService {
       throw new NotFoundException('Claim not found');
     }
 
-    return data;
+    return {
+      ...data,
+      customer_claim_photos: await this.attachSignedUrlsToPhotos(
+        data.customer_claim_photos ?? [],
+      ),
+    };
   }
 
   async createPhotoUpload(profileId: string, claimId: string, fileName: string) {
@@ -169,3 +228,4 @@ export class ClaimsService {
     return data;
   }
 }
+

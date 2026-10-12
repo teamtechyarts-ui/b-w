@@ -25,6 +25,8 @@ export type AdminOrderDetail = {
     order_qr_codes: {id: string; secure_token: string; is_active: boolean} | null;
     customers: {id: string; profile_id: string; profiles: {full_name: string | null; phone: string | null}};
     facilities?: {id: string; name: string; address: string | null} | null;
+    facility_id?: string | null;
+
     pickup_address?: {id?: string; label?: string | null; address_line1: string; address_line2?: string | null; city: string | null; state: string | null; postal_code: string | null} | null;
     delivery_address?: {id?: string; label?: string | null; address_line1: string; address_line2?: string | null; city: string | null; state: string | null; postal_code: string | null} | null;
     driver_assignments?: Array<{id: string; status: string; assignment_type: string; assigned_at: string; accepted_at: string | null; drivers?: {id: string; profiles?: {full_name: string | null; phone: string | null} | null} | null}>;

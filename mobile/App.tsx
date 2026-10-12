@@ -12,11 +12,16 @@ import {clearOrderAttempt, loadOrderAttempt, saveOrderAttempt} from './src/servi
 import {
   ActivityIndicator,
   Alert,
-  SafeAreaView,
+  StatusBar,
   StyleSheet,
   Text,
   TouchableOpacity,
 } from 'react-native';
+import {
+  SafeAreaProvider,
+  SafeAreaView,
+  initialWindowMetrics,
+} from 'react-native-safe-area-context';
 
 import {
   NavigationContainer,
@@ -77,10 +82,13 @@ import {customerNameFromProfile} from './src/services/profileApi';
 import SupportScreen from './src/screens/SupportScreen';
 import ReceiptScreen from './src/screens/ReceiptScreen';
 import AccountScreen from './src/screens/AccountScreen';
+import PrivacyPolicyScreen from './src/screens/PrivacyPolicyScreen';
+import ClaimsRefundsScreen from './src/screens/ClaimsRefundsScreen';
 import CustomerTabFrame from './src/components/CustomerTabFrame';
 import type {CreateOrderInput, CustomerOrder} from './src/types/order';
 import {buildReorderPlan} from './src/utils/reorder';
 import {normalizePhone} from './src/utils/contactValidation';
+import {isMalformedCategoryName} from './src/utils/categoryQuality';
 import type {CustomerPackage} from './src/services/packagesApi';
 import {packageDiscount} from './src/utils/packagePricing';
 import type {CouponResult} from './src/services/growthApi';
@@ -178,6 +186,7 @@ const linking: LinkingOptions<any> = {
       Login: 'login',
       SignUp: 'signup',
       DriverLogin: 'driver/login',
+      PrivacyPolicy: 'privacy-policy',
     },
   },
 };
@@ -399,7 +408,8 @@ export default function App() {
         services.forEach(
           service => {
             if (
-              !service.categoryName
+              !service.categoryName ||
+              isMalformedCategoryName(service.categoryName)
             ) {
               return;
             }
@@ -1261,28 +1271,31 @@ const useSelectedLocation =
     !initialSessionResolved
   ) {
     return (
-      <SafeAreaView
-        style={
-          styles.sessionLoadingContainer
-        }>
-        <ActivityIndicator
-          size="large"
-        />
-
-        <Text
+      <SafeAreaProvider initialMetrics={initialWindowMetrics} style={{flex: 1}}>
+        <StatusBar barStyle="dark-content" {...({backgroundColor: '#FFFFFF', translucent: false} as any)} />
+        <SafeAreaView
           style={
-            styles.sessionLoadingTitle
+            styles.sessionLoadingContainer
           }>
-          Bright & White
-        </Text>
+          <ActivityIndicator
+            size="large"
+          />
 
-        <Text
-          style={
-            styles.sessionLoadingText
-          }>
-          Restoring your session...
-        </Text>
-      </SafeAreaView>
+          <Text
+            style={
+              styles.sessionLoadingTitle
+            }>
+            Bright & White
+          </Text>
+
+          <Text
+            style={
+              styles.sessionLoadingText
+            }>
+            Restoring your session...
+          </Text>
+        </SafeAreaView>
+      </SafeAreaProvider>
     );
   }
 
@@ -1291,11 +1304,13 @@ const useSelectedLocation =
    */
 
   return (
-    <NavigationContainer
-      ref={
-        navigationRef
-      }
-      linking={linking}>
+    <SafeAreaProvider initialMetrics={initialWindowMetrics} style={{flex: 1}}>
+      <StatusBar barStyle="dark-content" {...({backgroundColor: '#FFFFFF', translucent: false} as any)} />
+      <NavigationContainer
+        ref={
+          navigationRef
+        }
+        linking={linking}>
       {authenticated && accessToken && !accountRoleFromProfile(profile) ? (
         <Stack.Navigator key="unresolved" screenOptions={{headerShown: false}}>
           <Stack.Screen name="DriverProfile">
@@ -1437,6 +1452,7 @@ const useSelectedLocation =
                 categories={
                   categories
                 }
+                selectedCategory={selectedCategory}
                 addresses={addresses}
                 selectedAddressId={selectedAddressId}
                 cartItemCount={
@@ -1479,17 +1495,38 @@ const useSelectedLocation =
               if (destination === 'profile') navigationRef.navigate('Profile');
               else if (destination === 'addresses') navigationRef.navigate('Addresses', {mode: 'manage'});
               else if (destination === 'offers') navigationRef.navigate('Benefits');
-              else if (destination === 'claims') navigationRef.navigate('Orders');
+              else if (destination === 'claims') navigationRef.navigate('ClaimsRefunds');
               else if (destination === 'notifications') navigationRef.navigate('Notifications');
               else if (destination === 'terms') navigationRef.navigate('Support', {showTerms: true});
+              else if (destination === 'privacy') navigationRef.navigate('PrivacyPolicy');
               else navigationRef.navigate('Support');
             }} /></CustomerTabFrame>}
+          </Stack.Screen>
+          <Stack.Screen name="ClaimsRefunds">
+            {() => (
+              <ClaimsRefundsScreen
+                accessToken={accessToken}
+                onBack={goBack}
+                onOpenOrder={openOrderDetails}
+              />
+            )}
           </Stack.Screen>
           <Stack.Screen name="Profile">
             {() => <ProfileScreen accessToken={accessToken} onBack={goBack} onAddresses={() => navigationRef.isReady() && navigationRef.navigate('Addresses', {mode: 'manage'})} onLogout={logout} />}
           </Stack.Screen>
           <Stack.Screen name="Support">
-            {({route}) => <SupportScreen onBack={goBack} onOrders={openOrders} initialTermsVisible={route.params?.showTerms === true} />}
+            {({route}) => (
+              <SupportScreen
+                onBack={goBack}
+                onOrders={openOrders}
+                initialTermsVisible={route.params?.showTerms === true}
+                initialPrivacyVisible={route.params?.showPrivacy === true}
+                onPrivacy={() => navigationRef.isReady() && navigationRef.navigate('PrivacyPolicy')}
+              />
+            )}
+          </Stack.Screen>
+          <Stack.Screen name="PrivacyPolicy">
+            {() => <PrivacyPolicyScreen onBack={goBack} />}
           </Stack.Screen>
           <Stack.Screen name="Receipt">
             {({route}) => <ReceiptScreen accessToken={accessToken} orderId={route.params.orderId} onBack={goBack} />}
@@ -1499,31 +1536,39 @@ const useSelectedLocation =
             name="Category">
             {({
               route,
-            }) => (
-              <CategoryScreen
-                categoryName={
-                  route.params
-                    .categoryName
-                }
-                services={
-                  selectedCategoryServices
-                }
-                cartItemCount={
-                  cartItemCount
-                }
-                cartSubtotal={
-                  cartSubtotal
-                }
-                getQuantity={
-                  getQuantity
-                }
-                onBack={() => {
-                  setSelectedCategory(
-                    null,
-                  );
-
-                  goBack();
-                }}
+            }) => {
+              const currentCategoryName =
+                route.params
+                  .categoryName;
+              const catServices =
+                services.filter(
+                  s => s.categoryName === currentCategoryName,
+                );
+              return (
+                <CategoryScreen
+                  categoryName={
+                    currentCategoryName
+                  }
+                  services={
+                    catServices
+                  }
+                  servicesLoading={
+                    servicesLoading
+                  }
+                  servicesError={
+                    servicesError
+                  }
+                  onRetryServices={() => loadServices(accessToken)}
+                  cartItemCount={
+                    cartItemCount
+                  }
+                  cartSubtotal={
+                    cartSubtotal
+                  }
+                  getQuantity={
+                    getQuantity
+                  }
+                  onBack={goBack}
                 onOpenCart={() => {
                   if (
                     navigationRef.isReady()
@@ -1537,7 +1582,8 @@ const useSelectedLocation =
                   updateQuantity
                 }
               />
-            )}
+              );
+            }}
           </Stack.Screen>
 
           <Stack.Screen
@@ -1844,6 +1890,7 @@ const useSelectedLocation =
                     categories={
                       categories
                     }
+                    selectedCategory={selectedCategory}
                     addresses={addresses}
                     selectedAddressId={selectedAddressId}
                     cartItemCount={
@@ -1989,6 +2036,11 @@ const useSelectedLocation =
                     'Login',
                   )
                 }
+                onOpenPrivacy={() =>
+                  navigation.navigate(
+                    'PrivacyPolicy',
+                  )
+                }
               />
             )}
           </Stack.Screen>
@@ -2015,6 +2067,11 @@ const useSelectedLocation =
                 onNavigateToDriverLogin={() =>
                   navigation.navigate(
                     'DriverLogin',
+                  )
+                }
+                onNavigateToPrivacyPolicy={() =>
+                  navigation.navigate(
+                    'PrivacyPolicy',
                   )
                 }
                 onBack={() =>
@@ -2057,6 +2114,11 @@ const useSelectedLocation =
                 onNavigateToLogin={() =>
                   navigation.navigate(
                     'Login',
+                  )
+                }
+                onNavigateToPrivacyPolicy={() =>
+                  navigation.navigate(
+                    'PrivacyPolicy',
                   )
                 }
                 onBack={() =>
@@ -2139,9 +2201,23 @@ const useSelectedLocation =
               />
             )}
           </Stack.Screen>
+
+          <Stack.Screen
+            name="PrivacyPolicy">
+            {({
+              navigation,
+            }) => (
+              <PrivacyPolicyScreen
+                onBack={() =>
+                  navigation.goBack()
+                }
+              />
+            )}
+          </Stack.Screen>
         </Stack.Navigator>
       )}
     </NavigationContainer>
+    </SafeAreaProvider>
   );
 }
 

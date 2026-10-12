@@ -1,5 +1,6 @@
 import React from 'react';
 import {StyleSheet, Text, TouchableOpacity, View} from 'react-native';
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import AppIcon, {IconName} from './AppIcon';
 import {colors, spacing, typography} from '../theme/designSystem';
 
@@ -14,7 +15,7 @@ type Props = {
 };
 
 const tabs: {key: CustomerTab; label: string; icon: IconName}[] = [
-  {key: 'home', label: 'Home', icon: 'wash'},
+  {key: 'home', label: 'Home', icon: 'home'},
   {key: 'orders', label: 'Orders', icon: 'box'},
   {key: 'account', label: 'Account', icon: 'user'},
 ];
@@ -25,6 +26,9 @@ export default function CustomerBottomNavigation({
   onOrders,
   onAccount,
 }: Props) {
+  const insets = useSafeAreaInsets();
+  const bottomInset = insets?.bottom ?? 0;
+
   const handlers = {
     home: onHome,
     orders: onOrders,
@@ -32,7 +36,15 @@ export default function CustomerBottomNavigation({
   };
 
   return (
-    <View accessibilityRole="tablist" style={styles.bar}>
+    <View
+      accessibilityRole="tablist"
+      style={[
+        styles.bar,
+        {
+          paddingBottom: bottomInset,
+          height: 60 + bottomInset,
+        },
+      ]}>
       {tabs.map(tab => {
         const isSelected = tab.key === active;
         return (

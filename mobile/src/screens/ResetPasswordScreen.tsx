@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import {
   ActivityIndicator,
-  SafeAreaView,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -9,6 +8,8 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import {SafeAreaView} from 'react-native-safe-area-context';
+import BrandLogo from '../components/BrandLogo';
 import PasswordInput from '../components/PasswordInput';
 import { resetPassword } from '../services/authApi';
 
@@ -162,6 +163,8 @@ export default function ResetPasswordScreen({
           <Text style={styles.back}>← Back</Text>
         </TouchableOpacity>
 
+        <BrandLogo width={160} containerStyle={styles.logoContainer} />
+
         <Text style={styles.title}>Set New Password</Text>
         <Text style={styles.subtitle}>
           Create a secure password for your Bright & White account
@@ -266,8 +269,12 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
   },
   backButton: {
-    marginBottom: 30,
+    marginBottom: 20,
     alignSelf: 'flex-start',
+  },
+  logoContainer: {
+    marginBottom: 20,
+    alignSelf: 'center',
   },
   back: {
     fontSize: 16,

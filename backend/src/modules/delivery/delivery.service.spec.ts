@@ -23,7 +23,7 @@ function query(result: unknown) {
 }
 
 describe('DeliveryService', () => {
-  it('delegates all successful delivery writes to the atomic RPC', async () => {
+  it('delegates all successful delivery writes without photo to the atomic RPC', async () => {
     const salt = 'runtime-test-salt';
     const otp = '654321';
     const otpHash = `${salt}:${scryptSync(
@@ -91,9 +91,6 @@ describe('DeliveryService', () => {
         'profile-1',
         'order-1',
         otp,
-        'order-1/00000000-0000-4000-8000-000000000001.png',
-        17.4,
-        78.4,
       ),
     ).resolves.toMatchObject({
       delivered: true,
@@ -115,8 +112,20 @@ describe('DeliveryService', () => {
         p_otp_id: 'otp-1',
         p_validated_otp_hash:
           otpHash,
+        p_photo_path: null,
       }),
     );
+  });
+
+  it('rejects empty or malformed OTP', async () => {
+    const service = new DeliveryService({} as any, {} as any);
+    await expect(
+      service.complete('profile-1', 'order-1', ''),
+    ).rejects.toThrow('Delivery OTP is required');
+
+    await expect(
+      service.complete('profile-1', 'order-1', '123'),
+    ).rejects.toThrow('Delivery OTP must be 6 digits');
   });
 
   it('serializes each failed OTP attempt through the database RPC', async () => {
@@ -184,7 +193,6 @@ describe('DeliveryService', () => {
         'profile-1',
         'order-1',
         '000000',
-        'order-1/00000000-0000-4000-8000-000000000001.png',
       ),
     ).rejects.toBeInstanceOf(
       BadRequestException,

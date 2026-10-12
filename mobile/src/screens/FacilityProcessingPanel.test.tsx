@@ -232,6 +232,7 @@ test('Facility Staff can approve QC and sees the rewash cap', async () => {
       accessToken="token"
       orderId="order-1"
       onChanged={jest.fn()}
+      packingReady={true}
     />,
   );
   await waitFor(() =>
@@ -307,3 +308,118 @@ test('renders full processing history with completed and in-progress stages', as
   expect(view.getByText('Complete Dry')).toBeTruthy();
   expect(view.queryByText('Ready to start processing')).toBeNull();
 });
+
+test('stepper strictly displays Wash as active/ready and Pack as waiting/locked on initial verified state', async () => {
+  get.mockResolvedValueOnce({
+    ...empty,
+    orderStatus: 'verification',
+    nextStage: 'washing',
+    stages: [],
+  });
+  const view = await render(
+    <FacilityProcessingPanel
+      accessToken="token"
+      orderId="order-1"
+      onChanged={jest.fn()}
+      packingReady={true}
+    />,
+  );
+  await waitFor(() =>
+    expect(view.getByTestId('step-wash-active')).toBeTruthy(),
+  );
+  expect(view.getByTestId('step-dry-waiting')).toBeTruthy();
+  expect(view.getByTestId('step-iron-waiting')).toBeTruthy();
+  expect(view.getByTestId('step-fold-waiting')).toBeTruthy();
+  expect(view.getByTestId('step-pack-waiting')).toBeTruthy();
+  expect(view.getByTestId('step-qc-waiting')).toBeTruthy();
+  expect(view.queryByTestId('step-pack-complete')).toBeNull();
+});
+
+test('stepper updates sequentially as stages complete: Wash -> Dry -> Iron -> Fold -> Pack -> QC', async () => {
+  // 1. Wash completed, Dry ready
+  get.mockResolvedValueOnce({
+    ...empty,
+    orderStatus: 'processing',
+    nextStage: 'drying',
+    stages: [
+      {
+        id: 'wash-1',
+        operation_type: 'washing',
+        started_at: '2026-10-03T10:00:00Z',
+        completed_at: '2026-10-03T10:30:00Z',
+      },
+    ],
+  });
+  const view1 = await render(
+    <FacilityProcessingPanel
+      accessToken="token"
+      orderId="order-1"
+      onChanged={jest.fn()}
+    />,
+  );
+  await waitFor(() =>
+    expect(view1.getByTestId('step-wash-complete')).toBeTruthy(),
+  );
+  expect(view1.getByTestId('step-dry-active')).toBeTruthy();
+  expect(view1.getByTestId('step-iron-waiting')).toBeTruthy();
+  expect(view1.getByTestId('step-fold-waiting')).toBeTruthy();
+  expect(view1.getByTestId('step-pack-waiting')).toBeTruthy();
+  expect(view1.getByTestId('step-qc-waiting')).toBeTruthy();
+  await view1.unmount();
+
+  // 2. Wash, Dry, Iron, Fold completed, Pack active/ready
+  get.mockResolvedValueOnce({
+    ...empty,
+    orderStatus: 'processing',
+    nextStage: 'packaging',
+    stages: [
+      { id: 'w1', operation_type: 'washing', started_at: 't1', completed_at: 't2' },
+      { id: 'd1', operation_type: 'drying', started_at: 't2', completed_at: 't3' },
+      { id: 'i1', operation_type: 'ironing', started_at: 't3', completed_at: 't4' },
+      { id: 'f1', operation_type: 'folding', started_at: 't4', completed_at: 't5' },
+    ],
+  });
+  const view2 = await render(
+    <FacilityProcessingPanel
+      accessToken="token"
+      orderId="order-1"
+      onChanged={jest.fn()}
+    />,
+  );
+  await waitFor(() =>
+    expect(view2.getByTestId('step-wash-complete')).toBeTruthy(),
+  );
+  expect(view2.getByTestId('step-dry-complete')).toBeTruthy();
+  expect(view2.getByTestId('step-iron-complete')).toBeTruthy();
+  expect(view2.getByTestId('step-fold-complete')).toBeTruthy();
+  expect(view2.getByTestId('step-pack-active')).toBeTruthy();
+  expect(view2.getByTestId('step-qc-waiting')).toBeTruthy();
+  await view2.unmount();
+
+  // 3. Packaging completed, QC ready
+  get.mockResolvedValueOnce({
+    ...empty,
+    orderStatus: 'processing',
+    nextStage: null,
+    canQualityCheck: true,
+    stages: [
+      { id: 'w1', operation_type: 'washing', started_at: 't1', completed_at: 't2' },
+      { id: 'd1', operation_type: 'drying', started_at: 't2', completed_at: 't3' },
+      { id: 'i1', operation_type: 'ironing', started_at: 't3', completed_at: 't4' },
+      { id: 'f1', operation_type: 'folding', started_at: 't4', completed_at: 't5' },
+      { id: 'p1', operation_type: 'packaging', started_at: 't5', completed_at: 't6' },
+    ],
+  });
+  const view3 = await render(
+    <FacilityProcessingPanel
+      accessToken="token"
+      orderId="order-1"
+      onChanged={jest.fn()}
+    />,
+  );
+  await waitFor(() =>
+    expect(view3.getByTestId('step-pack-complete')).toBeTruthy(),
+  );
+  expect(view3.getByTestId('step-qc-active')).toBeTruthy();
+});
+

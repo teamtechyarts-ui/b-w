@@ -45,9 +45,17 @@ export class OrdersController {
   }
 
   @Get()
-  list(@Req() req: any) {
+  list(
+    @Req() req: any,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ) {
+    const parsedLimit = limit ? Math.min(Math.max(1, parseInt(limit, 10) || 50), 100) : undefined;
+    const parsedOffset = offset ? Math.max(0, parseInt(offset, 10) || 0) : undefined;
     return this.orders.listMine(
       req.user.id,
+      parsedLimit,
+      parsedOffset,
     );
   }
 

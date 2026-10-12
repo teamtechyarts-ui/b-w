@@ -83,6 +83,7 @@ export type SignUpCustomerPayload = {
 export type SignUpCustomerResponse = AuthSessionResponse & {
   requiresEmailConfirmation?: boolean;
   message?: string;
+  email?: string;
 };
 
 export async function signUpCustomer(
@@ -96,6 +97,49 @@ export async function signUpCustomer(
     },
   );
 }
+
+export type VerifyEmailOtpResponse = {
+  verified: boolean;
+  message: string;
+  user?: any;
+  profile?: any;
+};
+
+export async function verifyEmailOtp(
+  email: string,
+  otp: string,
+): Promise<VerifyEmailOtpResponse> {
+  return apiRequest<VerifyEmailOtpResponse>(
+    '/auth/verify-email-otp',
+    {
+      method: 'POST',
+      body: {
+        email,
+        otp,
+      },
+    },
+  );
+}
+
+export type ResendEmailOtpResponse = {
+  sent: boolean;
+  message: string;
+};
+
+export async function resendEmailOtp(
+  email: string,
+): Promise<ResendEmailOtpResponse> {
+  return apiRequest<ResendEmailOtpResponse>(
+    '/auth/resend-email-otp',
+    {
+      method: 'POST',
+      body: {
+        email,
+      },
+    },
+  );
+}
+
 
 export type SignInCustomerPayload = {
   email: string;
@@ -117,8 +161,8 @@ export async function signInCustomer(
 export async function requestPasswordReset(
   email: string,
   redirectTo?: string,
-): Promise<{sent: boolean}> {
-  return apiRequest<{sent: boolean}>(
+): Promise<{sent: boolean; message?: string}> {
+  const res = await apiRequest<{message?: string; sent?: boolean}>(
     '/auth/forgot-password',
     {
       method: 'POST',
@@ -126,6 +170,40 @@ export async function requestPasswordReset(
         email,
         ...(redirectTo ? {redirectTo} : {}),
       },
+    },
+  );
+  return {
+    sent: true,
+    message: res.message,
+  };
+}
+
+export async function verifyPasswordResetOtp(
+  email: string,
+  otp: string,
+): Promise<{resetToken: string; message?: string}> {
+  return apiRequest<{resetToken: string; message?: string}>(
+    '/auth/verify-reset-otp',
+    {
+      method: 'POST',
+      body: {
+        email,
+        otp,
+      },
+    },
+  );
+}
+
+export async function confirmPasswordReset(payload: {
+  resetToken: string;
+  newPassword: string;
+  confirmPassword?: string;
+}): Promise<{success: boolean; message?: string}> {
+  return apiRequest<{success: boolean; message?: string}>(
+    '/auth/reset-password',
+    {
+      method: 'POST',
+      body: payload,
     },
   );
 }

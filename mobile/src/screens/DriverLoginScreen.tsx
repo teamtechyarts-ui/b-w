@@ -1,7 +1,6 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  SafeAreaView,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -10,7 +9,9 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import {SafeAreaView} from 'react-native-safe-area-context';
 import IndianMobileInput from '../components/IndianMobileInput';
+import { ActionError, FieldError } from '../components/FormError';
 import { signInStaffPin } from '../services/authApi';
 import type { AuthSessionResponse } from '../types/session';
 import { toIndianE164, validateIndianMobile } from '../utils/indianMobile';
@@ -29,26 +30,30 @@ export default function DriverLoginScreen({
   const [phone, setPhone] = useState('');
   const [pin, setPin] = useState('');
   const [loading, setLoading] = useState(false);
-  const [errorMessage, setErrorMessage] = useState('');
+  const [phoneError, setPhoneError] = useState('');
+  const [pinError, setPinError] = useState('');
+  const [actionError, setActionError] = useState('');
 
-  const validate = (): string | null => {
-    const phoneValidation = validateIndianMobile(phone);
-    if (!phoneValidation.isValid) {
-      return phoneValidation.error || 'Enter a valid 10-digit Indian mobile number.';
-    }
-    if (!pin || pin.length !== 6 || !/^\d{6}$/.test(pin)) {
-      return 'Please enter your 6-digit PIN';
-    }
-    return null;
+  const pinInputRef = useRef<any>(null);
+
+  const clearErrors = () => {
+    setPhoneError('');
+    setPinError('');
+    setActionError('');
   };
 
   const handleDriverLogin = async () => {
     if (loading) return;
-    setErrorMessage('');
+    clearErrors();
 
-    const validationError = validate();
-    if (validationError) {
-      setErrorMessage(validationError);
+    const phoneValidation = validateIndianMobile(phone);
+    if (!phoneValidation.isValid) {
+      setPhoneError(phoneValidation.error || 'Enter a valid 10-digit Indian mobile number.');
+      return;
+    }
+    if (!pin || pin.length !== 6 || !/^\d{6}$/.test(pin)) {
+      setPinError('Please enter your 6-digit PIN');
+      pinInputRef.current?.focus();
       return;
     }
 
@@ -63,11 +68,11 @@ export default function DriverLoginScreen({
     } catch (err: any) {
       const msg = err?.message || '';
       if (msg.includes('connection') || msg.includes('network')) {
-        setErrorMessage('Unable to connect. Please check your internet connection.');
+        setActionError('Unable to connect. Please check your internet connection.');
       } else if (msg) {
-        setErrorMessage(msg);
+        setActionError(msg);
       } else {
-        setErrorMessage('Incorrect mobile number or PIN.');
+        setActionError('Incorrect mobile number or PIN.');
       }
     } finally {
       setLoading(false);
@@ -98,29 +103,30 @@ export default function DriverLoginScreen({
           </Text>
         </View>
 
-        {errorMessage ? (
-          <View style={styles.errorContainer} accessibilityRole="alert">
-            <Text style={styles.errorText}>{errorMessage}</Text>
-          </View>
-        ) : null}
-
         <View style={styles.form}>
           <IndianMobileInput
             label="Mobile Number"
             accessibilityLabel="Mobile number"
             placeholder="9876543210"
             value={phone}
+            error={phoneError}
             helperText="Enter 10-digit Indian mobile number. +91 is added automatically."
             onChangeText={(localDigits) => {
               setPhone(localDigits);
-              if (errorMessage) setErrorMessage('');
+              if (phoneError) setPhoneError('');
+              if (actionError) setActionError('');
             }}
           />
 
           <Text style={styles.label}>6-Digit PIN</Text>
           <TextInput
+            ref={pinInputRef}
             accessibilityLabel="6-Digit PIN"
-            style={[styles.input, styles.pinInput]}
+            style={[
+              styles.input,
+              styles.pinInput,
+              pinError ? styles.inputError : null,
+            ]}
             placeholder="••••••"
             placeholderTextColor="#888888"
             keyboardType="number-pad"
@@ -128,12 +134,13 @@ export default function DriverLoginScreen({
             maxLength={6}
             value={pin}
             onChangeText={text => {
-              // Only allow numeric input
               const cleaned = text.replace(/\D/g, '').slice(0, 6);
               setPin(cleaned);
-              if (errorMessage) setErrorMessage('');
+              if (pinError) setPinError('');
+              if (actionError) setActionError('');
             }}
           />
+          <FieldError error={pinError} />
 
           <TouchableOpacity
             accessibilityRole="button"
@@ -150,6 +157,7 @@ export default function DriverLoginScreen({
               <Text style={styles.buttonText}>Sign In</Text>
             )}
           </TouchableOpacity>
+          <ActionError error={actionError} />
 
           <View style={styles.footerRow}>
             <TouchableOpacity
@@ -224,6 +232,10 @@ const styles = StyleSheet.create({
     color: '#111111',
     marginBottom: 20,
     backgroundColor: '#F9FAFB',
+  },
+  inputError: {
+    borderColor: '#C53030',
+    backgroundColor: '#FFF5F5',
   },
   pinInput: {
     letterSpacing: 6,

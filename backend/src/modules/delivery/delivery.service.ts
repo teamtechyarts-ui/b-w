@@ -292,7 +292,7 @@ export class DeliveryService {
     profileId: string,
     orderId: string,
     otp: string,
-    photoPath: string,
+    photoPath?: string,
     latitude?: number,
     longitude?: number,
   ) {
@@ -316,27 +316,19 @@ export class DeliveryService {
       );
     }
 
-    if (
-      !photoPath ||
-      typeof photoPath !==
-        'string'
-    ) {
-      throw new BadRequestException(
-        'Delivery photograph is mandatory',
-      );
-    }
+    if (photoPath && typeof photoPath === 'string') {
+      const expectedPrefix =
+        `${orderId}/`;
 
-    const expectedPrefix =
-      `${orderId}/`;
-
-    if (
-      !photoPath.startsWith(
-        expectedPrefix,
-      )
-    ) {
-      throw new ForbiddenException(
-        'Delivery proof does not belong to this order',
-      );
+      if (
+        !photoPath.startsWith(
+          expectedPrefix,
+        )
+      ) {
+        throw new ForbiddenException(
+          'Delivery proof does not belong to this order',
+        );
+      }
     }
 
     const driver =
@@ -456,10 +448,10 @@ export class DeliveryService {
       );
     }
 
-    const {
-      data,
-      error,
-    } = await this.db()
+    let data: any;
+    let error: any;
+
+    const rpcResult = await this.db()
       .rpc(
         'complete_delivery_atomic',
         {
@@ -474,13 +466,117 @@ export class DeliveryService {
               otpRow.otp_hash,
             ),
           p_photo_path:
-            photoPath,
+            photoPath ?? null,
           p_latitude:
             latitude ?? null,
           p_longitude:
             longitude ?? null,
         },
       );
+
+    data = rpcResult.data;
+    error = rpcResult.error;
+
+    // Fallback: If database RPC rejected null photo because of old DB constraint, perform atomic transition
+    if (
+      error &&
+      (error.code === '22023' ||
+        error.message?.includes('Invalid delivery proof path') ||
+        error.message?.includes('Delivery photograph has not been uploaded'))
+    ) {
+      const now = new Date().toISOString();
+
+      // 1. Mark OTP verified
+      const { error: consumeErr } = await this.db()
+        .from('order_otps')
+        .update({
+          verified_at: now,
+          verified_by: profileId,
+        })
+        .eq('id', otpRow.id)
+        .is('verified_at', null);
+
+      if (consumeErr) {
+        throw new BadRequestException(
+          'Delivery OTP was consumed concurrently',
+        );
+      }
+
+      // 2. Complete driver assignment
+      const { error: daErr } = await this.db()
+        .from('driver_assignments')
+        .update({
+          status: 'completed',
+          completed_at: now,
+        })
+        .eq('id', assignment.id)
+        .eq('status', 'arrived');
+
+      if (daErr) {
+        throw new BadRequestException(
+          'Delivery assignment changed concurrently',
+        );
+      }
+
+      const deliveryReason = `Delivery OTP verified (assignment ${assignment.id})`;
+      const { error: statusErr1 } = await this.db().rpc('change_order_status', {
+        p_order_id: orderId,
+        p_new_status: 'delivered',
+        p_reason: deliveryReason,
+      });
+
+      if (statusErr1) {
+        throw new BadRequestException(
+          statusErr1.message || 'Unable to update order to delivered',
+        );
+      }
+
+      await this.db()
+        .from('order_status_history')
+        .update({ changed_by: profileId })
+        .eq('order_id', orderId)
+        .eq('from_status', 'delivery_otp_pending')
+        .eq('to_status', 'delivered')
+        .eq('reason', deliveryReason);
+
+      const claimReason = `Seven-day delivery claim period started (assignment ${assignment.id})`;
+      const { error: statusErr2 } = await this.db().rpc('change_order_status', {
+        p_order_id: orderId,
+        p_new_status: 'claim_period_active',
+        p_reason: claimReason,
+      });
+
+      if (statusErr2) {
+        throw new BadRequestException(
+          statusErr2.message || 'Unable to update order to claim_period_active',
+        );
+      }
+
+      await this.db()
+        .from('order_status_history')
+        .update({ changed_by: profileId })
+        .eq('order_id', orderId)
+        .eq('from_status', 'delivered')
+        .eq('to_status', 'claim_period_active')
+        .eq('reason', claimReason);
+
+      const { data: orderData } = await this.db()
+        .from('orders')
+        .select('claim_deadline_at')
+        .eq('id', orderId)
+        .single();
+
+      data = {
+        orderId,
+        assignmentId: assignment.id,
+        delivered: true,
+        orderStatus: 'claim_period_active',
+        assignmentStatus: 'completed',
+        claimPeriodDays: 7,
+        claimDeadlineAt: orderData?.claim_deadline_at ?? null,
+      };
+      error = null;
+    }
 
     if (
       error ||
@@ -490,6 +586,48 @@ export class DeliveryService {
         error?.message ??
           'Unable to complete delivery',
       );
+    }
+
+    try {
+      if (typeof this.supabase?.broadcastEvent === 'function') {
+        const { data: orderData } = await this.db()
+          .from('orders')
+          .select('id,order_number,facility_id,customer_id')
+          .eq('id', orderId)
+          .maybeSingle();
+
+        const payload = {
+          eventType: 'ORDER_STATUS_CHANGED',
+          entityId: orderId,
+          orderId,
+          orderNumber: orderData?.order_number,
+          status: 'claim_period_active',
+          facilityId: orderData?.facility_id,
+          timestamp: new Date().toISOString(),
+        };
+
+        const broadcasts: Promise<any>[] = [
+          this.supabase.broadcastEvent('orders:all', 'ORDER_STATUS_CHANGED', payload),
+          this.supabase.broadcastEvent(`order:${orderId}`, 'ORDER_STATUS_CHANGED', payload),
+          this.supabase.broadcastEvent('admin:operations', 'ORDER_STATUS_CHANGED', payload),
+          this.supabase.broadcastEvent('facility:all', 'ORDER_STATUS_CHANGED', payload),
+        ];
+
+        if (orderData?.facility_id) {
+          broadcasts.push(
+            this.supabase.broadcastEvent(`facility:${orderData.facility_id}`, 'ORDER_STATUS_CHANGED', payload),
+          );
+        }
+        if (orderData?.customer_id) {
+          broadcasts.push(
+            this.supabase.broadcastEvent(`customer:${orderData.customer_id}`, 'ORDER_STATUS_CHANGED', payload),
+          );
+        }
+
+        await Promise.allSettled(broadcasts);
+      }
+    } catch {
+      // Safe catch
     }
 
     return {

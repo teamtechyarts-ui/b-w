@@ -3,6 +3,12 @@ import {
   getStoredSession,
   refreshStoredSession,
 } from './sessionManager';
+import {
+  generateRequestId,
+  parseServerTiming,
+  recordRequestMetric,
+  sanitizeRoute,
+} from '../utils/performanceMetrics';
 
 export {API_BASE_URL};
 
@@ -78,7 +84,7 @@ type ApiRequestOptions = {
   retryAuthentication?: boolean;
 };
 
-export const API_TIMEOUT_MS = 20_000;
+export const API_TIMEOUT_MS = 45_000;
 
 async function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
   const controller = new AbortController();
@@ -135,12 +141,16 @@ export async function apiRequest<T>(
     retryAuthentication = true,
   } = options;
 
+  const startTime = typeof performance !== 'undefined' ? performance.now() : Date.now();
+  const requestId = generateRequestId();
+
   const activeAccessToken =
     accessToken ||
     getStoredSession()?.accessToken;
 
   const headers: Record<string, string> = {
     Accept: 'application/json',
+    'X-Request-Id': requestId,
   };
 
   if (activeAccessToken) {
@@ -153,17 +163,33 @@ export async function apiRequest<T>(
       'application/json';
   }
 
-  let response = await fetchWithTimeout(
-    `${API_BASE_URL}${path}`,
-    {
+  let response: Response;
+  try {
+    response = await fetchWithTimeout(
+      `${API_BASE_URL}${path}`,
+      {
+        method,
+        headers,
+        body:
+          body === undefined
+            ? undefined
+            : JSON.stringify(body),
+      },
+    );
+  } catch (err) {
+    const totalDuration = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startTime;
+    recordRequestMetric({
+      requestId,
       method,
-      headers,
-      body:
-        body === undefined
-          ? undefined
-          : JSON.stringify(body),
-    },
-  );
+      route: sanitizeRoute(path),
+      status: 0,
+      clientDurationMs: Math.round(totalDuration),
+      serverDurationMs: null,
+      networkDurationMs: Math.round(totalDuration),
+      timestamp: new Date().toISOString(),
+    });
+    throw err;
+  }
 
   if (
     response.status === 401 &&
@@ -189,6 +215,24 @@ export async function apiRequest<T>(
       },
     );
   }
+
+  const clientDuration = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startTime;
+  const rawServerTiming = response.headers && typeof response.headers.get === 'function'
+    ? response.headers.get('Server-Timing')
+    : null;
+  const serverDuration = parseServerTiming(rawServerTiming);
+  const networkDuration = serverDuration !== null ? Math.max(0, clientDuration - serverDuration) : clientDuration;
+
+  recordRequestMetric({
+    requestId,
+    method,
+    route: sanitizeRoute(path),
+    status: response.status,
+    clientDurationMs: Math.round(clientDuration),
+    serverDurationMs: serverDuration !== null ? Math.round(serverDuration) : null,
+    networkDurationMs: Math.round(networkDuration),
+    timestamp: new Date().toISOString(),
+  });
 
   const data: unknown =
     await parseResponse(response);

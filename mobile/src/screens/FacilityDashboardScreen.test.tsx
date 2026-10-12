@@ -1,3 +1,5 @@
+jest.setTimeout(15000);
+
 import React from 'react';
 import {fireEvent, render, waitFor} from '@testing-library/react-native';
 import FacilityDashboardScreen from './FacilityDashboardScreen';
@@ -8,6 +10,7 @@ jest.mock('../services/facilityDashboardApi', () => ({
   getFacilityDashboard: jest.fn(),
   getAvailableDeliveryDrivers: jest.fn(),
   reassignFacilityDelivery: jest.fn(),
+  handoverFacilityOrderToDriver: jest.fn(),
 }));
 jest.mock('../services/facilityIntakeApi', () => ({
   confirmFacilityReceiptByOrderId: jest.fn(),
@@ -103,4 +106,58 @@ test('keeps an unaccepted delivery in Ready and reassigns a rejected delivery', 
   fireEvent.press(view.getByText('Meera Shah'));
   await waitFor(() => expect(reassign).toHaveBeenCalledWith('staff-token', 'rejected-order', 'driver-3'));
   await waitFor(() => expect(view.getByText('Delivery assigned to Meera Shah. Waiting for acceptance.')).toBeTruthy());
+});
+
+test('shows delivery_accepted order with arrived driver in Ready tab and allows handover', async () => {
+  const handoverDashboard = {
+    ...dashboard,
+    summary: {incoming: 0, received: 0, processing: 0, ready: 1},
+    orders: [
+      {
+        id: 'ready-order-1',
+        order_number: 'BW-20261001-3F97A3B9',
+        current_status: 'delivery_accepted',
+        deliveryAssignment: {
+          id: 'assignment-1',
+          driverId: 'driver-1',
+          driverName: 'Suresh Kumar',
+          status: 'arrived',
+          rejectionReason: null,
+          handedOver: false,
+          handedOverAt: null,
+        },
+      },
+    ],
+  };
+  load.mockResolvedValue(handoverDashboard);
+  const {handoverFacilityOrderToDriver} = require('../services/facilityDashboardApi');
+  (handoverFacilityOrderToDriver as jest.Mock).mockResolvedValue({
+    handedOver: true,
+  });
+
+  const view = await render(
+    <FacilityDashboardScreen
+      accessToken="staff-token"
+      onLogout={jest.fn()}
+      onIntake={jest.fn()}
+      onOrder={jest.fn()}
+    />,
+  );
+
+  await waitFor(() => expect(view.getByText('Ready 1')).toBeTruthy());
+  fireEvent.press(view.getByText('Ready 1'));
+
+  await waitFor(() => expect(view.getByText('DRIVER ARRIVED')).toBeTruthy());
+  expect(view.getByText('Delivery Driver: Suresh Kumar')).toBeTruthy();
+  expect(view.getByText('Driver arrived at facility (awaiting handover)')).toBeTruthy();
+  expect(view.getByText('Hand Over Order')).toBeTruthy();
+
+  fireEvent.press(view.getByText('Hand Over Order'));
+  await waitFor(() =>
+    expect(handoverFacilityOrderToDriver).toHaveBeenCalledWith(
+      'staff-token',
+      'ready-order-1',
+      'driver-1',
+    ),
+  );
 });

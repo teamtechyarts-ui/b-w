@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+<head><title>Convert & Upload Real Photo</title></head>
+<body>
+<h1>Processing Real Photo</h1>
+<canvas id="c"></canvas>
+<script>
+async function process() {
+  const img = new Image();
+  img.src = '/claim_garment.jpg';
+  img.onload = async () => {
+    const canvas = document.getElementById('c');
+    let width = img.width;
+    let height = img.height;
+    const maxDim = 1000;
+    if (width > maxDim || height > maxDim) {
+      if (width > height) {
+        height = Math.round((height * maxDim) / width);
+        width = maxDim;
+      } else {
+        width = Math.round((width * maxDim) / height);
+        height = maxDim;
+      }
+    }
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0, width, height);
+
+    canvas.toBlob(async (blob) => {
+      console.log('WebP blob created:', blob.size, blob.type);
+      const ab = await blob.arrayBuffer();
+      const base64 = btoa(String.fromCharCode(...new Uint8Array(ab)));
+      
+      const res = await fetch('/api/upload-real-photo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ base64, size: blob.size })
+      });
+      const data = await res.json();
+      console.log('Upload result:', data);
+      document.body.innerHTML += '<h2>SUCCESS: ' + blob.size + ' bytes uploaded</h2>';
+    }, 'image/webp', 0.75);
+  };
+}
+process();
+</script>
+</body>
+</html>

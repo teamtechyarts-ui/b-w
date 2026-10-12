@@ -42,10 +42,11 @@ describe('Facility dashboard authorization', () => {
     expect(f.from).not.toHaveBeenCalledWith('orders');
   });
 
-  it('keeps assigned and rejected deliveries in Ready until Driver acceptance', async () => {
+  it('keeps assigned, accepted, and rejected deliveries in Ready tab and maps driver arrival status', async () => {
     const orders = [
       {id: 'order-ready', order_number: 'BW-READY', current_status: 'ready_for_delivery'},
       {id: 'order-assigned', order_number: 'BW-ASSIGNED', current_status: 'delivery_assigned'},
+      {id: 'order-accepted', order_number: 'BW-ACCEPTED', current_status: 'delivery_accepted'},
       {id: 'order-rejected', order_number: 'BW-REJECTED', current_status: 'delivery_failed'},
     ];
     const assignments = [
@@ -53,12 +54,40 @@ describe('Facility dashboard authorization', () => {
         assigned_at: '2026-09-22T02:00:00Z', rejection_reason: 'Route unavailable'},
       {id: 'a1', order_id: 'order-assigned', driver_id: 'driver-1', status: 'assigned',
         assigned_at: '2026-09-22T01:00:00Z', rejection_reason: null},
+      {id: 'a3', order_id: 'order-accepted', driver_id: 'driver-3', status: 'accepted',
+        assigned_at: '2026-09-22T03:00:00Z', rejection_reason: null},
     ];
-    const f = fixture(true, true, orders, assignments);
-    const dashboard = await f.service.dashboard('staff-1');
-    expect(dashboard.summary.ready).toBe(3);
+    const navEvents = [
+      {order_id: 'order-accepted', event_type: 'arrived_at_facility', created_at: '2026-09-22T03:15:00Z'},
+    ];
+    const queries: Record<string, any> = {};
+    const from = jest.fn((table: string) => {
+      const query: any = {};
+      for (const method of ['select', 'eq', 'in', 'order', 'limit']) query[method] = jest.fn(() => query);
+      query.maybeSingle = jest.fn(async () => ({data: table === 'facility_employees'
+        ? {facility_id: 'facility-1', employee_role: 'manager'}
+        : {id: 'facility-1', name: 'Local Facility', address: 'Test Lane', is_active: true},
+      error: null}));
+      query.then = (resolve: any) => Promise.resolve({
+        data: table === 'orders'
+          ? orders
+          : table === 'driver_assignments'
+          ? assignments
+          : table === 'driver_navigation_events'
+          ? navEvents
+          : [],
+        error: null,
+      }).then(resolve);
+      queries[table] = query;
+      return query;
+    });
+    const service = new FacilityService({admin: {from}} as any);
+    const dashboard = await service.dashboard('staff-1');
+    expect(dashboard.summary.ready).toBe(4);
     expect(dashboard.orders.find(order => order.id === 'order-assigned')?.deliveryAssignment)
       .toMatchObject({id: 'a1', status: 'assigned'});
+    expect(dashboard.orders.find(order => order.id === 'order-accepted')?.deliveryAssignment)
+      .toMatchObject({id: 'a3', status: 'arrived'});
     expect(dashboard.orders.find(order => order.id === 'order-rejected')?.deliveryAssignment)
       .toMatchObject({id: 'a2', status: 'rejected', rejectionReason: 'Route unavailable'});
   });

@@ -7,7 +7,6 @@ import React, {
 import {
   ActivityIndicator,
   Alert,
-  SafeAreaView,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -16,9 +15,10 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import {SafeAreaView} from 'react-native-safe-area-context';
 
-import type MapView from 'react-native-maps';
 import AppIcon from '../components/AppIcon';
+
 
 import {
   getPlaceDetails,
@@ -43,17 +43,11 @@ import type {
   SelectedLocation,
 } from '../types/location';
 
-type NativeMapsModule = typeof import('react-native-maps');
+import MapView, { Marker } from 'react-native-maps';
 
-let nativeMapsModule: NativeMapsModule | null = null;
-try {
-  nativeMapsModule = require('react-native-maps') as NativeMapsModule;
-} catch {
-  nativeMapsModule = null;
-}
+const NativeMapView = MapView;
+const NativeMarker = Marker;
 
-const NativeMapView = nativeMapsModule?.default;
-const NativeMarker = nativeMapsModule?.Marker;
 
 type LocationPickerScreenProps = {
   accessToken: string;
@@ -105,11 +99,9 @@ function toSelectedLocation(
       place.placeId,
 
     source:
-      place.provider ===
-      'mock'
-        ? 'development_mock'
-        : 'google_maps',
+      'google_maps',
   };
+
 }
 
 export default function LocationPickerScreen({
@@ -761,10 +753,9 @@ export default function LocationPickerScreen({
             style={
               styles.mapHelpText
             }>
-            {(__DEV__ || MAPS_PROVIDER === 'mock')
-              ? 'Tap the map to choose the exact pickup location.'
-              : 'Tap the map or drag the pin to set the exact pickup location.'}
+            Tap the map or drag the pin to set the exact pickup location.
           </Text>
+
 
           <Text
             style={

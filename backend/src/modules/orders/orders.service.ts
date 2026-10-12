@@ -26,8 +26,25 @@ export interface ServiceabilityResult {
   message?: string;
 }
 
+const MAX_CUSTOMER_CACHE_SIZE = 1000;
+const CUSTOMER_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+export function invalidateCustomerCache(profileId?: string): void {
+  if (profileId) {
+    OrdersService.customerIdCache.delete(profileId);
+  } else {
+    OrdersService.customerIdCache.clear();
+  }
+}
+
+export function getCustomerCacheSize(): number {
+  return OrdersService.customerIdCache.size;
+}
+
 @Injectable()
 export class OrdersService {
+  static readonly customerIdCache = new Map<string, { id: string; expiresAt: number }>();
+
   constructor(
     private readonly supabase: SupabaseService,
     private readonly growth?: GrowthService,
@@ -39,6 +56,11 @@ export class OrdersService {
   }
 
   private async customerId(profileId: string): Promise<string> {
+    const cached = OrdersService.customerIdCache.get(profileId);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.id;
+    }
+
     const { data, error } = await this.db()
       .from("customers")
       .select("id")
@@ -48,6 +70,18 @@ export class OrdersService {
     if (error || !data) {
       throw new ForbiddenException("Customer profile required");
     }
+
+    // Evict oldest if bounded cache limit reached
+    if (OrdersService.customerIdCache.size >= MAX_CUSTOMER_CACHE_SIZE) {
+      const oldestKey = OrdersService.customerIdCache.keys().next().value;
+      if (oldestKey) OrdersService.customerIdCache.delete(oldestKey);
+    }
+
+    // Cache customer ID for 5 minutes
+    OrdersService.customerIdCache.set(profileId, {
+      id: data.id,
+      expiresAt: Date.now() + CUSTOMER_CACHE_TTL_MS,
+    });
 
     return data.id;
   }
@@ -464,7 +498,36 @@ export class OrdersService {
     if (error || !orderId) {
       throw new BadRequestException(error?.message ?? "Unable to create order");
     }
-    return this.getById(profileId, orderId);
+
+    const orderResult = await this.getById(profileId, orderId);
+
+    // If order moves directly to confirmed, notify driver pool, admin, and customer immediately
+    if (targetStatus === "confirmed") {
+      const broadcastPayload = {
+        eventType: "ORDER_CREATED",
+        entityId: orderId,
+        orderId,
+        orderNumber: orderResult.order_number,
+        status: "confirmed",
+        facilityId: assignedFacilityId,
+        jobType: "pickup",
+        timestamp: new Date().toISOString(),
+      };
+
+      if (typeof this.supabase?.broadcastEvent === "function") {
+        await Promise.allSettled([
+          this.supabase.broadcastEvent("driver:available", "JOB_AVAILABLE", broadcastPayload),
+          this.supabase.broadcastEvent("jobs:drivers", "JOB_AVAILABLE", broadcastPayload),
+          this.supabase.broadcastEvent("admin:operations", "ORDER_CREATED", broadcastPayload),
+          this.supabase.broadcastEvent(`customer:${customerId}`, "ORDER_STATUS_CHANGED", broadcastPayload),
+          this.supabase.broadcastEvent(`customer:${profileId}`, "ORDER_STATUS_CHANGED", broadcastPayload),
+          this.supabase.broadcastEvent(`facility:${assignedFacilityId}`, "ORDER_CREATED", broadcastPayload),
+          this.supabase.broadcastEvent(`order:${orderId}`, "ORDER_CREATED", broadcastPayload),
+        ]);
+      }
+    }
+
+    return orderResult;
   }
 
   async cancel(profileId: string, orderId: string, reason: string) {
@@ -495,6 +558,49 @@ export class OrdersService {
 
     if (error || !data) {
       throw new BadRequestException(error?.message ?? "Unable to cancel order");
+    }
+
+    try {
+      if (typeof this.supabase?.broadcastEvent === "function") {
+        const { data: orderData } = await this.db()
+          .from("orders")
+          .select("id,order_number,facility_id,customer_id")
+          .eq("id", orderId)
+          .maybeSingle();
+
+        const payload = {
+          eventType: "ORDER_STATUS_CHANGED",
+          entityId: orderId,
+          orderId,
+          orderNumber: orderData?.order_number,
+          status: "cancelled",
+          facilityId: orderData?.facility_id,
+          timestamp: new Date().toISOString(),
+        };
+
+        const broadcasts: Promise<any>[] = [
+          this.supabase.broadcastEvent("orders:all", "ORDER_STATUS_CHANGED", payload),
+          this.supabase.broadcastEvent(`order:${orderId}`, "ORDER_STATUS_CHANGED", payload),
+          this.supabase.broadcastEvent("admin:operations", "ORDER_STATUS_CHANGED", payload),
+          this.supabase.broadcastEvent("facility:all", "ORDER_STATUS_CHANGED", payload),
+          this.supabase.broadcastEvent(`customer:${profileId}`, "ORDER_STATUS_CHANGED", payload),
+        ];
+
+        if (orderData?.customer_id) {
+          broadcasts.push(
+            this.supabase.broadcastEvent(`customer:${orderData.customer_id}`, "ORDER_STATUS_CHANGED", payload),
+          );
+        }
+        if (orderData?.facility_id) {
+          broadcasts.push(
+            this.supabase.broadcastEvent(`facility:${orderData.facility_id}`, "ORDER_STATUS_CHANGED", payload),
+          );
+        }
+
+        await Promise.allSettled(broadcasts);
+      }
+    } catch {
+      // Safe catch
     }
 
     return data;
@@ -559,16 +665,24 @@ export class OrdersService {
     return order;
   }
 
-  async listMine(profileId: string) {
+  async listMine(profileId: string, limit?: number, offset?: number) {
     const customerId = await this.customerId(profileId);
 
-    const { data, error } = await this.db()
+    let query = this.db()
       .from("orders")
       .select("*,order_items(*)")
       .eq("customer_id", customerId)
       .order("created_at", {
         ascending: false,
       });
+
+    if (limit !== undefined && limit > 0) {
+      const from = offset || 0;
+      const to = from + limit - 1;
+      query = query.range(from, to);
+    }
+
+    const { data, error } = await query;
 
     if (error) {
       throw new BadRequestException(error.message);

@@ -34,6 +34,7 @@ export type RootStackParamList = {
     orderId: string;
   };
 
+  ClaimsRefunds: undefined;
   Notifications: undefined;
   Benefits: undefined;
   Profile: undefined;
@@ -60,6 +61,7 @@ export type RootStackParamList = {
   AdminReports: undefined;
   FacilityIntake: undefined;
   FacilityVerification: {orderId: string};
-  Support: {showTerms?: boolean} | undefined;
+  Support: {showTerms?: boolean; showPrivacy?: boolean} | undefined;
   Receipt: {orderId: string};
+  PrivacyPolicy: undefined;
 };

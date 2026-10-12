@@ -2,15 +2,16 @@ import React, {useCallback, useEffect, useMemo, useState} from 'react';
 import {
   ActivityIndicator,
   RefreshControl,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
+import {SafeAreaView} from 'react-native-safe-area-context';
 import {AdminDashboard, getAdminDashboard} from '../services/adminDashboardApi';
 import AppIcon, {IconName} from '../components/AppIcon';
+import {useAdminRealtime} from '../hooks/useRealtime';
 
 type Props = {
   accessToken: string;
@@ -71,7 +72,7 @@ function ActionCard({
           {description}
         </Text>
       </View>
-      <Text style={styles.actionCardArrow}>→</Text>
+      <AppIcon name="chevron-right" size={16} color="#94A3B8" />
     </TouchableOpacity>
   );
 }
@@ -125,6 +126,23 @@ export default function AdminDashboardScreen({
       }
     },
     [accessToken],
+  );
+
+  const refreshSilently = useCallback(async () => {
+    try {
+      const data = await getAdminDashboard(accessToken);
+      setDashboard(data);
+    } catch {
+      // keep existing dashboard state on background error
+    }
+  }, [accessToken]);
+
+  useAdminRealtime(
+    useCallback(() => {
+      refreshSilently();
+    }, [refreshSilently]),
+    accessToken,
+    !!accessToken,
   );
 
   useEffect(() => {
@@ -212,7 +230,10 @@ export default function AdminDashboardScreen({
             {refreshing ? (
               <ActivityIndicator size="small" color="#111827" />
             ) : (
-              <Text style={styles.refreshButtonText}>↻ Refresh</Text>
+              <View style={{flexDirection: 'row', alignItems: 'center', gap: 6}}>
+                <AppIcon name="refresh" size={13} color="#111827" strokeWidth={2.5} />
+                <Text style={styles.refreshButtonText}>Refresh</Text>
+              </View>
             )}
           </TouchableOpacity>
         </View>
@@ -260,7 +281,10 @@ export default function AdminDashboardScreen({
                 <Text style={styles.overviewNumberDark}>
                   {dashboard.activeOrders}
                 </Text>
-                <Text style={styles.overviewLabelDark}>Active orders →</Text>
+                <View style={{flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', width: '100%', marginTop: 2}}>
+                  <Text style={styles.overviewLabelDark}>Active orders</Text>
+                  <AppIcon name="chevron-right" size={12} color="#94A3B8" />
+                </View>
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -273,7 +297,10 @@ export default function AdminDashboardScreen({
                 <Text style={styles.overviewNumber}>
                   ₹{dashboard.grossRevenue.toFixed(2)}
                 </Text>
-                <Text style={styles.overviewLabel}>Order value →</Text>
+                <View style={{flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', width: '100%', marginTop: 2}}>
+                  <Text style={styles.overviewLabel}>Order value</Text>
+                  <AppIcon name="chevron-right" size={12} color="#64748B" />
+                </View>
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -286,7 +313,10 @@ export default function AdminDashboardScreen({
                 <Text style={styles.overviewNumber}>
                   {dashboard.activeDrivers}
                 </Text>
-                <Text style={styles.overviewLabel}>Drivers →</Text>
+                <View style={{flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', width: '100%', marginTop: 2}}>
+                  <Text style={styles.overviewLabel}>Drivers</Text>
+                  <AppIcon name="chevron-right" size={12} color="#64748B" />
+                </View>
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -299,7 +329,10 @@ export default function AdminDashboardScreen({
                 <Text style={styles.overviewNumber}>
                   {dashboard.activeFacilities}
                 </Text>
-                <Text style={styles.overviewLabel}>Facilities →</Text>
+                <View style={{flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', width: '100%', marginTop: 2}}>
+                  <Text style={styles.overviewLabel}>Facilities</Text>
+                  <AppIcon name="chevron-right" size={12} color="#64748B" />
+                </View>
               </TouchableOpacity>
             </View>
 
@@ -333,7 +366,7 @@ export default function AdminDashboardScreen({
                       Orders cleaned & packed, waiting for delivery dispatch
                     </Text>
                   </View>
-                  <Text style={styles.attentionArrow}>→</Text>
+                  <AppIcon name="chevron-right" size={16} color="#94A3B8" />
                 </TouchableOpacity>
               ) : null}
 
@@ -345,7 +378,7 @@ export default function AdminDashboardScreen({
                   style={styles.attentionCard}
                   onPress={onFacilities}>
                   <View style={styles.attentionIconBox}>
-                    <AppIcon name="gear" size={18} color="#9A3412" />
+                    <AppIcon name="facility" size={18} color="#9A3412" />
                   </View>
                   <View style={styles.attentionContent}>
                     <View style={styles.attentionTitleRow}>
@@ -362,7 +395,7 @@ export default function AdminDashboardScreen({
                       Orders actively undergoing cleaning & inspection
                     </Text>
                   </View>
-                  <Text style={styles.attentionArrow}>→</Text>
+                  <AppIcon name="chevron-right" size={16} color="#94A3B8" />
                 </TouchableOpacity>
               ) : null}
 
@@ -456,7 +489,7 @@ export default function AdminDashboardScreen({
             accessibilityHint="Manage discounts, loyalty points and promotional packages"
           />
           <ActionCard
-            iconName="tag"
+            iconName="chart"
             title="Analytics & Reports"
             description="Performance, trends and action history"
             onPress={onReports}
@@ -472,85 +505,49 @@ export default function AdminDashboardScreen({
               <Text style={styles.sectionTitle}>ORDER FLOW</Text>
             </View>
             <View style={styles.orderFlowGrid}>
-              <TouchableOpacity
-                accessibilityRole="button"
-                accessibilityLabel={`Pickup stage: ${orderFlow.pickup} orders`}
-                accessibilityHint="Open Orders and Customers"
-                activeOpacity={0.7}
-                style={styles.orderFlowCard}
-                onPress={onCustomers}>
+              <View style={styles.orderFlowCard}>
                 <View style={styles.orderFlowHeader}>
-                  <Text style={styles.orderFlowTitle}>Pickup Stage</Text>
+                  <Text style={styles.orderFlowTitle}>Pickup</Text>
                   <Text style={styles.orderFlowCount}>{orderFlow.pickup}</Text>
                 </View>
-                <Text style={styles.orderFlowDesc}>
-                  Confirmed, en route & in transit to facility
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                accessibilityRole="button"
-                accessibilityLabel={`Facility stage: ${orderFlow.facility} orders`}
-                accessibilityHint="Open Facility Operations"
-                activeOpacity={0.7}
-                style={styles.orderFlowCard}
-                onPress={onFacilities}>
+                <Text style={styles.orderFlowDesc}>Awaiting or in transit to facility</Text>
+              </View>
+              <View style={styles.orderFlowCard}>
                 <View style={styles.orderFlowHeader}>
-                  <Text style={styles.orderFlowTitle}>Facility Stage</Text>
+                  <Text style={styles.orderFlowTitle}>Facility</Text>
                   <Text style={styles.orderFlowCount}>{orderFlow.facility}</Text>
                 </View>
-                <Text style={styles.orderFlowDesc}>
-                  Intake, washing, packaging & QC ready
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                accessibilityRole="button"
-                accessibilityLabel={`Delivery stage: ${orderFlow.delivery} orders`}
-                accessibilityHint="Open Driver Dispatch"
-                activeOpacity={0.7}
-                style={styles.orderFlowCard}
-                onPress={onAssignments}>
+                <Text style={styles.orderFlowDesc}>Washing, drying, QC or packing</Text>
+              </View>
+              <View style={styles.orderFlowCard}>
                 <View style={styles.orderFlowHeader}>
-                  <Text style={styles.orderFlowTitle}>Delivery Stage</Text>
+                  <Text style={styles.orderFlowTitle}>Delivery</Text>
                   <Text style={styles.orderFlowCount}>{orderFlow.delivery}</Text>
                 </View>
-                <Text style={styles.orderFlowDesc}>
-                  Assigned, en route to customer & OTP pending
-                </Text>
-              </TouchableOpacity>
+                <Text style={styles.orderFlowDesc}>En route to customer or OTP pending</Text>
+              </View>
             </View>
 
-            {/* EXPANDABLE STATUS BREAKDOWN */}
             <TouchableOpacity
               accessibilityRole="button"
-              accessibilityLabel={
-                showAllStatuses
-                  ? 'Hide detailed order statuses'
-                  : 'View all order statuses'
-              }
               style={styles.expandStatusesToggle}
-              onPress={() => setShowAllStatuses(show => !show)}>
+              onPress={() => setShowAllStatuses(prev => !prev)}>
               <Text style={styles.expandStatusesText}>
-                {showAllStatuses
-                  ? 'Hide detailed status list ▴'
-                  : 'View all order statuses →'}
+                {showAllStatuses ? 'Hide detailed status list' : 'View all order statuses'}
               </Text>
             </TouchableOpacity>
 
             {showAllStatuses ? (
               <View style={styles.statusCard}>
-                {dashboard.ordersByStatus.length ? (
-                  dashboard.ordersByStatus.map(row => (
-                    <View key={row.status} style={styles.statusRow}>
-                      <Text style={styles.statusName}>
-                        {statusLabel(row.status)}
-                      </Text>
-                      <Text style={styles.statusCount}>{row.count}</Text>
+                {dashboard.ordersByStatus.length > 0 ? (
+                  dashboard.ordersByStatus.map(item => (
+                    <View key={item.status} style={styles.statusRow}>
+                      <Text style={styles.statusName}>{statusLabel(item.status)}</Text>
+                      <Text style={styles.statusCount}>{item.count}</Text>
                     </View>
                   ))
                 ) : (
-                  <Text style={styles.noOrdersText}>No orders yet.</Text>
+                  <Text style={styles.noOrdersText}>No orders tracked</Text>
                 )}
               </View>
             ) : null}
@@ -736,7 +733,6 @@ const styles = StyleSheet.create({
   attentionCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: '#FDE68A',
     borderRadius: 14,

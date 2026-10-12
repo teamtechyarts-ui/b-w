@@ -378,3 +378,26 @@ test('shows loading failure and retry', async () => {
   });
   await waitFor(() => expect(view.getByText('Shirt')).toBeTruthy());
 });
+
+test('rejects malformed category names like single letter e', async () => {
+  const view = await render(<AdminCatalogueScreen accessToken="token" onBack={jest.fn()} />);
+  await waitFor(() => expect(view.getByText('Service Catalogue')).toBeTruthy());
+
+  await act(async () => {
+    fireEvent.press(view.getByLabelText('Add category'));
+  });
+  await waitFor(() => expect(view.getByLabelText('Category name')).toBeTruthy());
+
+  await act(async () => {
+    fireEvent.changeText(view.getByLabelText('Category name'), 'e');
+  });
+  await act(async () => {
+    fireEvent.press(view.getByLabelText('Add Category'));
+  });
+
+  await waitFor(() => {
+    expect(view.getByText('Please enter a valid category name (at least 2 letters/numbers).')).toBeTruthy();
+  });
+  expect(createCategory).not.toHaveBeenCalled();
+});
+

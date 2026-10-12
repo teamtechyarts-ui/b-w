@@ -94,3 +94,6 @@ GoogleService-Info.plist
 App.pre-6k.txt
 
 vendor/bundle/
+
+# Local Android tester signing key
+android/app/bw-standalone-tester-release.keystore

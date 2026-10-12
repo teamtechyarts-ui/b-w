@@ -5,7 +5,8 @@ export type StaffRecord = {
   id: string; profile_id: string; role: StaffRole; is_active: boolean;
   is_available?: boolean; facility_id: string | null;
   profiles: {id: string; full_name: string | null; phone: string | null; is_active: boolean; created_at: string};
-  facilities: {id: string; name: string} | null;
+  facilities: {id: string; name: string; is_active?: boolean} | null;
+
 };
 export type StaffDetail = {
   staff: StaffRecord;

@@ -6,9 +6,62 @@ import {
 } from '@nestjs/common';
 
 import { Reflector } from '@nestjs/core';
-
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 import { SupabaseService } from '../../modules/supabase/supabase.service';
+import * as crypto from 'crypto';
+
+interface CachedSession {
+  user: {
+    id: string;
+    phone: string | null;
+    email: string | null;
+    roles: string[];
+    permissions: string[];
+  };
+  expiresAt: number;
+}
+
+const SESSION_CACHE = new Map<string, CachedSession>();
+const CACHE_TTL_MS = 30_000; // 30 seconds TTL
+const MAX_CACHE_SIZE = 500;
+
+function hashToken(token: string): string {
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
+
+function parseJwtExp(token: string): number | null {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+    if (typeof payload?.exp === 'number') {
+      return payload.exp * 1000;
+    }
+  } catch {
+    // Malformed token or payload
+  }
+  return null;
+}
+
+export function invalidateAuthSessionCache(token?: string) {
+  if (token) {
+    SESSION_CACHE.delete(hashToken(token));
+  } else {
+    SESSION_CACHE.clear();
+  }
+}
+
+export function invalidateAuthSessionsForUser(userId: string) {
+  for (const [key, session] of SESSION_CACHE.entries()) {
+    if (session.user.id === userId) {
+      SESSION_CACHE.delete(key);
+    }
+  }
+}
+
+export function getAuthSessionCacheSize(): number {
+  return SESSION_CACHE.size;
+}
 
 @Injectable()
 export class SupabaseAuthGuard implements CanActivate {
@@ -57,10 +110,25 @@ export class SupabaseAuthGuard implements CanActivate {
       );
     }
 
+    // Check bounded in-memory session cache
+    const tokenHash = hashToken(accessToken);
+    const cached = SESSION_CACHE.get(tokenHash);
+    const now = Date.now();
+
+    if (cached) {
+      if (cached.expiresAt > now) {
+        request.user = cached.user;
+        request.accessToken = accessToken;
+        return true;
+      }
+      SESSION_CACHE.delete(tokenHash);
+    }
+
     const user =
       await this.supabase.getUser(accessToken);
 
     if (!user) {
+      SESSION_CACHE.delete(tokenHash);
       throw new UnauthorizedException(
         'Invalid Supabase session',
       );
@@ -160,13 +228,33 @@ export class SupabaseAuthGuard implements CanActivate {
       }
     }
 
-    request.user = {
+    const resolvedUser = {
       id: user.id,
       phone: user.phone ?? null,
       email: user.email ?? null,
       roles: [...new Set(roles)],
       permissions: [...new Set(permissions)],
     };
+
+    request.user = resolvedUser;
+
+    // Store in bounded in-memory cache (capped to JWT exp if shorter than TTL)
+    const jwtExpMs = parseJwtExp(accessToken);
+    let expiresAt = now + CACHE_TTL_MS;
+    if (jwtExpMs && jwtExpMs < expiresAt) {
+      expiresAt = jwtExpMs;
+    }
+
+    if (expiresAt > now) {
+      if (SESSION_CACHE.size >= MAX_CACHE_SIZE) {
+        const oldestKey = SESSION_CACHE.keys().next().value;
+        if (oldestKey) SESSION_CACHE.delete(oldestKey);
+      }
+      SESSION_CACHE.set(tokenHash, {
+        user: resolvedUser,
+        expiresAt,
+      });
+    }
 
     /*
      * Preserve the access token in case a downstream service

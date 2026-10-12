@@ -5,6 +5,7 @@ const fs = require('fs');
 // Auto-detect and set JAVA_HOME
 const candidateJavaHomes = [
   process.env.JAVA_HOME,
+  'C:\\Program Files\\Eclipse Adoptium\\jdk-17.0.20.101-hotspot',
   'C:\\Program Files\\Android\\Android Studio\\jbr',
   'C:\\Program Files\\Java\\jdk-17',
   'C:\\Program Files\\Microsoft\\jdk-17'

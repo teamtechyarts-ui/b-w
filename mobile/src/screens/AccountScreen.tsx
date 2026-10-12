@@ -1,5 +1,7 @@
 import React from 'react';
-import {SafeAreaView, ScrollView, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
+import {ScrollView, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
+import {SafeAreaView} from 'react-native-safe-area-context';
+import AppIcon from '../components/AppIcon';
 
 export type AccountDestination =
   | 'profile'
@@ -8,7 +10,8 @@ export type AccountDestination =
   | 'claims'
   | 'notifications'
   | 'support'
-  | 'terms';
+  | 'terms'
+  | 'privacy';
 
 type Props = {
   onOpen: (destination: AccountDestination) => void;
@@ -51,6 +54,11 @@ const entries: {label: string; detail: string; destination: AccountDestination}[
     detail: 'Terms and conditions',
     destination: 'terms',
   },
+  {
+    label: 'Privacy Policy',
+    detail: 'How we collect, use and protect your data',
+    destination: 'privacy',
+  },
 ];
 
 export default function AccountScreen({onOpen, onLogout}: Props) {
@@ -72,7 +80,7 @@ export default function AccountScreen({onOpen, onLogout}: Props) {
                 <Text style={styles.label}>{entry.label}</Text>
                 <Text style={styles.detail}>{entry.detail}</Text>
               </View>
-              <Text style={styles.arrow}>›</Text>
+              <AppIcon name="chevron-right" size={16} color="#888" />
             </TouchableOpacity>
           ))}
         </View>

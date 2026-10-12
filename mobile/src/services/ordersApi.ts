@@ -70,27 +70,105 @@ export async function createOrder(
     );
   }
 
+  invalidateOrdersCache();
   return response;
 }
 
+interface OrdersCacheEntry {
+  token: string;
+  data: CustomerOrder[];
+  timestamp: number;
+}
+
+let cachedOrders: OrdersCacheEntry | null = null;
+const ORDERS_CACHE_TTL_MS = 30_000;
+
+interface InFlightOrdersRequest {
+  key: string;
+  promise: Promise<CustomerOrder[]>;
+}
+
+let inFlightGetOrders: InFlightOrdersRequest | null = null;
+
+export function invalidateOrdersCache(): void {
+  cachedOrders = null;
+  inFlightGetOrders = null;
+}
+
+export type GetOrdersOptions = {
+  forceRefresh?: boolean;
+  limit?: number;
+  offset?: number;
+};
+
 export async function getOrders(
   accessToken: string,
+  options: GetOrdersOptions = {},
 ): Promise<CustomerOrder[]> {
-  const orders =
-    await apiRequest<CustomerOrder[]>(
-      '/orders',
-      {
-        accessToken,
-      },
-    );
+  const { forceRefresh = false, limit, offset } = options;
+  const now = Date.now();
 
-  if (!Array.isArray(orders)) {
-    throw new Error(
-      'Invalid orders response',
-    );
+  if (
+    !forceRefresh &&
+    limit === undefined &&
+    offset === undefined &&
+    cachedOrders &&
+    cachedOrders.token === accessToken &&
+    now - cachedOrders.timestamp < ORDERS_CACHE_TTL_MS
+  ) {
+    return cachedOrders.data;
   }
 
-  return orders;
+  const requestKey = `${accessToken}:${limit ?? ''}:${offset ?? ''}`;
+  if (!forceRefresh && inFlightGetOrders && inFlightGetOrders.key === requestKey) {
+    return inFlightGetOrders.promise;
+  }
+
+  const queryParams: string[] = [];
+  if (limit !== undefined) queryParams.push(`limit=${limit}`);
+  if (offset !== undefined) queryParams.push(`offset=${offset}`);
+  const queryStr = queryParams.length > 0 ? `?${queryParams.join('&')}` : '';
+
+  const fetchPromise = (async () => {
+    try {
+      const orders =
+        await apiRequest<CustomerOrder[]>(
+          `/orders${queryStr}`,
+          {
+            accessToken,
+          },
+        );
+
+      if (!Array.isArray(orders)) {
+        throw new Error(
+          'Invalid orders response',
+        );
+      }
+
+      if (limit === undefined && offset === undefined) {
+        cachedOrders = {
+          token: accessToken,
+          data: orders,
+          timestamp: Date.now(),
+        };
+      }
+
+      return orders;
+    } finally {
+      if (inFlightGetOrders?.key === requestKey) {
+        inFlightGetOrders = null;
+      }
+    }
+  })();
+
+  if (!forceRefresh) {
+    inFlightGetOrders = {
+      key: requestKey,
+      promise: fetchPromise,
+    };
+  }
+
+  return fetchPromise;
 }
 
 export async function getOrder(
@@ -119,9 +197,11 @@ export async function cancelOrder(accessToken: string, orderId: string, reason: 
   if (trimmed.length < 3 || trimmed.length > 500) {
     throw new Error('Enter a cancellation reason between 3 and 500 characters.');
   }
-  return apiRequest(`/orders/${orderId}/cancel`, {
+  const result = await apiRequest(`/orders/${orderId}/cancel`, {
     method: 'POST', accessToken, body: {reason: trimmed},
   });
+  invalidateOrdersCache();
+  return result;
 }
 
 export async function getOrderStatusHistory(

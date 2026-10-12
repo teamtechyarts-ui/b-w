@@ -1,5 +1,6 @@
 import React, {useCallback, useEffect, useState} from 'react';
-import {ActivityIndicator, Alert, SafeAreaView, ScrollView, StyleSheet, Text, TouchableOpacity} from 'react-native';
+import {ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity} from 'react-native';
+import {SafeAreaView} from 'react-native-safe-area-context';
 import {getPackage, purchasePackage} from '../services/packagesApi';
 import type {PackageOffer} from '../services/packagesApi';
 import type {ServiceItem} from '../types/service';

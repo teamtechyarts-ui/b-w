@@ -45,12 +45,12 @@ test('uploads proof through the existing signed local storage contract', async (
   } finally {globalThis.fetch = oldFetch;}
 });
 
-test('requires valid OTP and uploaded proof before calling atomic completion endpoint', async () => {
-  await expect(completeDriverDelivery('token', 'order-1', '12', 'order-1/photo.jpg')).rejects.toThrow('six-digit delivery OTP');
-  await expect(completeDriverDelivery('token', 'order-1', '123456', '')).rejects.toThrow('Upload a delivery photograph');
+test('completes delivery with valid OTP alone and does not require photograph', async () => {
+  await expect(completeDriverDelivery('token', 'order-1', '12')).rejects.toThrow('delivery OTP');
+  await expect(completeDriverDelivery('token', 'order-1', '')).rejects.toThrow('delivery OTP');
   expect(request).not.toHaveBeenCalled();
   request.mockResolvedValue({delivered: true, orderStatus: 'claim_period_active'});
-  await completeDriverDelivery('token', 'order-1', ' 123456 ', 'order-1/photo.jpg');
+  await completeDriverDelivery('token', 'order-1', ' 123456 ');
   expect(request).toHaveBeenCalledWith('/orders/order-1/complete-delivery',
-    {method: 'POST', accessToken: 'token', body: {otp: '123456', photoPath: 'order-1/photo.jpg'}});
+    {method: 'POST', accessToken: 'token', body: {otp: '123456'}});
 });

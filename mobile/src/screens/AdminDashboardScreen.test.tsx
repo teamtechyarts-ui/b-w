@@ -57,10 +57,10 @@ describe('AdminDashboardScreen', () => {
     });
 
     // Live Overview
-    expect(view.getByText('Active orders →')).toBeTruthy();
+    expect(view.getByText('Active orders')).toBeTruthy();
     expect(view.getByText('₹1250.50')).toBeTruthy();
-    expect(view.getByText('Drivers →')).toBeTruthy();
-    expect(view.getByText('Facilities →')).toBeTruthy();
+    expect(view.getByText('Drivers')).toBeTruthy();
+    expect(view.getByText('Facilities')).toBeTruthy();
 
     // Needs Attention
     expect(view.getByText('Ready for delivery')).toBeTruthy();
@@ -179,7 +179,7 @@ describe('AdminDashboardScreen', () => {
     );
 
     await waitFor(() => {
-      expect(view.getByText('Active orders →')).toBeTruthy();
+      expect(view.getByText('Active orders')).toBeTruthy();
     });
 
     // Tap active orders overview card
@@ -207,22 +207,22 @@ describe('AdminDashboardScreen', () => {
     );
 
     await waitFor(() => {
-      expect(view.getByText('View all order statuses →')).toBeTruthy();
+      expect(view.getByText('View all order statuses')).toBeTruthy();
     });
 
     // Expand status list
     await act(async () => {
-      fireEvent.press(view.getByText('View all order statuses →'));
+      fireEvent.press(view.getByText('View all order statuses'));
     });
-    expect(view.getByText('Hide detailed status list ▴')).toBeTruthy();
+    expect(view.getByText('Hide detailed status list')).toBeTruthy();
     expect(view.getByText('Pickup OTP Pending')).toBeTruthy();
     expect(view.getByText('Ready For Delivery')).toBeTruthy();
 
     // Collapse status list
     await act(async () => {
-      fireEvent.press(view.getByText('Hide detailed status list ▴'));
+      fireEvent.press(view.getByText('Hide detailed status list'));
     });
-    expect(view.getByText('View all order statuses →')).toBeTruthy();
+    expect(view.getByText('View all order statuses')).toBeTruthy();
   });
 
   test('shows refresh action and handles logout', async () => {
@@ -232,11 +232,11 @@ describe('AdminDashboardScreen', () => {
     );
 
     await waitFor(() => {
-      expect(view.getByText('↻ Refresh')).toBeTruthy();
+      expect(view.getByText('Refresh')).toBeTruthy();
     });
 
     await act(async () => {
-      fireEvent.press(view.getByText('↻ Refresh'));
+      fireEvent.press(view.getByText('Refresh'));
     });
     await waitFor(() => expect(load).toHaveBeenCalledTimes(2));
 

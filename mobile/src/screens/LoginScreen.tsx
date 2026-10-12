@@ -1,7 +1,6 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  SafeAreaView,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -10,15 +9,20 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import {SafeAreaView} from 'react-native-safe-area-context';
+import BrandLogo from '../components/BrandLogo';
 import PasswordInput from '../components/PasswordInput';
+import { ActionError, FieldError } from '../components/FormError';
 import { signInCustomer } from '../services/authApi';
 import type { AuthSessionResponse } from '../types/session';
+import PrivacyPolicyModal from '../components/PrivacyPolicyModal';
 
 type LoginScreenProps = {
   onSessionEstablished: (response: AuthSessionResponse) => void;
   onNavigateToSignUp: () => void;
   onNavigateToForgotPassword: () => void;
   onNavigateToDriverLogin?: () => void;
+  onNavigateToPrivacyPolicy?: () => void;
   onBack: () => void;
 };
 
@@ -27,42 +31,52 @@ export default function LoginScreen({
   onNavigateToSignUp,
   onNavigateToForgotPassword,
   onNavigateToDriverLogin,
+  onNavigateToPrivacyPolicy,
   onBack,
 }: LoginScreenProps) {
+  const [showPrivacy, setShowPrivacy] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const [errorMessage, setErrorMessage] = useState('');
+  const [emailError, setEmailError] = useState('');
+  const [passwordError, setPasswordError] = useState('');
+  const [actionError, setActionError] = useState('');
 
-  const validate = (): string | null => {
-    const cleanEmail = email.trim().toLowerCase();
-    if (!cleanEmail) {
-      return 'Please enter your email address';
-    }
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(cleanEmail)) {
-      return 'Please enter a valid email address';
-    }
-    if (!password) {
-      return 'Please enter your password';
-    }
-    return null;
+  const emailInputRef = useRef<any>(null);
+  const passwordInputRef = useRef<any>(null);
+
+  const clearErrors = () => {
+    setEmailError('');
+    setPasswordError('');
+    setActionError('');
   };
 
   const handleSignIn = async () => {
     if (loading) return;
-    setErrorMessage('');
+    clearErrors();
 
-    const validationError = validate();
-    if (validationError) {
-      setErrorMessage(validationError);
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail) {
+      setEmailError('Please enter your email address');
+      emailInputRef.current?.focus();
+      return;
+    }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(cleanEmail)) {
+      setEmailError('Please enter a valid email address');
+      emailInputRef.current?.focus();
+      return;
+    }
+    if (!password) {
+      setPasswordError('Please enter your password');
+      passwordInputRef.current?.focus();
       return;
     }
 
     setLoading(true);
     try {
       const response = await signInCustomer({
-        email: email.trim().toLowerCase(),
+        email: cleanEmail,
         password,
       });
 
@@ -70,15 +84,15 @@ export default function LoginScreen({
     } catch (err: any) {
       const msg = err?.message || '';
       if (msg.includes('verify your email')) {
-        setErrorMessage('Please verify your email before signing in.');
+        setActionError('Please verify your email before signing in.');
       } else if (msg.includes('Invalid') || msg.includes('credentials') || msg.includes('password')) {
-        setErrorMessage('Invalid email or password.');
+        setActionError('Invalid email or password.');
       } else if (msg.includes('connection') || msg.includes('network')) {
-        setErrorMessage('Unable to connect. Please check your internet connection.');
+        setActionError('Unable to connect. Please check your internet connection.');
       } else if (msg) {
-        setErrorMessage(msg);
+        setActionError(msg);
       } else {
-        setErrorMessage('Unable to sign in right now. Please try again.');
+        setActionError('Unable to sign in right now. Please try again.');
       }
     } finally {
       setLoading(false);
@@ -99,20 +113,17 @@ export default function LoginScreen({
           <Text style={styles.back}>← Back</Text>
         </TouchableOpacity>
 
+        <BrandLogo width={160} containerStyle={styles.logoContainer} />
+
         <Text style={styles.title}>Welcome Back</Text>
         <Text style={styles.subtitle}>
           Sign in to your Bright & White account
         </Text>
 
-        {errorMessage ? (
-          <View style={styles.errorContainer} accessibilityRole="alert">
-            <Text style={styles.errorText}>{errorMessage}</Text>
-          </View>
-        ) : null}
-
         <View style={styles.form}>
           <TextInput
-            style={styles.input}
+            ref={emailInputRef}
+            style={[styles.input, emailError ? styles.inputError : null]}
             placeholder="Email"
             placeholderTextColor="#888888"
             keyboardType="email-address"
@@ -121,18 +132,22 @@ export default function LoginScreen({
             value={email}
             onChangeText={text => {
               setEmail(text);
-              if (errorMessage) setErrorMessage('');
+              if (emailError) setEmailError('');
+              if (actionError) setActionError('');
             }}
           />
+          <FieldError error={emailError} />
 
           <PasswordInput
             placeholder="Password"
             value={password}
             onChangeText={text => {
               setPassword(text);
-              if (errorMessage) setErrorMessage('');
+              if (passwordError) setPasswordError('');
+              if (actionError) setActionError('');
             }}
           />
+          <FieldError error={passwordError} />
 
           <View style={styles.forgotRow}>
             <TouchableOpacity
@@ -156,6 +171,7 @@ export default function LoginScreen({
               <Text style={styles.buttonText}>Sign In</Text>
             )}
           </TouchableOpacity>
+          <ActionError error={actionError} />
 
           <View style={styles.footerRow}>
             <Text style={styles.footerText}>Don't have an account? </Text>
@@ -177,8 +193,26 @@ export default function LoginScreen({
               </TouchableOpacity>
             </View>
           ) : null}
+
+          <View style={styles.privacyRow}>
+            <TouchableOpacity
+              accessibilityRole="link"
+              accessibilityLabel="Privacy Policy"
+              onPress={() =>
+                onNavigateToPrivacyPolicy
+                  ? onNavigateToPrivacyPolicy()
+                  : setShowPrivacy(true)
+              }
+              style={styles.privacyButton}>
+              <Text style={styles.privacyLink}>Privacy Policy</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </ScrollView>
+      <PrivacyPolicyModal
+        visible={showPrivacy}
+        onClose={() => setShowPrivacy(false)}
+      />
     </SafeAreaView>
   );
 }
@@ -200,6 +234,20 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#0284C7',
   },
+  privacyRow: {
+    alignItems: 'center',
+    marginTop: 16,
+  },
+  privacyButton: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+  },
+  privacyLink: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#6B7280',
+    textDecorationLine: 'underline',
+  },
   container: {
     flex: 1,
     backgroundColor: '#FFFFFF',
@@ -216,6 +264,10 @@ const styles = StyleSheet.create({
   back: {
     fontSize: 16,
     color: '#111111',
+  },
+  logoContainer: {
+    marginBottom: 20,
+    alignSelf: 'center',
   },
   title: {
     fontSize: 30,
@@ -241,6 +293,10 @@ const styles = StyleSheet.create({
     color: '#111111',
     marginBottom: 20,
     backgroundColor: '#FFFFFF',
+  },
+  inputError: {
+    borderColor: '#C53030',
+    backgroundColor: '#FFF5F5',
   },
   forgotRow: {
     alignItems: 'flex-end',

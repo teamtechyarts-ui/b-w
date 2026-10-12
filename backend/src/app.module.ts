@@ -30,6 +30,7 @@ import { DeliveryModule } from './modules/delivery/delivery.module';
 import { FacilityModule } from './modules/facility/facility.module';
 import { StaffModule } from './modules/staff/staff.module';
 import { ClaimsModule } from './modules/claims/claims.module';
+import { MailModule } from './modules/mail/mail.module';
 
 import { SupabaseAuthGuard } from './common/guards/supabase-auth.guard';
 import { validateProviderConfiguration } from './config/provider-config';
@@ -74,6 +75,7 @@ import { validateProviderConfiguration } from './config/provider-config';
     FacilityModule,
     StaffModule,
     ClaimsModule,
+    MailModule,
   ],
 
   providers: [

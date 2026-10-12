@@ -67,8 +67,39 @@ export class PaymentsService {
   ) {}
 
   private async triggerPickupAssignment(orderId: string) {
-    // Under availability-based driver dispatch architecture, confirmed orders
-    // automatically enter the available pickup job pool for drivers to claim.
+    try {
+      const { data: order } = await this.db()
+        .from("orders")
+        .select("id,order_number,current_status,facility_id,customer_id")
+        .eq("id", orderId)
+        .maybeSingle();
+
+      const payload = {
+        eventType: "ORDER_STATUS_CHANGED",
+        entityId: orderId,
+        orderId,
+        orderNumber: order?.order_number,
+        status: "confirmed",
+        facilityId: order?.facility_id,
+        jobType: "pickup",
+        timestamp: new Date().toISOString(),
+      };
+
+      if (typeof this.supabase?.broadcastEvent === "function") {
+        await Promise.allSettled([
+          this.supabase.broadcastEvent("orders:all", "ORDER_STATUS_CHANGED", payload),
+          this.supabase.broadcastEvent("driver:available", "JOB_AVAILABLE", payload),
+          this.supabase.broadcastEvent("jobs:drivers", "JOB_AVAILABLE", payload),
+          this.supabase.broadcastEvent("admin:operations", "ORDER_STATUS_CHANGED", payload),
+          this.supabase.broadcastEvent(`order:${orderId}`, "ORDER_STATUS_CHANGED", payload),
+          order?.customer_id
+            ? this.supabase.broadcastEvent(`customer:${order.customer_id}`, "ORDER_STATUS_CHANGED", payload)
+            : Promise.resolve(),
+        ]);
+      }
+    } catch {
+      // Safe catch
+    }
   }
 
   private db() {
