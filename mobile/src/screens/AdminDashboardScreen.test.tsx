@@ -2,9 +2,20 @@ import React from 'react';
 import {act, cleanup, fireEvent, render, waitFor} from '@testing-library/react-native';
 import AdminDashboardScreen from './AdminDashboardScreen';
 import {getAdminDashboard} from '../services/adminDashboardApi';
+import {
+  handleRealtimeAdminEvent,
+  resetIndicatorsForTest,
+  setSectionIndicator,
+} from '../services/adminUpdateIndicators';
 
 jest.mock('../services/adminDashboardApi', () => ({
   getAdminDashboard: jest.fn(),
+}));
+jest.mock('../services/notificationsApi', () => ({
+  getNotifications: jest.fn().mockResolvedValue([]),
+}));
+jest.mock('../services/adminIssuesApi', () => ({
+  listAdminIssues: jest.fn().mockResolvedValue({claims: [], refunds: [], cancellations: []}),
 }));
 const load = getAdminDashboard as jest.Mock;
 
@@ -270,5 +281,97 @@ describe('AdminDashboardScreen', () => {
     await waitFor(() => {
       expect(view.getByText('All operations are up to date')).toBeTruthy();
     });
+  });
+
+  test('green dot update indicators appear next to sections with new updates and clear upon click', async () => {
+    resetIndicatorsForTest();
+    setSectionIndicator('issues', true);
+    setSectionIndicator('customers', true);
+
+    const handlers = {
+      onIssues: jest.fn(),
+      onCustomers: jest.fn(),
+      onLogout: jest.fn(),
+    };
+
+    const view = await render(
+      <AdminDashboardScreen accessToken="admin-token" {...handlers} />,
+    );
+
+    await waitFor(() => {
+      expect(view.getByText('Operations Centre')).toBeTruthy();
+    });
+
+    // Check green dots exist for Claims & Refunds and Orders & Customers
+    expect(view.getByTestId('green-dot-claims---refunds')).toBeTruthy();
+    expect(view.getByTestId('green-dot-orders---customers')).toBeTruthy();
+    // Sections with no new updates should NOT have green dot
+    expect(view.queryByTestId('green-dot-driver-dispatch')).toBeNull();
+
+    // Preserve existing orange operational counts and warning indicators
+    expect(view.getByText('Ready for delivery')).toBeTruthy();
+    expect(view.getByText('Facility processing')).toBeTruthy();
+
+    // Acknowledge Claims & Refunds by clicking it
+    await act(async () => {
+      fireEvent.press(view.getByLabelText('Open Claims and Refunds'));
+    });
+
+    expect(handlers.onIssues).toHaveBeenCalledTimes(1);
+    // Green dot should disappear for Claims & Refunds
+    expect(view.queryByTestId('green-dot-claims---refunds')).toBeNull();
+    // Orders & Customers green dot should still be present
+    expect(view.getByTestId('green-dot-orders---customers')).toBeTruthy();
+  });
+
+  test('incoming realtime CLAIM_SUBMITTED and NOTIFICATION_CREATED events dynamically show green dot on Claims & Refunds', async () => {
+    resetIndicatorsForTest();
+    const handlers = {
+      onIssues: jest.fn(),
+      onLogout: jest.fn(),
+    };
+
+    const view = await render(
+      <AdminDashboardScreen accessToken="admin-token" {...handlers} />,
+    );
+
+    await waitFor(() => {
+      expect(view.getByText('Operations Centre')).toBeTruthy();
+    });
+
+    // Initially no green dot
+    expect(view.queryByTestId('green-dot-claims---refunds')).toBeNull();
+
+    // 1. Simulate real-time CLAIM_SUBMITTED broadcast from backend
+    await act(async () => {
+      handleRealtimeAdminEvent({
+        eventType: 'CLAIM_SUBMITTED',
+        timestamp: new Date().toISOString(),
+      });
+    });
+
+    // Green dot appears dynamically without manual page refresh
+    expect(view.getByTestId('green-dot-claims---refunds')).toBeTruthy();
+
+    // Acknowledge Claims & Refunds
+    await act(async () => {
+      fireEvent.press(view.getByLabelText('Open Claims and Refunds'));
+    });
+    expect(view.queryByTestId('green-dot-claims---refunds')).toBeNull();
+
+    // 2. Simulate nested NOTIFICATION_CREATED broadcast payload
+    await act(async () => {
+      handleRealtimeAdminEvent({
+        eventType: 'NOTIFICATION_CREATED',
+        notification: {
+          notification_type: 'claim.submitted',
+        },
+        data: { claimId: 'claim-xyz' },
+        timestamp: new Date().toISOString(),
+      });
+    });
+
+    // Green dot appears again for the new notification
+    expect(view.getByTestId('green-dot-claims---refunds')).toBeTruthy();
   });
 });

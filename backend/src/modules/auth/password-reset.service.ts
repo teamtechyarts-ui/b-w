@@ -213,11 +213,7 @@ export class PasswordResetService {
 
     // Lookup through user metadata
     try {
-      const { data: linkRes } = await this.supabase.admin.auth.admin.generateLink({
-        type: 'recovery',
-        email,
-      });
-      const user = linkRes?.user;
+      const user = await this.findUserByEmail(email);
       if (user?.app_metadata?.password_reset_challenge) {
         const c = user.app_metadata.password_reset_challenge as StoredChallenge;
         if (c.email === email) {
@@ -227,6 +223,53 @@ export class PasswordResetService {
     } catch {
       // Ignore user lookup error
     }
+
+    return null;
+  }
+
+  private async findUserByEmail(email: string): Promise<any | null> {
+    const normalizedEmail = email.trim().toLowerCase();
+
+    // 1. Try recovery link
+    try {
+      const { data: linkData, error: linkErr } = await this.supabase.admin.auth.admin.generateLink({
+        type: 'recovery',
+        email: normalizedEmail,
+      });
+      if (!linkErr && linkData?.user) {
+        return linkData.user;
+      }
+    } catch {}
+
+    // 2. Try magiclink
+    try {
+      const { data: linkData, error: linkErr } = await this.supabase.admin.auth.admin.generateLink({
+        type: 'magiclink',
+        email: normalizedEmail,
+      });
+      if (!linkErr && linkData?.user) {
+        return linkData.user;
+      }
+    } catch {}
+
+    // 3. Fallback to admin user listing
+    try {
+      let page = 1;
+      const perPage = 100;
+      while (true) {
+        const { data: listData, error: listErr } = await this.supabase.admin.auth.admin.listUsers({
+          page,
+          perPage,
+        });
+        if (listErr || !listData?.users || listData.users.length === 0) break;
+        const match = listData.users.find(
+          (u: any) => u.email?.trim().toLowerCase() === normalizedEmail,
+        );
+        if (match) return match;
+        if (listData.users.length < perPage) break;
+        page++;
+      }
+    } catch {}
 
     return null;
   }
@@ -286,13 +329,7 @@ export class PasswordResetService {
     // 2. Authoritative lookup of user by email
     let targetUser: any = null;
     try {
-      const { data: linkData, error: linkErr } = await this.supabase.admin.auth.admin.generateLink({
-        type: 'recovery',
-        email: normalizedEmail,
-      });
-      if (!linkErr && linkData?.user) {
-        targetUser = linkData.user;
-      }
+      targetUser = await this.findUserByEmail(normalizedEmail);
     } catch {
       // Suppress specific error to prevent account enumeration
     }

@@ -79,6 +79,7 @@ export default function AdminIssueDetailScreen({
   const [success, setSuccess] = useState('');
   const [notes, setNotes] = useState('');
   const [amount, setAmount] = useState('');
+  const [directRefundNotes, setDirectRefundNotes] = useState('');
   const [viewingPhotoUrl, setViewingPhotoUrl] = useState<string | null>(null);
   const [photoErrors, setPhotoErrors] = useState<Record<string, boolean>>({});
 
@@ -839,6 +840,14 @@ export default function AdminIssueDetailScreen({
                           onChangeText={setAmount}
                           style={styles.amountInput}
                         />
+                        <TextInput
+                          accessibilityLabel={`Refund decision notes for ${payment.id}`}
+                          placeholder="Enter reason or decision notes (minimum 3 characters)..."
+                          placeholderTextColor="#9E9E9E"
+                          value={directRefundNotes}
+                          onChangeText={setDirectRefundNotes}
+                          style={styles.amountInput}
+                        />
                         <TouchableOpacity
                           style={[styles.actionBtnPrimary, busy && styles.btnDisabled]}
                           disabled={busy}
@@ -856,9 +865,10 @@ export default function AdminIssueDetailScreen({
                               );
                               return;
                             }
-                            if (!notes.trim() || notes.trim().length < 3) {
+                            const effectiveNotes = (directRefundNotes || notes).trim();
+                            if (!effectiveNotes || effectiveNotes.length < 3) {
                               setRefundError(
-                                'Please enter decision notes in the field above (min 3 characters).',
+                                'Please enter decision notes explaining this refund (minimum 3 characters).',
                               );
                               return;
                             }
@@ -869,7 +879,7 @@ export default function AdminIssueDetailScreen({
                                   orderId,
                                   payment.id,
                                   parsedAmount,
-                                  notes,
+                                  effectiveNotes,
                                 ),
                               'Refund request created.',
                               'Unable to submit refund request. Please try again.',

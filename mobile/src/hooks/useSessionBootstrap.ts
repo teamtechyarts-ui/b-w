@@ -23,18 +23,25 @@ export function useSessionBootstrap(options: Options) {
   latest.current = options;
 
   useEffect(() => {
-    if (hydrating) return;
-    if (!authenticated || !accessToken) {
+    if (!authenticated) {
       bootstrappedRef.current = false;
       setResolved(true);
+      return;
+    }
+
+    if (!accessToken) {
+      // Authenticated but token is refreshing or being read: do not clear bootstrapped state
+      if (!bootstrappedRef.current) {
+        setResolved(false);
+      }
       return;
     }
 
     let active = true;
     const session = latest.current;
 
-    // Only set resolved to false on initial cold boot.
-    // Subsequent token refreshes must NOT unmount NavigationContainer.
+    // Only set resolved to false on initial cold boot before first resolution.
+    // Subsequent token refreshes must NEVER unmount NavigationContainer.
     if (!bootstrappedRef.current) {
       setResolved(false);
     }
@@ -53,16 +60,31 @@ export function useSessionBootstrap(options: Options) {
       if (!active) return;
       const loads =
         role === 'customer'
-          ? Promise.all([session.loadServices(accessToken), session.loadAddresses()])
+          ? Promise.all([
+              session.loadServices(accessToken).catch(() => {}),
+              session.loadAddresses().catch(() => {}),
+            ])
           : Promise.resolve();
       bootstrappedRef.current = true;
       setResolved(true);
       await loads;
     }
 
-    restore();
+    // Safety fallback: if network hangs indefinitely, resolve within 7 seconds so app shell displays retry state
+    const safetyTimer = setTimeout(() => {
+      if (active && !bootstrappedRef.current) {
+        bootstrappedRef.current = true;
+        setResolved(true);
+      }
+    }, 7000);
+
+    restore().finally(() => {
+      clearTimeout(safetyTimer);
+    });
+
     return () => {
       active = false;
+      clearTimeout(safetyTimer);
     };
   }, [accessToken, authenticated, hydrating]);
 

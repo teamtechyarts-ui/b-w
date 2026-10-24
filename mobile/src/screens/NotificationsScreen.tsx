@@ -1,5 +1,6 @@
-import React, {useCallback, useEffect, useState} from 'react';
+import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {
+  Alert,
   NativeModules,
   Platform,
   RefreshControl,
@@ -10,6 +11,9 @@ import {
   View,
 } from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
+import {useSafeFocusEffect} from '../hooks/useSafeFocusEffect';
+import {useCustomerRealtime} from '../hooks/useRealtime';
+import {RealtimeEventPayload} from '../services/realtimeService';
 import {
   CustomerNotification,
   getNotifications,
@@ -17,6 +21,7 @@ import {
   markNotificationRead,
   notificationOrderId,
   notificationOrderNumber,
+  sendDevTestNotification,
 } from '../services/notificationsApi';
 
 type Props = {
@@ -37,6 +42,37 @@ export default function NotificationsScreen({
   const [permissionBusy, setPermissionBusy] = useState(false);
   const [permissionMessage, setPermissionMessage] = useState<string | null>(null);
   const [markingAllRead, setMarkingAllRead] = useState(false);
+  const [testPushBusy, setTestPushBusy] = useState(false);
+
+  const handleSendTestPush = async () => {
+    setTestPushBusy(true);
+    try {
+      const res = await sendDevTestNotification(accessToken, {
+        title: 'Bright & White Push Test',
+        body: 'Push notification received successfully on your device!',
+      });
+      if (res.ok) {
+        Alert.alert(
+          'Push Sent',
+          'FCM accepted the notification for delivery. Check your device notification shade/tray.',
+        );
+      } else {
+        Alert.alert(
+          'Push Test Result',
+          res.reason === 'no_active_devices'
+            ? 'No registered active devices found for this account. Ensure notification permissions are allowed.'
+            : `FCM dispatch status: ${res.status} (${res.reason || 'not delivered'})`,
+        );
+      }
+    } catch (err: any) {
+      Alert.alert(
+        'Push Test Error',
+        err?.message || 'Unable to trigger test push notification.',
+      );
+    } finally {
+      setTestPushBusy(false);
+    }
+  };
 
   const requestIosPermission = async () => {
     setPermissionBusy(true);
@@ -60,19 +96,32 @@ export default function NotificationsScreen({
     }
   };
 
+  const requestSeqRef = useRef(0);
+  const itemsRef = useRef<CustomerNotification[]>([]);
+  itemsRef.current = items;
+
   const load = useCallback(
     async (refresh = false) => {
+      const seq = ++requestSeqRef.current;
       try {
-        refresh ? setRefreshing(true) : setLoading(true);
+        if (refresh) setRefreshing(true);
+        else if (itemsRef.current.length === 0) setLoading(true);
         setError(null);
-        setItems(await getNotifications(accessToken));
+        const nextItems = await getNotifications(accessToken);
+        if (seq === requestSeqRef.current) {
+          setItems(nextItems);
+        }
       } catch (loadError: any) {
-        setError(
-          loadError?.message || 'Notifications are temporarily unavailable.',
-        );
+        if (seq === requestSeqRef.current) {
+          setError(
+            loadError?.message || 'Notifications are temporarily unavailable.',
+          );
+        }
       } finally {
-        setLoading(false);
-        setRefreshing(false);
+        if (seq === requestSeqRef.current) {
+          setLoading(false);
+          setRefreshing(false);
+        }
       }
     },
     [accessToken],
@@ -82,15 +131,38 @@ export default function NotificationsScreen({
     load();
   }, [load]);
 
+  useSafeFocusEffect(
+    useCallback(() => {
+      load(true);
+    }, [load]),
+  );
+
+  const handleRealtimeEvent = useCallback(
+    (event: RealtimeEventPayload) => {
+      if (event.eventType === 'NOTIFICATION_CREATED' && event.notification) {
+        const newNotif = event.notification as CustomerNotification;
+        setItems(prev => {
+          if (prev.some(p => p.id === newNotif.id)) return prev;
+          return [newNotif, ...prev];
+        });
+      } else if (event.eventType === 'ORDER_STATUS_CHANGED') {
+        load(true);
+      }
+    },
+    [load],
+  );
+
+  useCustomerRealtime(null, handleRealtimeEvent, accessToken);
+
   const handleMarkAllRead = async () => {
     if (markingAllRead) return;
     setMarkingAllRead(true);
+    // Optimistic UI update
+    setItems(current => current.map(item => ({...item, is_read: true})));
     try {
       await markAllNotificationsRead(accessToken);
-      setItems(current => current.map(item => ({...item, is_read: true})));
     } catch {
-      // Graceful fallback: local update
-      setItems(current => current.map(item => ({...item, is_read: true})));
+      // Retain optimistic state
     } finally {
       setMarkingAllRead(false);
     }
@@ -98,18 +170,13 @@ export default function NotificationsScreen({
 
   const open = async (item: CustomerNotification) => {
     if (!item.is_read) {
-      try {
-        const updated = await markNotificationRead(accessToken, item.id);
-        setItems(current =>
-          current.map(value => (value.id === item.id ? updated : value)),
-        );
-      } catch {
-        setItems(current =>
-          current.map(value =>
-            value.id === item.id ? {...value, is_read: true} : value,
-          ),
-        );
-      }
+      // Optimistic mark as read
+      setItems(current =>
+        current.map(value =>
+          value.id === item.id ? {...value, is_read: true} : value,
+        ),
+      );
+      markNotificationRead(accessToken, item.id).catch(() => {});
     }
     const orderId = notificationOrderId(item);
     if (orderId) onOpenOrder(orderId);
@@ -163,7 +230,24 @@ export default function NotificationsScreen({
           </View>
         ) : null}
 
-        {loading ? <Text style={styles.message}>Loading notifications...</Text> : null}
+        {__DEV__ ? (
+          <View style={styles.permissionCard}>
+            <Text style={styles.itemTitle}>Developer Push Test</Text>
+            <Text style={[styles.message, {marginBottom: 8}]}>
+              Send a test FCM push notification to your registered device.
+            </Text>
+            <TouchableOpacity
+              accessibilityRole="button"
+              disabled={testPushBusy}
+              onPress={handleSendTestPush}>
+              <Text style={styles.permissionButton}>
+                {testPushBusy ? 'Sending Test Push...' : 'Send Test Notification'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
+
+        {loading && items.length === 0 ? <Text style={styles.message}>Loading notifications...</Text> : null}
         {error ? <Text style={styles.error}>{error}</Text> : null}
         {!loading && !error && items.length === 0 ? (
           <Text style={styles.message}>You have no notifications yet.</Text>

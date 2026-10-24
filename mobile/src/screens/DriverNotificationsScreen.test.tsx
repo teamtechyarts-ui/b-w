@@ -6,6 +6,8 @@ import {openDriverNotification} from '../services/driverNotifications';
 
 jest.mock('../services/notificationsApi', () => ({
   getNotifications: jest.fn(),
+  markNotificationRead: jest.fn().mockResolvedValue({}),
+  markAllNotificationsRead: jest.fn().mockResolvedValue({}),
   notificationOrderNumber: jest.requireActual('../services/notificationsApi').notificationOrderNumber,
 }));
 jest.mock('../services/driverNotifications', () => ({openDriverNotification: jest.fn()}));

@@ -1,4 +1,15 @@
-import { BadRequestException, forwardRef, Inject, Injectable, Optional, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  forwardRef,
+  HttpException,
+  HttpStatus,
+  Inject,
+  Injectable,
+  Logger,
+  Optional,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SupabaseService } from '../supabase/supabase.service';
 import { EmailVerificationService } from './email-verification.service';
@@ -11,6 +22,8 @@ import {
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private readonly s: SupabaseService,
     @Optional() private readonly config?: ConfigService,
@@ -18,6 +31,7 @@ export class AuthService {
     @Inject(forwardRef(() => EmailVerificationService))
     private readonly emailVerification?: EmailVerificationService,
   ) {}
+
 
   async driverSignIn(phone: string, pin: string) {
     if (!phone || !/^\+[1-9]\d{7,14}$/.test(phone) || !pin || !/^\d{6}$/.test(pin)) {
@@ -319,58 +333,194 @@ export class AuthService {
     };
   }
 
+  private maskEmail(email: string): string {
+    const parts = email.trim().toLowerCase().split('@');
+    if (parts.length !== 2) return '***';
+    const name = parts[0];
+    const maskedName =
+      name.length <= 2 ? `${name[0]}*` : `${name.slice(0, 2)}***${name.slice(-1)}`;
+    return `${maskedName}@${parts[1]}`;
+  }
+
   async signUp(email: string, password: string, fullName: string, phone?: string) {
     const cleanEmail = email.trim().toLowerCase();
+    const cleanFullName = fullName.trim();
+    const cleanPhone = phone?.trim();
+
+    this.logger.log(
+      `[AUTH_SIGNUP_START] stage=init email=${this.maskEmail(cleanEmail)} hasPhone=${Boolean(cleanPhone)}`,
+    );
+
+    // Pre-check phone uniqueness to prevent Postgres unique constraint violation
+    // in the auth.users trigger (trg_handle_new_user -> public.profiles), which causes
+    // GoTrue to return an opaque "Database error creating new user" (HTTP 500).
+    const hasAdminCreate = typeof this.s.admin?.auth?.admin?.createUser === 'function';
+    if (cleanPhone && hasAdminCreate && this.s.admin?.from) {
+      const { data: phoneProfile, error: phoneLookupErr } = await this.s.admin
+        .from('profiles')
+        .select('id')
+        .eq('phone', cleanPhone)
+        .maybeSingle();
+
+      if (phoneProfile && !phoneLookupErr) {
+        // If this phone belongs to an unconfirmed user with the SAME email, allow retry/OTP resend.
+        let isSameUnconfirmed = false;
+        try {
+          if (typeof this.s.admin.auth?.admin?.getUserById === 'function') {
+            const { data: userRec } = await this.s.admin.auth.admin.getUserById(phoneProfile.id);
+            if (
+              userRec?.user?.email?.toLowerCase() === cleanEmail &&
+              !userRec.user.email_confirmed_at
+            ) {
+              isSameUnconfirmed = true;
+            }
+          }
+        } catch {}
+
+        if (!isSameUnconfirmed) {
+          this.logger.warn(
+            `[AUTH_SIGNUP_PHONE_CONFLICT] stage=pre_check email=${this.maskEmail(cleanEmail)}`,
+          );
+          throw new ConflictException('An account with this phone number already exists.');
+        }
+      }
+    }
+
     let userId: string;
 
     // In production with Supabase Admin API, create user unverified (email_confirm: false)
-    // so GoTrue does NOT send email confirmation links
-    if (this.s.admin?.auth?.admin?.createUser) {
+    // so GoTrue does NOT send email confirmation links. Verification email is dispatched exclusively via Nodemailer.
+    if (hasAdminCreate) {
       const { data: createData, error: createError } = await this.s.admin.auth.admin.createUser({
         email: cleanEmail,
         password,
         email_confirm: false,
         user_metadata: {
-          full_name: fullName,
-          ...(phone ? { phone } : {}),
+          full_name: cleanFullName,
+          ...(cleanPhone ? { phone: cleanPhone } : {}),
         },
       });
 
       if (createError) {
+        this.logger.warn(
+          `[AUTH_SIGNUP_CREATE_ERROR] stage=supabase_create email=${this.maskEmail(cleanEmail)} status=${createError.status} msg=${createError.message}`,
+        );
         const msg = createError.message?.toLowerCase() || '';
-        if (msg.includes('already registered') || msg.includes('user already exists')) {
+
+        // Duplicate account detection (HTTP 422 from GoTrue)
+        if (
+          createError.status === 422 ||
+          msg.includes('already registered') ||
+          msg.includes('user already exists')
+        ) {
           // Check if existing user is unverified - if so, allow verification retry without duplicate error
           let existingUser: any = null;
           try {
             const { data: linkData } = await this.s.admin.auth.admin.generateLink({
-              type: 'recovery',
+              type: 'magiclink',
               email: cleanEmail,
             });
             existingUser = linkData?.user;
-          } catch {
-            // Ignore error
+          } catch {}
+
+          if (!existingUser) {
+            try {
+              const { data: linkData } = await this.s.admin.auth.admin.generateLink({
+                type: 'recovery',
+                email: cleanEmail,
+              });
+              existingUser = linkData?.user;
+            } catch {}
+          }
+
+          if (!existingUser) {
+            try {
+              const { data: listData } = await this.s.admin.auth.admin.listUsers();
+              existingUser =
+                listData?.users?.find((u: any) => u.email?.toLowerCase() === cleanEmail) || null;
+            } catch {}
           }
 
           if (existingUser && !existingUser.email_confirmed_at) {
+            this.logger.log(
+              `[AUTH_SIGNUP_RETRY] stage=resend_otp_unconfirmed email=${this.maskEmail(cleanEmail)}`,
+            );
             if (this.emailVerification) {
               await this.emailVerification.issueAndSendVerificationOtp(existingUser.id, cleanEmail);
             }
             return {
               session: null,
-              user: { id: existingUser.id, email: cleanEmail, phone: phone || null },
+              user: null, // Never expose existing user database UUID to unauthenticated callers
               profile: null,
               requiresEmailConfirmation: true,
-              message: 'A verification code has been sent to your email address.',
+              message:
+                'Your account is pending verification. A verification code has been sent to your email.',
             };
           }
-          throw new BadRequestException('An account with this email already exists.');
+
+          throw new ConflictException('An account with this email already exists. Please sign in instead.');
         }
-        if (msg.includes('password')) {
+
+        // Rate limits
+        if (
+          createError.status === 429 ||
+          msg.includes('rate limit') ||
+          msg.includes('too many requests') ||
+          msg.includes('security purposes')
+        ) {
+          throw new HttpException(
+            'Too many registration requests. Please wait a few moments and try again.',
+            HttpStatus.TOO_MANY_REQUESTS,
+          );
+        }
+
+        // Password validation
+        if (msg.includes('password') || msg.includes('weak')) {
           throw new BadRequestException('Password must be at least 6 characters long.');
         }
-        if (msg.includes('email') || msg.includes('invalid format')) {
-          throw new BadRequestException('Please enter a valid email address.');
+
+        // Database unique constraint violation (phone)
+        if (
+          msg.includes('profiles_phone_key') ||
+          (msg.includes('phone') && msg.includes('unique'))
+        ) {
+          throw new ConflictException('An account with this phone number already exists.');
         }
+
+        // Database trigger failure (e.g. Postgres unique violation in trg_handle_new_user)
+        if (
+          createError.status === 500 ||
+          msg.includes('database error creating new user')
+        ) {
+          this.logger.error(
+            `[AUTH_SIGNUP_DATABASE_ERROR] stage=supabase_create email=${this.maskEmail(cleanEmail)} status=500 msg=${createError.message}`,
+          );
+
+          // Check if a phone uniqueness conflict caused the trigger failure
+          if (cleanPhone && this.s.admin?.from) {
+            const { data: phoneCheck } = await this.s.admin
+              .from('profiles')
+              .select('id')
+              .eq('phone', cleanPhone)
+              .maybeSingle();
+
+            if (phoneCheck) {
+              throw new ConflictException('An account with this phone number already exists.');
+            }
+          }
+
+          throw new BadRequestException('Unable to create your account right now. Please verify your details or try again.');
+        }
+
+        // Specific email format validation error from Supabase
+        if (
+          msg.includes('invalid format') ||
+          msg.includes('unable to validate email') ||
+          msg.includes('email address is invalid')
+        ) {
+          throw new BadRequestException('Please enter a valid email address format.');
+        }
+
         throw new BadRequestException('Unable to create your account right now. Please try again.');
       }
 
@@ -382,22 +532,38 @@ export class AuthService {
         password,
         options: {
           data: {
-            full_name: fullName,
-            ...(phone ? { phone } : {}),
+            full_name: cleanFullName,
+            ...(cleanPhone ? { phone: cleanPhone } : {}),
           },
         },
       });
 
       if (error) {
+        this.logger.warn(
+          `[AUTH_SIGNUP_CREATE_ERROR_FALLBACK] stage=supabase_signup email=${this.maskEmail(cleanEmail)} msg=${error.message}`,
+        );
         const msg = error.message?.toLowerCase() || '';
-        if (msg.includes('already registered') || msg.includes('user already exists')) {
-          throw new BadRequestException('An account with this email already exists.');
+        if (msg.includes('already registered') || msg.includes('user already exists') || error.status === 422) {
+          throw new ConflictException('An account with this email already exists. Please sign in instead.');
         }
-        if (msg.includes('password')) {
+        if (msg.includes('profiles_phone_key') || (msg.includes('phone') && msg.includes('unique'))) {
+          throw new ConflictException('An account with this phone number already exists.');
+        }
+        if (error.status === 429 || msg.includes('rate limit') || msg.includes('too many requests')) {
+          throw new HttpException(
+            'Too many registration requests. Please wait a few moments and try again.',
+            HttpStatus.TOO_MANY_REQUESTS,
+          );
+        }
+        if (msg.includes('password') || msg.includes('weak')) {
           throw new BadRequestException('Password must be at least 6 characters long.');
         }
-        if (msg.includes('email') || msg.includes('invalid format')) {
-          throw new BadRequestException('Please enter a valid email address.');
+        if (
+          msg.includes('invalid format') ||
+          msg.includes('unable to validate email') ||
+          msg.includes('email address is invalid')
+        ) {
+          throw new BadRequestException('Please enter a valid email address format.');
         }
         throw new BadRequestException('Unable to create your account right now. Please try again.');
       }
@@ -409,19 +575,27 @@ export class AuthService {
       userId = data.user.id;
     }
 
-    // Issue and dispatch verification OTP via Nodemailer & Gmail SMTP
+    // Issue and dispatch verification OTP exclusively via Nodemailer
     if (this.emailVerification && userId) {
+      this.logger.log(
+        `[AUTH_SIGNUP_OTP_DISPATCH] stage=issue_otp email=${this.maskEmail(cleanEmail)} userId=${userId}`,
+      );
       await this.emailVerification.issueAndSendVerificationOtp(userId, cleanEmail);
     }
 
+    this.logger.log(
+      `[AUTH_SIGNUP_COMPLETE] stage=complete email=${this.maskEmail(cleanEmail)} userId=${userId}`,
+    );
+
     return {
       session: null,
-      user: { id: userId, email: cleanEmail, phone: phone || null },
+      user: null, // Never expose internal user database UUID to unauthenticated clients
       profile: null,
       requiresEmailConfirmation: true,
       message: 'Account created successfully. A verification code has been sent to your email.',
     };
   }
+
 
   async signIn(email: string, password: string) {
     const { data, error } = await this.s.createAuthClient().auth.signInWithPassword({

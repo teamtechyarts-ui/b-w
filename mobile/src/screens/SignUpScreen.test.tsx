@@ -364,5 +364,101 @@ describe('SignUpScreen', () => {
 
     expect(view.getByText('Invalid verification code. Please check and try again.')).toBeTruthy();
   });
+
+  it('normalizes valid email with leading/trailing whitespace before submission', async () => {
+    (authApi.signUpCustomer as jest.Mock).mockResolvedValueOnce({
+      session: null,
+      user: { id: 'usr-unconfirmed', email: 'whitespace@example.com' },
+      profile: null,
+      requiresEmailConfirmation: true,
+      message: 'Account created successfully. A verification code has been sent to your email.',
+    });
+
+    const view = await render(
+      <SignUpScreen
+        onSessionEstablished={jest.fn()}
+        onNavigateToLogin={jest.fn()}
+        onBack={jest.fn()}
+      />,
+    );
+
+    await act(async () => {
+      fireEvent.changeText(view.getByPlaceholderText('Full Name'), '  Whitespace User  ');
+      fireEvent.changeText(view.getByPlaceholderText('Email'), '  Whitespace@Example.COM  ');
+      fireEvent.changeText(view.getByPlaceholderText('Mobile Number'), '9876543213');
+      fireEvent.changeText(view.getByPlaceholderText('Password'), 'SecurePass123!');
+      fireEvent.changeText(view.getByPlaceholderText('Confirm Password'), 'SecurePass123!');
+    });
+
+    await act(async () => {
+      fireEvent.press(view.getByText('Sign Up'));
+    });
+
+    expect(authApi.signUpCustomer).toHaveBeenCalledWith({
+      fullName: 'Whitespace User',
+      email: 'whitespace@example.com',
+      phone: '+919876543213',
+      password: 'SecurePass123!',
+    });
+  });
+
+  it('displays friendly message on network interruption', async () => {
+    (authApi.signUpCustomer as jest.Mock).mockRejectedValueOnce({
+      isNetworkError: true,
+      message: 'Network request failed',
+    });
+
+    const view = await render(
+      <SignUpScreen
+        onSessionEstablished={jest.fn()}
+        onNavigateToLogin={jest.fn()}
+        onBack={jest.fn()}
+      />,
+    );
+
+    await act(async () => {
+      fireEvent.changeText(view.getByPlaceholderText('Full Name'), 'Network User');
+      fireEvent.changeText(view.getByPlaceholderText('Email'), 'network@example.com');
+      fireEvent.changeText(view.getByPlaceholderText('Mobile Number'), '9876543214');
+      fireEvent.changeText(view.getByPlaceholderText('Password'), 'SecurePass123!');
+      fireEvent.changeText(view.getByPlaceholderText('Confirm Password'), 'SecurePass123!');
+    });
+
+    await act(async () => {
+      fireEvent.press(view.getByText('Sign Up'));
+    });
+
+    expect(view.getByText('Unable to connect. Please check your internet connection.')).toBeTruthy();
+  });
+
+  it('displays field-specific error when phone number is already registered', async () => {
+    (authApi.signUpCustomer as jest.Mock).mockRejectedValueOnce({
+      status: 409,
+      message: 'An account with this phone number already exists.',
+    });
+
+    const view = await render(
+      <SignUpScreen
+        onSessionEstablished={jest.fn()}
+        onNavigateToLogin={jest.fn()}
+        onBack={jest.fn()}
+      />,
+    );
+
+    await act(async () => {
+      fireEvent.changeText(view.getByPlaceholderText('Full Name'), 'Phone Conflict User');
+      fireEvent.changeText(view.getByPlaceholderText('Email'), 'conflict@example.com');
+      fireEvent.changeText(view.getByPlaceholderText('Mobile Number'), '9876543215');
+      fireEvent.changeText(view.getByPlaceholderText('Password'), 'SecurePass123!');
+      fireEvent.changeText(view.getByPlaceholderText('Confirm Password'), 'SecurePass123!');
+    });
+
+    await act(async () => {
+      fireEvent.press(view.getByText('Sign Up'));
+    });
+
+    expect(view.getByText('An account with this phone number already exists.')).toBeTruthy();
+  });
 });
+
 

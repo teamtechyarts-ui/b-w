@@ -28,4 +28,32 @@ jest.mock('react-native-safe-area-context', () => {
   };
 });
 
+jest.mock('@react-native-firebase/messaging', () => {
+  const getInitialNotification = jest.fn().mockResolvedValue(null);
+  const onNotificationOpenedApp = jest.fn().mockReturnValue(() => {});
+  const onMessage = jest.fn().mockReturnValue(() => {});
+  const onTokenRefresh = jest.fn().mockReturnValue(() => {});
+  const requestPermission = jest.fn().mockResolvedValue(1);
+  const getToken = jest.fn().mockResolvedValue('mock-fcm-token');
+  const setBackgroundMessageHandler = jest.fn();
+  const getMessaging = jest.fn().mockReturnValue({});
+
+  return {
+    getMessaging,
+    getInitialNotification,
+    onNotificationOpenedApp,
+    onMessage,
+    onTokenRefresh,
+    requestPermission,
+    getToken,
+    setBackgroundMessageHandler,
+    AuthorizationStatus: {
+      NOT_DETERMINED: -1,
+      DENIED: 0,
+      AUTHORIZED: 1,
+      PROVISIONAL: 2,
+    },
+  };
+});
+
 

@@ -1,4 +1,4 @@
-import React, {useCallback, useEffect, useMemo, useState} from 'react';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   ActivityIndicator,
   RefreshControl,
@@ -10,6 +10,7 @@ import {
   View,
 } from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
+import {useSafeFocusEffect} from '../hooks/useSafeFocusEffect';
 import AppIcon from '../components/AppIcon';
 import OrderStatusBadge from '../components/OrderStatusBadge';
 import {
@@ -134,12 +135,23 @@ export default function ClaimsRefundsScreen({
   const [refunds, setRefunds] = useState<EnrichedRefund[]>([]);
   const [cancellations, setCancellations] = useState<EnrichedCancellation[]>([]);
 
+  const totalClaimsCount = claims.length;
+  const totalRefundsCount = refunds.length;
+  const totalCancellationsCount = cancellations.length;
+  const totalItemsCount =
+    totalClaimsCount + totalRefundsCount + totalCancellationsCount;
+
+  const requestSeqRef = useRef(0);
+  const totalCountRef = useRef(0);
+  totalCountRef.current = totalItemsCount;
+
   const loadData = useCallback(
     async (isRefresh = false) => {
+      const seq = ++requestSeqRef.current;
       try {
         if (isRefresh) {
           setRefreshing(true);
-        } else {
+        } else if (totalCountRef.current === 0) {
           setLoading(true);
         }
         setError('');
@@ -230,15 +242,21 @@ export default function ClaimsRefundsScreen({
             new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
         );
 
-        setClaims(allClaims);
-        setRefunds(allRefunds);
-        setCancellations(allCancellations);
-        setError('');
+        if (seq === requestSeqRef.current) {
+          setClaims(allClaims);
+          setRefunds(allRefunds);
+          setCancellations(allCancellations);
+          setError('');
+        }
       } catch (cause) {
-        setError(cause instanceof Error ? cause.message : 'Unable to load claims & refunds.');
+        if (seq === requestSeqRef.current) {
+          setError(cause instanceof Error ? cause.message : 'Unable to load claims & refunds.');
+        }
       } finally {
-        setLoading(false);
-        setRefreshing(false);
+        if (seq === requestSeqRef.current) {
+          setLoading(false);
+          setRefreshing(false);
+        }
       }
     },
     [accessToken],
@@ -256,12 +274,11 @@ export default function ClaimsRefundsScreen({
     loadData();
   }, [loadData]);
 
-  const totalClaimsCount = claims.length;
-  const totalRefundsCount = refunds.length;
-  const totalCancellationsCount = cancellations.length;
-
-  const totalItemsCount =
-    totalClaimsCount + totalRefundsCount + totalCancellationsCount;
+  useSafeFocusEffect(
+    useCallback(() => {
+      loadData(true);
+    }, [loadData]),
+  );
 
   return (
     <SafeAreaView style={styles.container}>
@@ -424,7 +441,7 @@ export default function ClaimsRefundsScreen({
         ) : null}
 
         {/* Loading Indicator */}
-        {loading && !refreshing ? (
+        {loading && !refreshing && totalItemsCount === 0 ? (
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color={colors.primary} />
             <Text style={styles.loadingText}>Loading claims & refunds...</Text>
@@ -432,7 +449,7 @@ export default function ClaimsRefundsScreen({
         ) : null}
 
         {/* Content Lists */}
-        {!loading && !error ? (
+        {(!loading || totalItemsCount > 0) && !error ? (
           <View style={styles.contentSection}>
             {/* Claims Section */}
             {(activeTab === 'all' || activeTab === 'claims') && claims.length > 0 ? (

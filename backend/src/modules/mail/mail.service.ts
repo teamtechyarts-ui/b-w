@@ -13,23 +13,66 @@ export interface SendMailOptions {
   attachments?: nodemailer.SendMailOptions['attachments'];
 }
 
+export interface EmailDiagnosticResult {
+  configured: boolean;
+  provider: string;
+  host: string;
+  port: number;
+  secure: boolean;
+  senderAddress: string;
+  connectionVerified: boolean;
+  deliveryGuarantee: string;
+}
+
 @Injectable()
 export class MailService {
   private readonly logger = new Logger(MailService.name);
   private transporter: Transporter | null = null;
   private readonly smtpUser?: string;
-  private readonly smtpAppPassword?: string;
+  private readonly smtpPass?: string;
   private readonly smtpFromName: string;
+  private readonly mailFrom?: string;
 
   constructor(private readonly config: ConfigService) {
     this.smtpUser = this.config.get<string>('SMTP_USER')?.trim();
-    this.smtpAppPassword = this.config.get<string>('SMTP_APP_PASSWORD')?.trim();
+    this.smtpPass =
+      this.config.get<string>('SMTP_PASS')?.trim() ||
+      this.config.get<string>('SMTP_APP_PASSWORD')?.trim();
     this.smtpFromName =
       this.config.get<string>('SMTP_FROM_NAME')?.trim() || 'Bright & White Laundry';
+    this.mailFrom = this.config.get<string>('MAIL_FROM')?.trim();
 
-    if (this.smtpUser && this.smtpAppPassword) {
-      // Clean any accidental spaces from Google App Password (e.g., 'xxxx yyyy zzzz wwww')
-      const sanitizedPassword = this.smtpAppPassword.replace(/\s+/g, '');
+    const smtpHost = this.config.get<string>('SMTP_HOST')?.trim();
+    const rawPort = this.config.get<string | number>('SMTP_PORT');
+    const smtpPort = rawPort ? Number(rawPort) : 465;
+    const rawSecure = this.config.get<string | boolean>('SMTP_SECURE');
+    const smtpSecure =
+      rawSecure === true ||
+      rawSecure === 'true' ||
+      rawSecure === '1' ||
+      (smtpPort === 465 && rawSecure !== false && rawSecure !== 'false');
+
+    if (this.smtpUser && this.smtpPass && smtpHost) {
+      // Clean any accidental spaces from password
+      const sanitizedPassword = this.smtpPass.replace(/\s+/g, '');
+      this.transporter = nodemailer.createTransport({
+        pool: true,
+        host: smtpHost,
+        port: smtpPort,
+        secure: smtpSecure,
+        maxConnections: 3,
+        maxMessages: 100,
+        auth: {
+          user: this.smtpUser,
+          pass: sanitizedPassword,
+        },
+      });
+      this.logger.log(
+        `Nodemailer SMTP pooled transport initialized for host ${smtpHost}:${smtpPort} (secure=${smtpSecure}).`,
+      );
+    } else if (this.smtpUser && this.smtpPass) {
+      // Direct service fallback (e.g., Gmail)
+      const sanitizedPassword = this.smtpPass.replace(/\s+/g, '');
       this.transporter = nodemailer.createTransport({
         pool: true,
         service: 'gmail',
@@ -44,7 +87,7 @@ export class MailService {
     } else {
       const missing: string[] = [];
       if (!this.smtpUser) missing.push('SMTP_USER');
-      if (!this.smtpAppPassword) missing.push('SMTP_APP_PASSWORD');
+      if (!this.smtpPass) missing.push('SMTP_PASS or SMTP_APP_PASSWORD');
       this.logger.warn(
         `SMTP service is unconfigured. Missing environment variable(s): ${missing.join(', ')}.`,
       );
@@ -52,7 +95,7 @@ export class MailService {
   }
 
   isConfigured(): boolean {
-    return Boolean(this.transporter && this.smtpUser && this.smtpAppPassword);
+    return Boolean(this.transporter && this.smtpUser && this.smtpPass);
   }
 
   async verifyConnection(): Promise<boolean> {
@@ -69,6 +112,50 @@ export class MailService {
       this.logger.error(`SMTP verification failed: ${error?.message || 'Unknown error'}`);
       return false;
     }
+  }
+
+  async getDiagnosticStatus(): Promise<EmailDiagnosticResult> {
+    const isConfigured = this.isConfigured();
+    const smtpHost = this.config.get<string>('SMTP_HOST')?.trim() || 'unconfigured';
+    const rawPort = this.config.get<string | number>('SMTP_PORT');
+    const smtpPort = rawPort ? Number(rawPort) : 465;
+    const rawSecure = this.config.get<string | boolean>('SMTP_SECURE');
+    const smtpSecure =
+      rawSecure === true ||
+      rawSecure === 'true' ||
+      rawSecure === '1' ||
+      (smtpPort === 465 && rawSecure !== false && rawSecure !== 'false');
+
+    let connectionVerified = false;
+    if (isConfigured && this.transporter) {
+      try {
+        await this.transporter.verify();
+        connectionVerified = true;
+      } catch {
+        connectionVerified = false;
+      }
+    }
+
+    const maskedSender = this.smtpUser ? this.maskEmail(this.smtpUser) : 'not_configured';
+
+    return {
+      configured: isConfigured,
+      provider: smtpHost.includes('zoho') ? 'Zoho Mail SMTP' : 'SMTP Transport',
+      host: smtpHost,
+      port: smtpPort,
+      secure: smtpSecure,
+      senderAddress: maskedSender,
+      connectionVerified,
+      deliveryGuarantee:
+        'SMTP connectivity and message acceptance (250 OK) confirm transmission to the mail provider. Final inbox delivery depends on recipient server policies, SPF/DKIM validation, and spam filtering.',
+    };
+  }
+
+  private renderHeaderHtml(hasLogo: boolean): string {
+    if (hasLogo) {
+      return '<img src="cid:bwlogo" alt="Bright &amp; White Laundry" class="brand-logo" />';
+    }
+    return '<div style="font-size: 22px; font-weight: 800; color: #0284C7; letter-spacing: 1.5px; text-transform: uppercase; padding: 8px 0;">BRIGHT &amp; WHITE</div>';
   }
 
   private cachedLogoAttachment: nodemailer.SendMailOptions['attachments'] | null = null;
@@ -116,7 +203,7 @@ export class MailService {
       );
     }
 
-    const fromAddress = `"${this.smtpFromName}" <${this.smtpUser}>`;
+    const fromAddress = this.mailFrom || `"${this.smtpFromName}" <${this.smtpUser}>`;
 
     try {
       await this.transporter.sendMail({
@@ -145,9 +232,10 @@ export class MailService {
    */
   async sendEmailVerificationOtp(to: string, otp: string, expiresInMinutes: number = 10): Promise<void> {
     const subject = 'Verify Your Email Address — Bright & White Laundry';
-    const text = this.buildEmailVerificationText(otp, expiresInMinutes);
-    const html = this.buildEmailVerificationHtml(otp, expiresInMinutes);
     const attachments = this.getLogoAttachment();
+    const hasLogo = Boolean(attachments && attachments.length > 0);
+    const text = this.buildEmailVerificationText(otp, expiresInMinutes);
+    const html = this.buildEmailVerificationHtml(otp, expiresInMinutes, hasLogo);
 
     await this.sendMail({
       to,
@@ -163,9 +251,10 @@ export class MailService {
    */
   async sendPasswordResetOtp(to: string, otp: string, expiresInMinutes: number = 10): Promise<void> {
     const subject = 'Your Password Reset Code — Bright & White Laundry';
-    const text = this.buildPasswordResetText(otp, expiresInMinutes);
-    const html = this.buildPasswordResetHtml(otp, expiresInMinutes);
     const attachments = this.getLogoAttachment();
+    const hasLogo = Boolean(attachments && attachments.length > 0);
+    const text = this.buildPasswordResetText(otp, expiresInMinutes);
+    const html = this.buildPasswordResetHtml(otp, expiresInMinutes, hasLogo);
 
     await this.sendMail({
       to,
@@ -196,7 +285,7 @@ export class MailService {
     ].join('\n');
   }
 
-  private buildEmailVerificationHtml(otp: string, expiresInMinutes: number): string {
+  private buildEmailVerificationHtml(otp: string, expiresInMinutes: number, hasLogo: boolean = true): string {
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -319,7 +408,7 @@ export class MailService {
   <div class="wrapper">
     <div class="container">
       <div class="header">
-        <img src="cid:bwlogo" alt="Bright &amp; White Laundry" class="brand-logo" />
+        ${this.renderHeaderHtml(hasLogo)}
       </div>
       <div class="content">
         <h2 class="title">Verify Your Email Address</h2>
@@ -365,7 +454,7 @@ export class MailService {
     ].join('\n');
   }
 
-  private buildPasswordResetHtml(otp: string, expiresInMinutes: number): string {
+  private buildPasswordResetHtml(otp: string, expiresInMinutes: number, hasLogo: boolean = true): string {
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -478,7 +567,7 @@ export class MailService {
   <div class="wrapper">
     <div class="container">
       <div class="header">
-        <img src="cid:bwlogo" alt="Bright &amp; White Laundry" class="brand-logo" />
+        ${this.renderHeaderHtml(hasLogo)}
       </div>
       <div class="content">
         <h2 class="title">Password Reset Verification</h2>

@@ -21,6 +21,8 @@ export type IconName =
   | 'facility'
   | 'building-2'
   | 'wash'
+  | 'wash-fold'
+  | 'wash-iron'
   | 'washing-machine'
   | 'dry'
   | 'iron'
@@ -78,7 +80,9 @@ export type IconName =
   | 'analytics'
   | 'hand'
   | 'pickup'
-  | 'more-vertical';
+  | 'more-vertical'
+  | 'shirt'
+  | 'driver-arrived';
 
 type AppIconProps = {
   name: IconName;
@@ -94,6 +98,7 @@ const SVG_PATHS: Record<IconName, string> = {
   bell: 'M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9 M13.73 21a2 2 0 01-3.46 0',
   notifications: 'M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9 M13.73 21a2 2 0 01-3.46 0',
   hanger: 'M12 2a3 3 0 00-3 3c0 1.3.8 2.4 2 2.8V10l-8.6 6.4A2 2 0 003.6 20H20.4a2 2 0 001.2-3.6L13 10V7.8c1.2-.4 2-1.5 2-2.8a3 3 0 00-3-3z',
+  shirt: 'M20.38 3.46L16 2a4 4 0 01-8 0L3.62 3.46a2 2 0 00-1.34 2.23l.58 3.47a1 1 0 00.99.84H6v10a2 2 0 002 2h8a2 2 0 002-2V10h2.15a1 1 0 00.99-.84l.58-3.47a2 2 0 00-1.34-2.23z',
   shoe: 'M2 17h20v2a2 2 0 01-2 2H4a2 2 0 01-2-2v-2z M2 17l2.5-7.5A2 2 0 016.4 8H11v3h4l2 3h5v3',
   bed: 'M2 4v16 M2 8h18a2 2 0 012 2v10 M2 17h20 M6 8v9',
   chart: 'M18 20V10 M12 20V4 M6 20v-6',
@@ -117,8 +122,9 @@ const SVG_PATHS: Record<IconName, string> = {
   delete: 'M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16',
   'refresh-cw': 'M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15',
   'washing-machine': 'M6 3h12a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V5a2 2 0 012-2z M6 8h12 M8 5.5h.01 M16 5.5h.01 M12 15a4 4 0 100-8 4 4 0 000 8z',
-  orders: 'M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4',
+  orders: 'M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2 M9 2h6a1 1 0 011 1v2a1 1 0 01-1 1H9a1 1 0 01-1-1V3a1 1 0 011-1z M9 11h6 M9 15h4',
   delivery: 'M9 17a2 2 0 11-4 0 2 2 0 014 0zM19 17a2 2 0 11-4 0 2 2 0 014 0z M13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10h10zm0 0h3.586a1 1 0 00.707-.293l2.414-2.414A1 1 0 0020 12.586V10a1 1 0 00-1-1h-6v7z',
+  'driver-arrived': 'M9 17a2 2 0 11-4 0 2 2 0 014 0zM19 17a2 2 0 11-4 0 2 2 0 014 0z M13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10h10zm0 0h3.586a1 1 0 00.707-.293l2.414-2.414A1 1 0 0020 12.586V10a1 1 0 00-1-1h-6v7z',
   wallet: 'M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z',
   'user-circle': 'M12 2a10 10 0 100 20 10 10 0 000-20zm0 3a3 3 0 110 6 3 3 0 010-6zm0 14.2a7.2 7.2 0 01-5.2-2.2c.03-1.73 3.47-2.67 5.2-2.67s5.17.94 5.2 2.67a7.2 7.2 0 01-5.2 2.2z',
   cart: 'M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z',
@@ -135,9 +141,11 @@ const SVG_PATHS: Record<IconName, string> = {
   truck: 'M9 17a2 2 0 11-4 0 2 2 0 014 0zM19 17a2 2 0 11-4 0 2 2 0 014 0z M13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10h10zm0 0h3.586a1 1 0 00.707-.293l2.414-2.414A1 1 0 0020 12.586V10a1 1 0 00-1-1h-6v7z',
   facility: 'M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4',
   wash: 'M6 3h12a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V5a2 2 0 012-2z M6 8h12 M8 5.5h.01 M16 5.5h.01 M12 15a4 4 0 100-8 4 4 0 000 8z',
+  'wash-fold': 'M2 4h8a1.5 1.5 0 011.5 1.5v13a1.5 1.5 0 01-1.5 1.5H2A1.5 1.5 0 01.5 18.5v-13A1.5 1.5 0 012 4z M2 8h9.5 M4 6h.01 M8 6h.01 M6 14a2.5 2.5 0 100-5 2.5 2.5 0 000 5z M14 9h7a1 1 0 011 1v2a1 1 0 01-1 1h-7a1 1 0 01-1-1v-2a1 1 0 011-1z M16 11h4 M14 15h7a1 1 0 011 1v2a1 1 0 01-1 1h-7a1 1 0 01-1-1v-2a1 1 0 011-1z M16 17h4',
+  'wash-iron': 'M2 4h8a1.5 1.5 0 011.5 1.5v13a1.5 1.5 0 01-1.5 1.5H2A1.5 1.5 0 01.5 18.5v-13A1.5 1.5 0 012 4z M2 8h9.5 M4 6h.01 M8 6h.01 M6 14a2.5 2.5 0 100-5 2.5 2.5 0 000 5z M14 14h6a2.5 2.5 0 002.5-2.5V10a1.5 1.5 0 00-1.5-1.5H16a2.5 2.5 0 00-2.5 2.5v3zm0 0v1.5a1.5 1.5 0 001.5 1.5h6a1.5 1.5 0 001.5-1.5V14 M15 19h.01 M18 19h.01 M21 19h.01',
   dry: 'M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z',
   iron: 'M3 15h14a4 4 0 004-4V9a2 2 0 00-2-2H7a4 4 0 00-4 4v4zm0 0v2a2 2 0 002 2h12a2 2 0 002-2v-2',
-  fold: 'M4 6h16M4 10h16M4 14h16M4 18h16',
+  fold: 'M3 7a2 2 0 012-2h14a2 2 0 012 2v2a2 2 0 01-2 2H5a2 2 0 01-2-2V7zm0 8a2 2 0 012-2h14a2 2 0 012 2v2a2 2 0 01-2 2H5a2 2 0 01-2-2v-2z',
   pack: 'M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4',
   qc: 'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z',
   package: 'M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4',
@@ -180,6 +188,7 @@ export default function AppIcon({
   if (Platform.OS === 'web') {
     return (
       <View
+        testID={`icon-${name}`}
         accessibilityRole="image"
         accessibilityLabel={accessibilityLabel || name}
         style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
@@ -202,6 +211,7 @@ export default function AppIcon({
   // React Native native vector renderer for Android/iOS
   return (
     <View
+      testID={`icon-${name}`}
       accessibilityRole="image"
       accessibilityLabel={accessibilityLabel || name}
       style={{
@@ -209,7 +219,7 @@ export default function AppIcon({
         height: size,
         alignItems: 'center',
         justifyContent: 'center',
-        overflow: 'hidden',
+        overflow: 'visible',
       }}>
       {renderNativeIcon(name, size, color, strokeWidth)}
     </View>
@@ -326,6 +336,34 @@ function renderNativeIcon(
             borderLeftWidth: sw,
             borderColor: color,
             transform: [{ rotate: '45deg' }, { translateX: s * 0.06 }],
+          }}
+        />
+      );
+
+    case 'chevron-down':
+      return (
+        <View
+          style={{
+            width: s * 0.38,
+            height: s * 0.38,
+            borderBottomWidth: sw,
+            borderRightWidth: sw,
+            borderColor: color,
+            transform: [{ rotate: '45deg' }, { translateY: -s * 0.06 }],
+          }}
+        />
+      );
+
+    case 'chevron-up':
+      return (
+        <View
+          style={{
+            width: s * 0.38,
+            height: s * 0.38,
+            borderTopWidth: sw,
+            borderLeftWidth: sw,
+            borderColor: color,
+            transform: [{ rotate: '45deg' }, { translateY: s * 0.06 }],
           }}
         />
       );
@@ -787,6 +825,189 @@ function renderNativeIcon(
         </View>
       );
 
+    case 'wash-fold': {
+      const csw = Math.max(1, s <= 24 ? 1.2 : 1.5);
+      return (
+        <View
+          style={{
+            width: s * 0.96,
+            height: s * 0.86,
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+          }}>
+          {/* Left: Washing Machine */}
+          <View
+            style={{
+              width: s * 0.46,
+              height: s * 0.84,
+              borderWidth: csw,
+              borderColor: color,
+              borderRadius: 3,
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              paddingVertical: 2,
+            }}>
+            <View style={{ flexDirection: 'row', width: '80%', justifyContent: 'flex-end', gap: 2 }}>
+              <View style={{ width: csw * 1.2, height: csw * 1.2, borderRadius: 99, backgroundColor: color }} />
+              <View style={{ width: csw * 1.2, height: csw * 1.2, borderRadius: 99, backgroundColor: color }} />
+            </View>
+            <View
+              style={{
+                width: s * 0.28,
+                height: s * 0.28,
+                borderRadius: 99,
+                borderWidth: csw,
+                borderColor: color,
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}>
+              <View
+                style={{
+                  width: s * 0.14,
+                  height: s * 0.07,
+                  borderBottomWidth: csw,
+                  borderColor: color,
+                  borderRadius: 99,
+                }}
+              />
+            </View>
+            <View style={{ height: 1 }} />
+          </View>
+
+          {/* Right: Folded Laundry Stack */}
+          <View
+            style={{
+              width: s * 0.46,
+              height: s * 0.76,
+              justifyContent: 'center',
+              alignItems: 'center',
+            }}>
+            <View
+              style={{
+                width: s * 0.44,
+                height: s * 0.3,
+                borderWidth: csw,
+                borderColor: color,
+                borderRadius: 2,
+                justifyContent: 'center',
+                paddingHorizontal: 2,
+              }}>
+              <View style={{ width: '55%', height: csw, backgroundColor: color, borderRadius: 1 }} />
+            </View>
+            <View
+              style={{
+                width: s * 0.44,
+                height: s * 0.3,
+                borderWidth: csw,
+                borderColor: color,
+                borderRadius: 2,
+                marginTop: 2,
+                justifyContent: 'center',
+                paddingHorizontal: 2,
+              }}>
+              <View style={{ width: '70%', height: csw, backgroundColor: color, borderRadius: 1 }} />
+            </View>
+          </View>
+        </View>
+      );
+    }
+
+    case 'wash-iron': {
+      const csw = Math.max(1, s <= 24 ? 1.2 : 1.5);
+      return (
+        <View
+          style={{
+            width: s * 0.96,
+            height: s * 0.86,
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+          }}>
+          {/* Left: Washing Machine */}
+          <View
+            style={{
+              width: s * 0.46,
+              height: s * 0.84,
+              borderWidth: csw,
+              borderColor: color,
+              borderRadius: 3,
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              paddingVertical: 2,
+            }}>
+            <View style={{ flexDirection: 'row', width: '80%', justifyContent: 'flex-end', gap: 2 }}>
+              <View style={{ width: csw * 1.2, height: csw * 1.2, borderRadius: 99, backgroundColor: color }} />
+              <View style={{ width: csw * 1.2, height: csw * 1.2, borderRadius: 99, backgroundColor: color }} />
+            </View>
+            <View
+              style={{
+                width: s * 0.28,
+                height: s * 0.28,
+                borderRadius: 99,
+                borderWidth: csw,
+                borderColor: color,
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}>
+              <View
+                style={{
+                  width: s * 0.14,
+                  height: s * 0.07,
+                  borderBottomWidth: csw,
+                  borderColor: color,
+                  borderRadius: 99,
+                }}
+              />
+            </View>
+            <View style={{ height: 1 }} />
+          </View>
+
+          {/* Right: Steam Iron */}
+          <View
+            style={{
+              width: s * 0.46,
+              height: s * 0.74,
+              justifyContent: 'flex-end',
+              alignItems: 'center',
+            }}>
+            {/* Iron handle */}
+            <View
+              style={{
+                width: s * 0.32,
+                height: s * 0.18,
+                borderTopWidth: csw,
+                borderLeftWidth: csw,
+                borderRightWidth: csw,
+                borderColor: color,
+                borderTopLeftRadius: 4,
+                borderTopRightRadius: 2,
+                marginBottom: -1,
+              }}
+            />
+            {/* Iron soleplate */}
+            <View
+              style={{
+                width: s * 0.46,
+                height: s * 0.28,
+                borderWidth: csw,
+                borderColor: color,
+                borderTopRightRadius: s * 0.14,
+                borderBottomLeftRadius: 2,
+                borderBottomRightRadius: 2,
+              }}
+            />
+            {/* Steam dots */}
+            <View style={{ flexDirection: 'row', justifyContent: 'space-around', width: '80%', marginTop: 2 }}>
+              <View style={{ width: csw * 1.1, height: csw * 1.1, borderRadius: 99, backgroundColor: color }} />
+              <View style={{ width: csw * 1.1, height: csw * 1.1, borderRadius: 99, backgroundColor: color }} />
+              <View style={{ width: csw * 1.1, height: csw * 1.1, borderRadius: 99, backgroundColor: color }} />
+            </View>
+          </View>
+        </View>
+      );
+    }
+
     case 'dry':
       return (
         <View
@@ -844,10 +1065,34 @@ function renderNativeIcon(
 
     case 'fold':
       return (
-        <View style={{ width: s * 0.8, height: s * 0.65, justifyContent: 'space-around' }}>
-          <View style={{ height: sw, backgroundColor: color, borderRadius: sw / 2, width: '100%' }} />
-          <View style={{ height: sw, backgroundColor: color, borderRadius: sw / 2, width: '85%', alignSelf: 'center' }} />
-          <View style={{ height: sw, backgroundColor: color, borderRadius: sw / 2, width: '100%' }} />
+        <View style={{ width: s * 0.8, height: s * 0.72, justifyContent: 'center', alignItems: 'center' }}>
+          {/* Top folded laundry item */}
+          <View
+            style={{
+              width: s * 0.76,
+              height: s * 0.28,
+              borderWidth: sw,
+              borderColor: color,
+              borderRadius: s * 0.08,
+              justifyContent: 'center',
+              paddingHorizontal: s * 0.08,
+            }}>
+            <View style={{ width: '45%', height: sw, backgroundColor: color, borderRadius: 1 }} />
+          </View>
+          {/* Bottom folded laundry item */}
+          <View
+            style={{
+              width: s * 0.76,
+              height: s * 0.28,
+              borderWidth: sw,
+              borderColor: color,
+              borderRadius: s * 0.08,
+              marginTop: s * 0.04,
+              justifyContent: 'center',
+              paddingHorizontal: s * 0.08,
+            }}>
+            <View style={{ width: '60%', height: sw, backgroundColor: color, borderRadius: 1 }} />
+          </View>
         </View>
       );
 
@@ -1287,42 +1532,110 @@ function renderNativeIcon(
 
     case 'hanger':
       return (
-        <View style={{ width: s * 0.8, height: s * 0.65, alignItems: 'center' }}>
+        <View style={{ width: s * 0.85, height: s * 0.65, alignItems: 'center', justifyContent: 'flex-start' }}>
+          {/* Top Hook */}
           <View
             style={{
-              width: s * 0.2,
-              height: s * 0.2,
-              borderWidth: sw,
-              borderBottomWidth: 0,
-              borderRightWidth: 0,
+              width: s * 0.22,
+              height: s * 0.22,
+              borderTopWidth: sw,
+              borderLeftWidth: sw,
               borderColor: color,
-              borderRadius: s * 0.1,
+              borderTopLeftRadius: s * 0.11,
+              borderTopRightRadius: s * 0.11,
+              marginBottom: -sw,
             }}
           />
+          {/* Triangular wireframe */}
+          <View style={{ width: s * 0.82, height: s * 0.4, alignItems: 'center', justifyContent: 'flex-end', overflow: 'hidden' }}>
+            <View
+              style={{
+                position: 'absolute',
+                top: s * 0.14,
+                left: -s * 0.02,
+                width: s * 0.48,
+                height: sw,
+                backgroundColor: color,
+                transform: [{ rotate: '27deg' }],
+              }}
+            />
+            <View
+              style={{
+                position: 'absolute',
+                top: s * 0.14,
+                right: -s * 0.02,
+                width: s * 0.48,
+                height: sw,
+                backgroundColor: color,
+                transform: [{ rotate: '-27deg' }],
+              }}
+            />
+            <View style={{ width: '100%', height: sw, backgroundColor: color }} />
+          </View>
+        </View>
+      );
+
+    case 'shirt':
+      return (
+        <View style={{ width: s * 0.82, height: s * 0.82, alignItems: 'center', justifyContent: 'center' }}>
+          {/* Torso body */}
           <View
             style={{
-              width: 0,
-              height: 0,
-              borderLeftWidth: s * 0.38,
-              borderRightWidth: s * 0.38,
-              borderBottomWidth: s * 0.35,
-              borderLeftColor: 'transparent',
-              borderRightColor: 'transparent',
-              borderBottomColor: color,
+              width: s * 0.52,
+              height: s * 0.65,
+              borderWidth: sw,
+              borderColor: color,
+              borderTopWidth: 0,
+              borderBottomLeftRadius: 3,
+              borderBottomRightRadius: 3,
+              marginTop: s * 0.14,
             }}
           />
+          {/* Collar / V-neck */}
           <View
             style={{
               position: 'absolute',
-              top: s * 0.22,
-              width: 0,
-              height: 0,
-              borderLeftWidth: s * 0.38 - sw * 1.5,
-              borderRightWidth: s * 0.38 - sw * 1.5,
-              borderBottomWidth: s * 0.35 - sw * 1.5,
-              borderLeftColor: 'transparent',
-              borderRightColor: 'transparent',
-              borderBottomColor: '#FFF',
+              top: s * 0.03,
+              width: s * 0.28,
+              height: s * 0.16,
+              borderBottomWidth: sw,
+              borderLeftWidth: sw,
+              borderRightWidth: sw,
+              borderColor: color,
+              borderBottomLeftRadius: s * 0.14,
+              borderBottomRightRadius: s * 0.14,
+            }}
+          />
+          {/* Left shoulder & sleeve */}
+          <View
+            style={{
+              position: 'absolute',
+              top: s * 0.08,
+              left: 0,
+              width: s * 0.22,
+              height: s * 0.32,
+              borderTopWidth: sw,
+              borderLeftWidth: sw,
+              borderBottomWidth: sw,
+              borderColor: color,
+              borderTopLeftRadius: 3,
+              transform: [{ rotate: '15deg' }],
+            }}
+          />
+          {/* Right shoulder & sleeve */}
+          <View
+            style={{
+              position: 'absolute',
+              top: s * 0.08,
+              right: 0,
+              width: s * 0.22,
+              height: s * 0.32,
+              borderTopWidth: sw,
+              borderRightWidth: sw,
+              borderBottomWidth: sw,
+              borderColor: color,
+              borderTopRightRadius: 3,
+              transform: [{ rotate: '-15deg' }],
             }}
           />
         </View>
@@ -1330,39 +1643,94 @@ function renderNativeIcon(
 
     case 'shoe':
       return (
-        <View style={{ width: s * 0.8, height: s * 0.45, justifyContent: 'flex-end' }}>
+        <View style={{ width: s * 0.85, height: s * 0.65, justifyContent: 'center', alignItems: 'center' }}>
+          {/* Shoe upper & collar */}
           <View
             style={{
-              width: s * 0.78,
-              height: s * 0.35,
+              width: s * 0.8,
+              height: s * 0.38,
               borderWidth: sw,
               borderColor: color,
-              borderBottomLeftRadius: 4,
-              borderBottomRightRadius: 6,
-              borderTopRightRadius: 8,
-              borderTopLeftRadius: 2,
-            }}
-          />
+              borderTopLeftRadius: s * 0.18,
+              borderTopRightRadius: s * 0.12,
+              borderBottomLeftRadius: 3,
+              borderBottomRightRadius: s * 0.16,
+              borderBottomWidth: sw * 1.5,
+              justifyContent: 'space-between',
+              paddingHorizontal: s * 0.06,
+              paddingTop: s * 0.04,
+            }}>
+            {/* Sneaker collar notch */}
+            <View style={{ width: s * 0.24, height: sw, backgroundColor: color, borderRadius: 1 }} />
+            {/* Outsole tread line */}
+            <View style={{ width: '100%', height: sw * 0.8, backgroundColor: color, marginBottom: 1 }} />
+          </View>
         </View>
       );
 
     case 'bed':
       return (
-        <View style={{ width: s * 0.75, height: s * 0.6, justifyContent: 'space-between' }}>
+        <View style={{ width: s * 0.82, height: s * 0.65, justifyContent: 'center' }}>
+          {/* Headboard post (tall on left) */}
           <View
             style={{
-              width: '100%',
-              height: s * 0.35,
-              borderWidth: sw,
-              borderColor: color,
-              borderTopLeftRadius: 3,
-              borderTopRightRadius: 3,
+              position: 'absolute',
+              left: 0,
+              top: 0,
+              width: sw,
+              height: s * 0.62,
+              backgroundColor: color,
+              borderRadius: sw / 2,
             }}
           />
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-            <View style={{ width: sw, height: s * 0.18, backgroundColor: color }} />
-            <View style={{ width: sw, height: s * 0.18, backgroundColor: color }} />
-          </View>
+          {/* Footboard post (shorter on right) */}
+          <View
+            style={{
+              position: 'absolute',
+              right: 0,
+              top: s * 0.22,
+              width: sw,
+              height: s * 0.4,
+              backgroundColor: color,
+              borderRadius: sw / 2,
+            }}
+          />
+          {/* Mattress horizontal rail */}
+          <View
+            style={{
+              position: 'absolute',
+              left: sw,
+              right: sw,
+              top: s * 0.38,
+              height: sw,
+              backgroundColor: color,
+            }}
+          />
+          {/* Pillow resting on left of bed */}
+          <View
+            style={{
+              position: 'absolute',
+              left: s * 0.08,
+              top: s * 0.2,
+              width: s * 0.22,
+              height: s * 0.16,
+              borderWidth: sw,
+              borderColor: color,
+              borderRadius: 3,
+            }}
+          />
+          {/* Bed blanket fold */}
+          <View
+            style={{
+              position: 'absolute',
+              left: s * 0.36,
+              right: sw,
+              top: s * 0.24,
+              height: s * 0.14,
+              borderTopWidth: sw,
+              borderColor: color,
+            }}
+          />
         </View>
       );
 
@@ -1420,11 +1788,27 @@ function renderNativeIcon(
     case 'back':
       return renderNativeIcon('arrow-left', size, color, strokeWidth);
 
-    case 'chevron-down':
-      return renderNativeIcon('arrow-down', size, color, strokeWidth);
+    case 'washing-machine':
+      return renderNativeIcon('wash', size, color, strokeWidth);
 
-    case 'chevron-up':
-      return renderNativeIcon('arrow-up', size, color, strokeWidth);
+    case 'triangle-alert':
+      return renderNativeIcon('alert', size, color, strokeWidth);
+
+    case 'user-circle':
+      return (
+        <View
+          style={{
+            width: s * 0.85,
+            height: s * 0.85,
+            borderRadius: 99,
+            borderWidth: sw,
+            borderColor: color,
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}>
+          {renderNativeIcon('user', s * 0.65, color, sw)}
+        </View>
+      );
 
     case 'x':
       return renderNativeIcon('close', size, color, strokeWidth);
@@ -1449,7 +1833,10 @@ function renderNativeIcon(
       return renderNativeIcon('truck', size, color, strokeWidth);
 
     case 'orders':
-      return renderNativeIcon('box', size, color, strokeWidth);
+      return renderNativeIcon('clipboard-list', size, color, strokeWidth);
+
+    case 'driver-arrived':
+      return renderNativeIcon('truck', size, color, strokeWidth);
 
     case 'wallet':
       return renderNativeIcon('card', size, color, strokeWidth);

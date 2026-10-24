@@ -12,6 +12,7 @@ import {SafeAreaView} from 'react-native-safe-area-context';
 import {AdminDashboard, getAdminDashboard} from '../services/adminDashboardApi';
 import AppIcon, {IconName} from '../components/AppIcon';
 import {useAdminRealtime} from '../hooks/useRealtime';
+import {useAdminUpdateIndicators} from '../services/adminUpdateIndicators';
 
 type Props = {
   accessToken: string;
@@ -32,6 +33,7 @@ type ActionCardProps = {
   title: string;
   description: string;
   badge?: string | number;
+  hasUpdate?: boolean;
   onPress?: () => void;
   accessibilityLabel: string;
   accessibilityHint?: string;
@@ -42,6 +44,7 @@ function ActionCard({
   title,
   description,
   badge,
+  hasUpdate,
   onPress,
   accessibilityLabel,
   accessibilityHint,
@@ -62,6 +65,13 @@ function ActionCard({
       <View style={styles.actionCardContent}>
         <View style={styles.actionCardTitleRow}>
           <Text style={styles.actionCardTitle}>{title}</Text>
+          {hasUpdate ? (
+            <View
+              style={styles.greenUpdateDot}
+              accessibilityLabel="New update available"
+              testID={`green-dot-${title.toLowerCase().replace(/[^a-z0-9]/g, '-')}`}
+            />
+          ) : null}
           {badge !== undefined && badge !== 0 && (
             <View style={styles.actionBadge}>
               <Text style={styles.actionBadgeText}>{badge}</Text>
@@ -105,6 +115,11 @@ export default function AdminDashboardScreen({
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [showAllStatuses, setShowAllStatuses] = useState(false);
+
+  const {indicators, acknowledgeSection} = useAdminUpdateIndicators(
+    accessToken,
+    !!accessToken,
+  );
 
   const load = useCallback(
     async (refresh = false) => {
@@ -421,7 +436,15 @@ export default function AdminDashboardScreen({
             iconName="box"
             title="Orders & Customers"
             description="Search customers, orders and QR codes"
-            onPress={onCustomers}
+            hasUpdate={indicators.customers}
+            onPress={
+              onCustomers
+                ? () => {
+                    acknowledgeSection('customers');
+                    onCustomers();
+                  }
+                : undefined
+            }
             accessibilityLabel="Open Orders and Customers"
             accessibilityHint="Search customer orders, QR codes and history"
           />
@@ -429,7 +452,15 @@ export default function AdminDashboardScreen({
             iconName="truck"
             title="Driver Dispatch"
             description="Available jobs, assignments and live driver activity"
-            onPress={onAssignments}
+            hasUpdate={indicators.assignments}
+            onPress={
+              onAssignments
+                ? () => {
+                    acknowledgeSection('assignments');
+                    onAssignments();
+                  }
+                : undefined
+            }
             accessibilityLabel="Open Driver Dispatch"
             accessibilityHint="Review available jobs, claiming and driver dispatch"
           />
@@ -437,7 +468,15 @@ export default function AdminDashboardScreen({
             iconName="facility"
             title="Facility Operations"
             description="Incoming orders, processing, QC and handovers"
-            onPress={onFacilities}
+            hasUpdate={indicators.facilities}
+            onPress={
+              onFacilities
+                ? () => {
+                    acknowledgeSection('facilities');
+                    onFacilities();
+                  }
+                : undefined
+            }
             accessibilityLabel="Open Facility Operations"
             accessibilityHint="Monitor facility processing, intake and delivery handovers"
           />
@@ -445,7 +484,15 @@ export default function AdminDashboardScreen({
             iconName="shield"
             title="Claims & Refunds"
             description="Resolve customer issues and review claims"
-            onPress={onIssues}
+            hasUpdate={indicators.issues}
+            onPress={
+              onIssues
+                ? () => {
+                    acknowledgeSection('issues');
+                    onIssues();
+                  }
+                : undefined
+            }
             accessibilityLabel="Open Claims and Refunds"
             accessibilityHint="Review active claims and refund decisions"
           />
@@ -460,7 +507,15 @@ export default function AdminDashboardScreen({
             iconName="users"
             title="Staff Management"
             description="Drivers and facility teams"
-            onPress={onStaff}
+            hasUpdate={indicators.staff}
+            onPress={
+              onStaff
+                ? () => {
+                    acknowledgeSection('staff');
+                    onStaff();
+                  }
+                : undefined
+            }
             accessibilityLabel="Open Staff Management"
             accessibilityHint="Manage driver accounts and facility staff assignments"
           />
@@ -468,7 +523,15 @@ export default function AdminDashboardScreen({
             iconName="tag"
             title="Services & Pricing"
             description="Catalogue and pricing policy"
-            onPress={onCatalogue}
+            hasUpdate={indicators.catalogue}
+            onPress={
+              onCatalogue
+                ? () => {
+                    acknowledgeSection('catalogue');
+                    onCatalogue();
+                  }
+                : undefined
+            }
             accessibilityLabel="Open Services and Pricing"
             accessibilityHint="Configure services, garment categories and pricing tiers"
           />
@@ -476,7 +539,15 @@ export default function AdminDashboardScreen({
             iconName="location"
             title="Laundry Locations"
             description="Facilities, coordinates and service radius"
-            onPress={onLocations}
+            hasUpdate={indicators.locations}
+            onPress={
+              onLocations
+                ? () => {
+                    acknowledgeSection('locations');
+                    onLocations();
+                  }
+                : undefined
+            }
             accessibilityLabel="Open Laundry Locations"
             accessibilityHint="Manage facilities, coordinates and geographic service zones"
           />
@@ -484,7 +555,15 @@ export default function AdminDashboardScreen({
             iconName="sparkles"
             title="Growth Programs"
             description="Coupons and promotional offers"
-            onPress={onGrowth}
+            hasUpdate={indicators.growth}
+            onPress={
+              onGrowth
+                ? () => {
+                    acknowledgeSection('growth');
+                    onGrowth();
+                  }
+                : undefined
+            }
             accessibilityLabel="Open Growth Programs"
             accessibilityHint="Manage discounts, loyalty points and promotional packages"
           />
@@ -492,66 +571,70 @@ export default function AdminDashboardScreen({
             iconName="chart"
             title="Analytics & Reports"
             description="Performance, trends and action history"
-            onPress={onReports}
+            hasUpdate={indicators.reports}
+            onPress={
+              onReports
+                ? () => {
+                    acknowledgeSection('reports');
+                    onReports();
+                  }
+                : undefined
+            }
             accessibilityLabel="Open Analytics and Reports"
             accessibilityHint="View gross revenue, machine utilization and audit trails"
           />
         </View>
 
         {/* ORDER FLOW SECTION */}
-        {dashboard ? (
-          <>
-            <View style={styles.sectionHeaderRow}>
-              <Text style={styles.sectionTitle}>ORDER FLOW</Text>
+        <View style={styles.sectionHeaderRow}>
+          <Text style={styles.sectionTitle}>ORDER FLOW</Text>
+        </View>
+        <View style={styles.orderFlowGrid}>
+          <View style={styles.orderFlowCard}>
+            <View style={styles.orderFlowHeader}>
+              <Text style={styles.orderFlowTitle}>Pickup</Text>
+              <Text style={styles.orderFlowCount}>{orderFlow.pickup}</Text>
             </View>
-            <View style={styles.orderFlowGrid}>
-              <View style={styles.orderFlowCard}>
-                <View style={styles.orderFlowHeader}>
-                  <Text style={styles.orderFlowTitle}>Pickup</Text>
-                  <Text style={styles.orderFlowCount}>{orderFlow.pickup}</Text>
-                </View>
-                <Text style={styles.orderFlowDesc}>Awaiting or in transit to facility</Text>
-              </View>
-              <View style={styles.orderFlowCard}>
-                <View style={styles.orderFlowHeader}>
-                  <Text style={styles.orderFlowTitle}>Facility</Text>
-                  <Text style={styles.orderFlowCount}>{orderFlow.facility}</Text>
-                </View>
-                <Text style={styles.orderFlowDesc}>Washing, drying, QC or packing</Text>
-              </View>
-              <View style={styles.orderFlowCard}>
-                <View style={styles.orderFlowHeader}>
-                  <Text style={styles.orderFlowTitle}>Delivery</Text>
-                  <Text style={styles.orderFlowCount}>{orderFlow.delivery}</Text>
-                </View>
-                <Text style={styles.orderFlowDesc}>En route to customer or OTP pending</Text>
-              </View>
+            <Text style={styles.orderFlowDesc}>Awaiting or in transit to facility</Text>
+          </View>
+          <View style={styles.orderFlowCard}>
+            <View style={styles.orderFlowHeader}>
+              <Text style={styles.orderFlowTitle}>Facility</Text>
+              <Text style={styles.orderFlowCount}>{orderFlow.facility}</Text>
             </View>
+            <Text style={styles.orderFlowDesc}>Washing, drying, QC or packing</Text>
+          </View>
+          <View style={styles.orderFlowCard}>
+            <View style={styles.orderFlowHeader}>
+              <Text style={styles.orderFlowTitle}>Delivery</Text>
+              <Text style={styles.orderFlowCount}>{orderFlow.delivery}</Text>
+            </View>
+            <Text style={styles.orderFlowDesc}>En route to customer or OTP pending</Text>
+          </View>
+        </View>
 
-            <TouchableOpacity
-              accessibilityRole="button"
-              style={styles.expandStatusesToggle}
-              onPress={() => setShowAllStatuses(prev => !prev)}>
-              <Text style={styles.expandStatusesText}>
-                {showAllStatuses ? 'Hide detailed status list' : 'View all order statuses'}
-              </Text>
-            </TouchableOpacity>
+        <TouchableOpacity
+          accessibilityRole="button"
+          style={styles.expandStatusesToggle}
+          onPress={() => setShowAllStatuses(prev => !prev)}>
+          <Text style={styles.expandStatusesText}>
+            {showAllStatuses ? 'Hide detailed status list' : 'View all order statuses'}
+          </Text>
+        </TouchableOpacity>
 
-            {showAllStatuses ? (
-              <View style={styles.statusCard}>
-                {dashboard.ordersByStatus.length > 0 ? (
-                  dashboard.ordersByStatus.map(item => (
-                    <View key={item.status} style={styles.statusRow}>
-                      <Text style={styles.statusName}>{statusLabel(item.status)}</Text>
-                      <Text style={styles.statusCount}>{item.count}</Text>
-                    </View>
-                  ))
-                ) : (
-                  <Text style={styles.noOrdersText}>No orders tracked</Text>
-                )}
-              </View>
-            ) : null}
-          </>
+        {showAllStatuses ? (
+          <View style={styles.statusCard}>
+            {dashboard?.ordersByStatus && dashboard.ordersByStatus.length > 0 ? (
+              dashboard.ordersByStatus.map(item => (
+                <View key={item.status} style={styles.statusRow}>
+                  <Text style={styles.statusName}>{statusLabel(item.status)}</Text>
+                  <Text style={styles.statusCount}>{item.count}</Text>
+                </View>
+              ))
+            ) : (
+              <Text style={styles.noOrdersText}>No orders tracked</Text>
+            )}
+          </View>
         ) : null}
 
         {/* LOGOUT ACTION */}
@@ -850,6 +933,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+  },
+  greenUpdateDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#10B981',
+    borderWidth: 1,
+    borderColor: '#059669',
   },
   actionCardTitle: {
     fontSize: 15,

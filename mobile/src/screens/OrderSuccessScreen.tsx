@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import {
   Animated,
+  BackHandler,
   Platform,
   ScrollView,
   StatusBar,
@@ -51,6 +52,15 @@ export default function OrderSuccessScreen({
       }),
     ]).start();
   }, [scaleAnim, fadeAnim, slideAnim]);
+
+  useEffect(() => {
+    const onBackPress = () => {
+      onBackHome();
+      return true;
+    };
+    const sub = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+    return () => sub.remove();
+  }, [onBackHome]);
 
   return (
     <SafeAreaView style={styles.container}>

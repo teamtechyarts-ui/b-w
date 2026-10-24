@@ -1,142 +1,85 @@
-import {
-  realtimeService,
-  RealtimeEventPayload,
-  RealtimeEventType,
-} from './realtimeService';
+import {realtimeService, resolveSocketUrl} from './realtimeService';
 
-describe('RealtimeService Mobile Integration & Performance Tests', () => {
-  test('subscribes to role channels and dispatches events to registered listeners', () => {
-    const receivedCustomerEvents: RealtimeEventPayload[] = [];
-    const receivedDriverEvents: RealtimeEventPayload[] = [];
-    const receivedAdminEvents: RealtimeEventPayload[] = [];
+describe('RealtimeService Mobile Client', () => {
+  beforeEach(() => {
+    realtimeService.disconnect();
+  });
 
-    const unsubscribeCustomer = realtimeService.registerLocalListener(
-      'customer:cust_123',
-      (e) => receivedCustomerEvents.push(e),
+  it('resolves socket URL from environment without v1 prefix', () => {
+    const url = resolveSocketUrl();
+    expect(url).not.toMatch(/\/v1$/);
+    expect(url.length).toBeGreaterThan(0);
+  });
+
+  it('maintains a single shared socket instance', async () => {
+    const socket1 = await realtimeService.getOrInitSocket('test-token-1');
+    const socket2 = await realtimeService.getOrInitSocket('test-token-1');
+    expect(socket1).toBe(socket2);
+  });
+
+  it('routes incoming order events to order and orders:all channels', async () => {
+    const orderEvents: any[] = [];
+    const allOrdersEvents: any[] = [];
+
+    const unsubOrder = await realtimeService.subscribeToChannel(
+      'order:order-123',
+      evt => orderEvents.push(evt),
+      'token',
+    );
+    const unsubAll = await realtimeService.subscribeToChannel(
+      'orders:all',
+      evt => allOrdersEvents.push(evt),
+      'token',
     );
 
-    const unsubscribeDriver = realtimeService.registerLocalListener(
-      'driver:available',
-      (e) => receivedDriverEvents.push(e),
+    realtimeService.publishLocalEvent('order:order-123', {
+      eventType: 'order.updated',
+      entityId: 'order-123',
+      orderId: 'order-123',
+      status: 'in_transit',
+      timestamp: new Date().toISOString(),
+    });
+
+    expect(orderEvents.length).toBe(1);
+    expect(orderEvents[0].status).toBe('in_transit');
+
+    unsubOrder();
+    unsubAll();
+  });
+
+  it('deduplicates duplicate events within sliding window', async () => {
+    const received: any[] = [];
+    const unsub = await realtimeService.subscribeToChannel(
+      'orders:all',
+      evt => received.push(evt),
+      'token',
     );
 
-    const unsubscribeAdmin = realtimeService.registerLocalListener(
-      'admin:operations',
-      (e) => receivedAdminEvents.push(e),
-    );
-
-    const testEvent: RealtimeEventPayload = {
-      eventType: 'ORDER_STATUS_CHANGED',
-      entityId: 'ord_999',
-      orderId: 'ord_999',
+    const event = {
+      eventId: 'evt-unique-99',
+      eventType: 'ORDER_STATUS_CHANGED' as const,
+      entityId: 'order-1',
+      orderId: 'order-1',
       status: 'confirmed',
       timestamp: new Date().toISOString(),
     };
 
-    realtimeService.emitLocalEvent('customer:cust_123', testEvent);
-    expect(receivedCustomerEvents).toHaveLength(1);
-    expect(receivedCustomerEvents[0].status).toBe('confirmed');
-    expect(receivedDriverEvents).toHaveLength(0);
+    // Simulate socket delivering the same event twice
+    (realtimeService as any).dispatchIncomingEvent('ORDER_STATUS_CHANGED', event);
+    (realtimeService as any).dispatchIncomingEvent('ORDER_STATUS_CHANGED', event);
 
-    const jobEvent: RealtimeEventPayload = {
-      eventType: 'JOB_AVAILABLE',
-      entityId: 'ord_999',
-      orderId: 'ord_999',
-      status: 'confirmed',
-      timestamp: new Date().toISOString(),
-    };
-
-    realtimeService.emitLocalEvent('driver:available', jobEvent);
-    expect(receivedDriverEvents).toHaveLength(1);
-    expect(receivedDriverEvents[0].eventType).toBe('JOB_AVAILABLE');
-
-    unsubscribeCustomer();
-    unsubscribeDriver();
-    unsubscribeAdmin();
-  });
-
-  test('measures local UI propagation latency under 500 ms budget (strictly < 100 ms target)', () => {
-    const start = performance.now();
-    let end = 0;
-
-    const unsubscribe = realtimeService.registerLocalListener('order:ord_benchmark', (e) => {
-      end = performance.now();
-      expect(e.status).toBe('in_transit_to_facility');
-    });
-
-    realtimeService.emitLocalEvent('order:ord_benchmark', {
-      eventType: 'ORDER_STATUS_CHANGED',
-      entityId: 'ord_benchmark',
-      orderId: 'ord_benchmark',
-      status: 'in_transit_to_facility',
-      timestamp: new Date().toISOString(),
-    });
-
-    const elapsedMs = end - start;
-    expect(elapsedMs).toBeLessThan(100); // Sub-100ms local event-to-handler execution
-    unsubscribe();
-  });
-
-  test('handles driver claim conflict notifications instantly', () => {
-    const driver1Events: RealtimeEventPayload[] = [];
-    const driver2Events: RealtimeEventPayload[] = [];
-
-    const unsub1 = realtimeService.registerLocalListener('driver:available', (e) =>
-      driver1Events.push(e),
-    );
-    const unsub2 = realtimeService.registerLocalListener('driver:available', (e) =>
-      driver2Events.push(e),
-    );
-
-    // Broadcast that job was claimed by driver 1
-    realtimeService.emitLocalEvent('driver:available', {
-      eventType: 'JOB_CLAIMED',
-      entityId: 'ord_compete_1',
-      orderId: 'ord_compete_1',
-      driverId: 'drv_1',
-      timestamp: new Date().toISOString(),
-    });
-
-    expect(driver1Events).toHaveLength(1);
-    expect(driver2Events).toHaveLength(1);
-    expect(driver2Events[0].eventType).toBe('JOB_CLAIMED');
-    expect(driver2Events[0].driverId).toBe('drv_1');
-
-    unsub1();
-    unsub2();
-  });
-
-  test('reconciliation listener triggers on foreground / reconnect', () => {
-    let reconcileCalled = false;
-    const unsub = realtimeService.onReconnect(() => {
-      reconcileCalled = true;
-    });
-
-    // Simulate foreground reconciliation trigger
-    realtimeService.triggerReconciliation();
-    expect(reconcileCalled).toBe(true);
+    expect(received.length).toBe(1);
 
     unsub();
   });
 
-  test('deduplicates foreground reconciliation notifications when a listener is registered on multiple channels', () => {
-    let callCount = 0;
-    const multiChannelListener = (event: RealtimeEventPayload) => {
-      if (event.eventType === 'RECONNECT_RECONCILE') {
-        callCount += 1;
-      }
-    };
+  it('cleans up channels and tokens on disconnect', async () => {
+    await realtimeService.subscribeToChannel('customer:cust-1', () => {}, 'token');
+    expect((realtimeService as any).channels.size).toBe(1);
 
-    // Register same callback on 2 different channels (e.g. orders:all and customer:456)
-    const unsub1 = realtimeService.registerLocalListener('orders:all', multiChannelListener);
-    const unsub2 = realtimeService.registerLocalListener('customer:456', multiChannelListener);
+    realtimeService.disconnect();
 
-    realtimeService.triggerReconciliation();
-
-    // Must be invoked exactly once, not twice!
-    expect(callCount).toBe(1);
-
-    unsub1();
-    unsub2();
+    expect((realtimeService as any).channels.size).toBe(0);
+    expect(realtimeService.isConnected()).toBe(false);
   });
 });

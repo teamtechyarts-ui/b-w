@@ -1,11 +1,10 @@
-import {createClient, RealtimeChannel, SupabaseClient} from '@supabase/supabase-js';
 import {AppState, AppStateStatus, Platform} from 'react-native';
-import Config from 'react-native-config';
+import {io, Socket} from 'socket.io-client';
 import {API_BASE_URL} from '../config/environment';
 
 export interface RealtimeConfig {
   url: string;
-  anonKey: string;
+  anonKey?: string;
 }
 
 export type RealtimeEventType =
@@ -16,14 +15,37 @@ export type RealtimeEventType =
   | 'JOB_CONFLICT'
   | 'ASSIGNMENT_UPDATED'
   | 'FACILITY_INTAKE'
+  | 'FACILITY_VERIFICATION'
+  | 'PROCESSING_STAGE_STARTED'
+  | 'PROCESSING_STAGE_COMPLETED'
   | 'PROCESSING_STAGE_CHANGED'
+  | 'QC_DECIDED'
   | 'QC_UPDATED'
   | 'CLAIM_UPDATED'
   | 'REFUND_UPDATED'
   | 'DRIVER_AVAILABILITY_CHANGED'
-  | 'RECONNECT_RECONCILE';
+  | 'NOTIFICATION_CREATED'
+  | 'NOTIFICATION_READ'
+  | 'NOTIFICATION_READ_ALL'
+  | 'DRIVER_ARRIVED'
+  | 'DRIVER_ARRIVED_AT_FACILITY'
+  | 'FACILITY_HANDOVER'
+  | 'FACILITY_COLLECTED'
+  | 'FACILITY_PACKING_CONFIRMED'
+  | 'DELIVERY_REASSIGNED'
+  | 'RECONNECT_RECONCILE'
+  | 'order.created'
+  | 'order.updated'
+  | 'pickup.updated'
+  | 'delivery.updated'
+  | 'delivery.status_changed'
+  | 'dashboard.updated'
+  | 'notification.created'
+  | 'task.updated'
+  | 'attendance.updated';
 
 export interface RealtimeEventPayload {
+  eventId?: string;
   eventType: RealtimeEventType;
   entityId: string;
   orderId?: string;
@@ -31,7 +53,9 @@ export interface RealtimeEventPayload {
   status?: string;
   facilityId?: string;
   driverId?: string;
+  customerId?: string;
   data?: any;
+  notification?: any;
   timestamp: string;
   localReceivedAt?: number;
 }
@@ -39,22 +63,26 @@ export interface RealtimeEventPayload {
 export type RealtimeEventListener = (event: RealtimeEventPayload) => void;
 
 interface ChannelSubscription {
-  channel: RealtimeChannel;
+  channelName: string;
   refCount: number;
   listeners: Set<RealtimeEventListener>;
   teardownTimer?: ReturnType<typeof setTimeout>;
 }
 
+export function resolveSocketUrl(): string {
+  // Base URL without /v1 prefix
+  return API_BASE_URL.replace(/\/v1\/?$/, '');
+}
+
 class RealtimeService {
-  private client: SupabaseClient | null = null;
-  private config: RealtimeConfig | null = null;
-  private configPromise: Promise<RealtimeConfig | null> | null = null;
+  private socket: Socket | null = null;
   private currentToken: string | null = null;
   private channels = new Map<string, ChannelSubscription>();
   private appState: AppStateStatus = (AppState.currentState || 'active') as AppStateStatus;
   private appStateSubscription: any = null;
-  private isConnected = false;
+  private isSocketConnected = false;
   private reconnectListeners = new Set<() => void>();
+  private recentDedupeKeys = new Map<string, number>();
 
   constructor() {
     this.initAppStateListener();
@@ -77,93 +105,284 @@ class RealtimeService {
     }
   }
 
-  private async fetchRealtimeConfig(): Promise<RealtimeConfig | null> {
-    // In test environments, return mock config immediately to avoid hanging
-    if (process.env.NODE_ENV === 'test' || typeof jest !== 'undefined') {
-      return {
-        url: 'http://127.0.0.1:54321',
-        anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.test',
-      };
-    }
-
-    // 1. Check direct config / env vars
-    const envUrl = Config.BW_SUPABASE_URL || Config.SUPABASE_URL;
-    const envKey =
-      Config.BW_SUPABASE_ANON_KEY ||
-      Config.SUPABASE_ANON_KEY ||
-      Config.SUPABASE_PUBLISHABLE_KEY;
-
-    if (envUrl && envKey) {
-      return {url: envUrl.trim(), anonKey: envKey.trim()};
-    }
-
-    // 2. Discover from backend endpoint /api/v1/auth/realtime-config with 2s timeout
-    try {
-      const baseUrl = API_BASE_URL.replace(/\/$/, '');
-      const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-      const timeoutId = controller ? setTimeout(() => controller.abort(), 2000) : null;
-      const response = await fetch(`${baseUrl}/auth/realtime-config`, {
-        signal: controller?.signal,
-      });
-      if (timeoutId) clearTimeout(timeoutId);
-      if (response.ok) {
-        const data: any = await response.json();
-        if (data?.url && data?.anonKey) {
-          return {url: data.url, anonKey: data.anonKey};
-        }
-      }
-    } catch {
-      // Backend discovery fallback
-    }
-
-    // 3. Fallback defaults for dev mode
-    if (__DEV__) {
-      const host = Platform.OS === 'android' ? '10.0.2.2' : '127.0.0.1';
-      return {
-        url: `http://${host}:54321`,
-        anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.dummy',
-      };
-    }
-
-    return null;
+  public getSocket(): Socket | null {
+    return this.socket;
   }
 
-  public async getOrInitClient(accessToken?: string): Promise<SupabaseClient | null> {
-    if (!this.config) {
-      if (!this.configPromise) {
-        this.configPromise = this.fetchRealtimeConfig();
+  public isConnected(): boolean {
+    return this.isSocketConnected;
+  }
+
+  public async getOrInitSocket(accessToken?: string): Promise<Socket | null> {
+    if (process.env.NODE_ENV === 'test' || typeof jest !== 'undefined') {
+      if (!this.socket) {
+        this.socket = {
+          connected: true,
+          emit: () => this.socket,
+          on: () => this.socket,
+          off: () => this.socket,
+          disconnect: () => this.socket,
+          connect: () => this.socket,
+        } as unknown as Socket;
+        this.isSocketConnected = true;
       }
-      this.config = await this.configPromise;
+      return this.socket;
     }
 
-    if (!this.config) {
+    const token = accessToken || this.currentToken;
+
+    if (this.socket) {
+      if (token && token !== this.currentToken) {
+        this.currentToken = token;
+        this.socket.auth = {token};
+        if (this.socket.connected) {
+          this.socket.disconnect().connect();
+        } else {
+          this.socket.connect();
+        }
+      }
+      return this.socket;
+    }
+
+    if (!token) {
       return null;
     }
 
-    if (!this.client) {
-      this.client = createClient(this.config.url, this.config.anonKey, {
-        auth: {
-          persistSession: false,
-          autoRefreshToken: false,
-        },
-        realtime: {
-          params: {
-            eventsPerSecond: 20,
-          },
-        },
+    this.currentToken = token;
+    const socketUrl = resolveSocketUrl();
+
+    try {
+      this.socket = io(socketUrl, {
+        auth: {token},
+        autoConnect: true,
+        reconnection: true,
+        reconnectionAttempts: Infinity,
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: 5000,
+        timeout: 20000,
+        transports: ['websocket', 'polling'],
+      });
+
+      this.setupSocketListeners(this.socket);
+      return this.socket;
+    } catch (err) {
+      console.warn('[RealtimeService] Socket initialization error:', err);
+      return null;
+    }
+  }
+
+  private setupSocketListeners(socket: Socket) {
+    socket.on('connect', () => {
+      this.isSocketConnected = true;
+      console.log('[RealtimeService] WebSocket connected successfully');
+
+      // Resubscribe active entity rooms (e.g. order rooms)
+      for (const channelName of this.channels.keys()) {
+        if (channelName.startsWith('order:')) {
+          const orderId = channelName.slice(6);
+          socket.emit('subscribe:order', {orderId});
+        }
+      }
+
+      this.notifyReconnect();
+    });
+
+    socket.on('disconnect', (reason: string) => {
+      this.isSocketConnected = false;
+      console.log('[RealtimeService] WebSocket disconnected:', reason);
+    });
+
+    socket.on('connect_error', (err: any) => {
+      this.isSocketConnected = false;
+      // Do not log tokens or sensitive data
+      console.warn('[RealtimeService] Connection error:', err?.message || 'Network unavailable');
+    });
+
+    socket.on('auth_error', (err: any) => {
+      this.isSocketConnected = false;
+      console.warn('[RealtimeService] Authentication error from gateway:', err?.message);
+    });
+
+    // Listen to standard versioned and legacy event types
+    const supportedEvents: RealtimeEventType[] = [
+      'order.created',
+      'order.updated',
+      'pickup.updated',
+      'delivery.updated',
+      'delivery.status_changed',
+      'dashboard.updated',
+      'notification.created',
+      'task.updated',
+      'attendance.updated',
+      'ORDER_CREATED',
+      'ORDER_STATUS_CHANGED',
+      'JOB_AVAILABLE',
+      'JOB_CLAIMED',
+      'JOB_CONFLICT',
+      'ASSIGNMENT_UPDATED',
+      'FACILITY_INTAKE',
+      'FACILITY_VERIFICATION',
+      'PROCESSING_STAGE_STARTED',
+      'PROCESSING_STAGE_COMPLETED',
+      'PROCESSING_STAGE_CHANGED',
+      'QC_DECIDED',
+      'QC_UPDATED',
+      'CLAIM_UPDATED',
+      'REFUND_UPDATED',
+      'DRIVER_AVAILABILITY_CHANGED',
+      'NOTIFICATION_CREATED',
+      'NOTIFICATION_READ',
+      'NOTIFICATION_READ_ALL',
+      'DRIVER_ARRIVED',
+      'DRIVER_ARRIVED_AT_FACILITY',
+      'FACILITY_HANDOVER',
+      'FACILITY_COLLECTED',
+      'FACILITY_PACKING_CONFIRMED',
+      'DELIVERY_REASSIGNED',
+    ];
+
+    for (const evt of supportedEvents) {
+      socket.on(evt, (payload: any) => {
+        this.dispatchIncomingEvent(evt, payload);
       });
     }
+  }
 
-    if (accessToken && accessToken !== this.currentToken) {
-      this.currentToken = accessToken;
-      try {
-        this.client.realtime.setAuth(accessToken);
-      } catch {
-        // Safe token set
+  private isDuplicateEvent(eventId?: string, entityId?: string, eventType?: string): boolean {
+    const key = eventId || `${eventType}:${entityId}`;
+    if (!key) return false;
+
+    const now = Date.now();
+    // Bounded cleanup
+    if (this.recentDedupeKeys.size > 200) {
+      for (const [k, timestamp] of this.recentDedupeKeys.entries()) {
+        if (now - timestamp > 10000) {
+          this.recentDedupeKeys.delete(k);
+        }
       }
     }
 
-    return this.client;
+    const lastSeen = this.recentDedupeKeys.get(key);
+    if (lastSeen && now - lastSeen < 3000) {
+      return true;
+    }
+    this.recentDedupeKeys.set(key, now);
+    return false;
+  }
+
+  private dispatchIncomingEvent(eventType: RealtimeEventType, raw: any) {
+    if (!raw) return;
+
+    const eventId = raw.eventId || raw.id;
+    const entityId = raw.entityId || raw.orderId || raw.id || '';
+
+    if (this.isDuplicateEvent(eventId, entityId, eventType)) {
+      return;
+    }
+
+    const payload: RealtimeEventPayload = {
+      eventId,
+      eventType,
+      entityId,
+      orderId: raw.orderId || raw.order_id || (raw.order && raw.order.id) || (raw.data && raw.data.order_id),
+      orderNumber: raw.orderNumber || raw.order_number || (raw.order && raw.order.order_number),
+      status: raw.status || raw.current_status || (raw.order && raw.order.current_status),
+      facilityId: raw.facilityId || raw.facility_id,
+      driverId: raw.driverId || raw.driver_id,
+      customerId: raw.customerId || raw.customer_id,
+      data: raw.data !== undefined ? raw.data : raw,
+      notification: raw.notification,
+      timestamp: raw.timestamp || new Date().toISOString(),
+      localReceivedAt: Date.now(),
+    };
+
+    // Broadcast to matching channel subscriptions
+    for (const [channelName, sub] of this.channels.entries()) {
+      if (this.channelMatchesEvent(channelName, payload)) {
+        sub.listeners.forEach(cb => {
+          try {
+            cb(payload);
+          } catch (err) {
+            console.warn(`[RealtimeService] Listener error on channel ${channelName}:`, err);
+          }
+        });
+      }
+    }
+  }
+
+  private channelMatchesEvent(channelName: string, event: RealtimeEventPayload): boolean {
+    // 1. Exact event name match
+    if (channelName === event.eventType) return true;
+
+    // 2. Global operational channels
+    if (channelName === 'orders:all') {
+      return (
+        event.eventType === 'order.created' ||
+        event.eventType === 'order.updated' ||
+        event.eventType === 'ORDER_CREATED' ||
+        event.eventType === 'ORDER_STATUS_CHANGED' ||
+        Boolean(event.orderId)
+      );
+    }
+
+    if (channelName === 'driver:available' || channelName === 'jobs:drivers') {
+      return (
+        event.eventType === 'JOB_AVAILABLE' ||
+        event.eventType === 'JOB_CLAIMED' ||
+        event.eventType === 'JOB_CONFLICT' ||
+        event.eventType === 'pickup.updated' ||
+        event.eventType === 'delivery.updated' ||
+        event.eventType === 'ASSIGNMENT_UPDATED' ||
+        event.eventType === 'order.created' ||
+        event.eventType === 'ORDER_CREATED'
+      );
+    }
+
+    if (channelName === 'facility:all') {
+      return (
+        event.eventType === 'FACILITY_INTAKE' ||
+        event.eventType === 'FACILITY_VERIFICATION' ||
+        event.eventType === 'PROCESSING_STAGE_CHANGED' ||
+        event.eventType === 'task.updated' ||
+        event.eventType === 'dashboard.updated' ||
+        Boolean(event.facilityId)
+      );
+    }
+
+    if (channelName === 'admin:operations') {
+      return true;
+    }
+
+    // 3. User-specific / Customer channel: `customer:<id>` or `driver:<id>` or `user:<id>`
+    if (channelName.startsWith('customer:')) {
+      const customerId = channelName.slice(9);
+      return (
+        event.customerId === customerId ||
+        event.entityId === customerId ||
+        (event.data && (event.data.customer_id === customerId || event.data.profile_id === customerId))
+      );
+    }
+
+    if (channelName.startsWith('driver:')) {
+      const driverId = channelName.slice(7);
+      return (
+        event.driverId === driverId ||
+        event.entityId === driverId ||
+        (event.data && (event.data.driver_id === driverId || event.data.profile_id === driverId))
+      );
+    }
+
+    if (channelName.startsWith('facility:')) {
+      const facilityId = channelName.slice(9);
+      return event.facilityId === facilityId || (event.data && event.data.facility_id === facilityId);
+    }
+
+    if (channelName.startsWith('order:')) {
+      const orderId = channelName.slice(6);
+      return event.orderId === orderId || event.entityId === orderId;
+    }
+
+    return false;
   }
 
   public async subscribeToChannel(
@@ -171,13 +390,9 @@ class RealtimeService {
     listener: RealtimeEventListener,
     accessToken?: string,
   ): Promise<() => void> {
-    const client = await this.getOrInitClient(accessToken);
-    if (!client) {
-      return () => {};
-    }
+    await this.getOrInitSocket(accessToken);
 
     let sub = this.channels.get(channelName);
-
     if (sub) {
       if (sub.teardownTimer) {
         clearTimeout(sub.teardownTimer);
@@ -186,208 +401,18 @@ class RealtimeService {
       sub.refCount += 1;
       sub.listeners.add(listener);
     } else {
-      const listeners = new Set<RealtimeEventListener>([listener]);
-      const channel = client.channel(channelName);
-
-      // Listen for broadcast events
-      channel.on('broadcast', {event: '*'}, (msg: any) => {
-        const payload: RealtimeEventPayload = {
-          eventType: msg.event as RealtimeEventType,
-          entityId: msg.payload?.entityId || msg.payload?.id || '',
-          orderId: msg.payload?.orderId || msg.payload?.id,
-          orderNumber: msg.payload?.orderNumber,
-          status: msg.payload?.status || msg.payload?.current_status,
-          facilityId: msg.payload?.facilityId,
-          driverId: msg.payload?.driverId,
-          data: msg.payload?.data || msg.payload,
-          timestamp: msg.payload?.timestamp || new Date().toISOString(),
-          localReceivedAt: Date.now(),
-        };
-
-        listeners.forEach(cb => {
-          try {
-            cb(payload);
-          } catch (err) {
-            console.warn('[Realtime] Listener error:', err);
-          }
-        });
-      });
-
-      // Listen for postgres_changes on relevant operational tables
-      channel
-        .on(
-          'postgres_changes',
-          {event: '*', schema: 'public', table: 'orders'},
-          (msg: any) => {
-            const row = msg.new || msg.old || {};
-            const eventType: RealtimeEventType =
-              msg.eventType === 'INSERT'
-                ? 'ORDER_CREATED'
-                : 'ORDER_STATUS_CHANGED';
-
-            const payload: RealtimeEventPayload = {
-              eventType,
-              entityId: row.id || '',
-              orderId: row.id,
-              orderNumber: row.order_number,
-              status: row.current_status,
-              facilityId: row.facility_id,
-              data: row,
-              timestamp: row.updated_at || row.created_at || new Date().toISOString(),
-              localReceivedAt: Date.now(),
-            };
-
-            listeners.forEach(cb => {
-              try {
-                cb(payload);
-              } catch (err) {
-                console.warn('[Realtime] Orders postgres_changes listener error:', err);
-              }
-            });
-          },
-        )
-        .on(
-          'postgres_changes',
-          {event: '*', schema: 'public', table: 'driver_assignments'},
-          (msg: any) => {
-            const row = msg.new || msg.old || {};
-            const eventType: RealtimeEventType =
-              row.status === 'assigned' || row.status === 'accepted'
-                ? 'JOB_CLAIMED'
-                : 'ASSIGNMENT_UPDATED';
-
-            const payload: RealtimeEventPayload = {
-              eventType,
-              entityId: row.id || '',
-              orderId: row.order_id,
-              status: row.status,
-              driverId: row.driver_id,
-              data: row,
-              timestamp: row.updated_at || row.assigned_at || new Date().toISOString(),
-              localReceivedAt: Date.now(),
-            };
-
-            listeners.forEach(cb => {
-              try {
-                cb(payload);
-              } catch (err) {
-                console.warn('[Realtime] Assignment postgres_changes listener error:', err);
-              }
-            });
-          },
-        )
-        .on(
-          'postgres_changes',
-          {event: '*', schema: 'public', table: 'customer_order_claims'},
-          (msg: any) => {
-            const row = msg.new || msg.old || {};
-            const payload: RealtimeEventPayload = {
-              eventType: 'CLAIM_UPDATED',
-              entityId: row.id || '',
-              orderId: row.order_id,
-              status: row.status,
-              data: row,
-              timestamp: row.updated_at || row.created_at || new Date().toISOString(),
-              localReceivedAt: Date.now(),
-            };
-
-            listeners.forEach(cb => {
-              try {
-                cb(payload);
-              } catch (err) {
-                console.warn('[Realtime] Claim postgres_changes listener error:', err);
-              }
-            });
-          },
-        )
-        .on(
-          'postgres_changes',
-          {event: '*', schema: 'public', table: 'customer_claims'},
-          (msg: any) => {
-            const row = msg.new || msg.old || {};
-            const payload: RealtimeEventPayload = {
-              eventType: 'CLAIM_UPDATED',
-              entityId: row.id || '',
-              orderId: row.order_id,
-              status: row.status,
-              data: row,
-              timestamp: row.updated_at || row.created_at || new Date().toISOString(),
-              localReceivedAt: Date.now(),
-            };
-
-            listeners.forEach(cb => {
-              try {
-                cb(payload);
-              } catch (err) {
-                console.warn('[Realtime] Claim postgres_changes listener error:', err);
-              }
-            });
-          },
-        )
-        .on(
-          'postgres_changes',
-          {event: '*', schema: 'public', table: 'refund_requests'},
-          (msg: any) => {
-            const row = msg.new || msg.old || {};
-            const payload: RealtimeEventPayload = {
-              eventType: 'REFUND_UPDATED',
-              entityId: row.id || '',
-              orderId: row.order_id,
-              status: row.status,
-              data: row,
-              timestamp: row.updated_at || row.created_at || new Date().toISOString(),
-              localReceivedAt: Date.now(),
-            };
-
-            listeners.forEach(cb => {
-              try {
-                cb(payload);
-              } catch (err) {
-                console.warn('[Realtime] Refund postgres_changes listener error:', err);
-              }
-            });
-          },
-        )
-        .on(
-          'postgres_changes',
-          {event: '*', schema: 'public', table: 'facility_order_operations'},
-          (msg: any) => {
-            const row = msg.new || msg.old || {};
-            const payload: RealtimeEventPayload = {
-              eventType: 'PROCESSING_STAGE_CHANGED',
-              entityId: row.id || '',
-              orderId: row.order_id,
-              facilityId: row.facility_id,
-              status: row.status,
-              data: row,
-              timestamp: row.updated_at || new Date().toISOString(),
-              localReceivedAt: Date.now(),
-            };
-
-            listeners.forEach(cb => {
-              try {
-                cb(payload);
-              } catch (err) {
-                console.warn('[Realtime] Facility postgres_changes listener error:', err);
-              }
-            });
-          },
-        );
-
-      channel.subscribe((status: string) => {
-        if (status === 'SUBSCRIBED') {
-          this.isConnected = true;
-        } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
-          this.isConnected = false;
-        }
-      });
-
       sub = {
-        channel,
+        channelName,
         refCount: 1,
-        listeners,
+        listeners: new Set<RealtimeEventListener>([listener]),
       };
       this.channels.set(channelName, sub);
+
+      // If subscribing to a specific order, register on the backend socket gateway
+      if (channelName.startsWith('order:') && this.socket && this.isSocketConnected) {
+        const orderId = channelName.slice(6);
+        this.socket.emit('subscribe:order', {orderId});
+      }
     }
 
     return () => {
@@ -409,13 +434,11 @@ class RealtimeService {
       if (sub.teardownTimer) {
         clearTimeout(sub.teardownTimer);
       }
-      // Debounce teardown by 500ms to preserve connection during fast tab transitions
       sub.teardownTimer = setTimeout(() => {
         if (sub.refCount <= 0) {
-          try {
-            sub.channel.unsubscribe();
-          } catch {
-            // Safe cleanup
+          if (channelName.startsWith('order:') && this.socket && this.isSocketConnected) {
+            const orderId = channelName.slice(6);
+            this.socket.emit('unsubscribe:order', {orderId});
           }
           this.channels.delete(channelName);
         }
@@ -430,21 +453,13 @@ class RealtimeService {
     };
   }
 
-  private handleAppForeground() {
-    // Notify all active listeners to perform bounded reconciliation refetch
+  private notifyReconnect() {
     this.reconnectListeners.forEach(cb => {
       try {
         cb();
       } catch (err) {
-        console.warn('[Realtime] Reconnect callback error:', err);
+        console.warn('[RealtimeService] Reconnect callback error:', err);
       }
-    });
-
-    const uniqueListeners = new Set<RealtimeEventListener>();
-    this.channels.forEach(sub => {
-      sub.listeners.forEach(cb => {
-        uniqueListeners.add(cb);
-      });
     });
 
     const reconcilePayload: RealtimeEventPayload = {
@@ -454,6 +469,11 @@ class RealtimeService {
       localReceivedAt: Date.now(),
     };
 
+    const uniqueListeners = new Set<RealtimeEventListener>();
+    this.channels.forEach(sub => {
+      sub.listeners.forEach(cb => uniqueListeners.add(cb));
+    });
+
     uniqueListeners.forEach(cb => {
       try {
         cb(reconcilePayload);
@@ -461,6 +481,45 @@ class RealtimeService {
         // Safe catch
       }
     });
+  }
+
+  private handleAppForeground() {
+    if (this.socket && !this.isSocketConnected) {
+      this.socket.connect();
+    } else if (this.isSocketConnected) {
+      this.notifyReconnect();
+    }
+  }
+
+  public setAuthToken(token: string | null) {
+    if (token === this.currentToken) return;
+    this.currentToken = token;
+    if (this.socket) {
+      if (token) {
+        this.socket.auth = {token};
+        if (this.socket.connected) {
+          this.socket.disconnect().connect();
+        } else {
+          this.socket.connect();
+        }
+      } else {
+        this.disconnect();
+      }
+    }
+  }
+
+  public disconnect() {
+    if (this.socket) {
+      try {
+        this.socket.disconnect();
+      } catch {
+        // Safe catch
+      }
+      this.socket = null;
+    }
+    this.isSocketConnected = false;
+    this.currentToken = null;
+    this.channels.clear();
   }
 
   public publishLocalEvent(channelName: string, event: RealtimeEventPayload) {
@@ -474,7 +533,7 @@ class RealtimeService {
         try {
           cb(payload);
         } catch (err) {
-          console.warn('[Realtime] Local event callback error:', err);
+          console.warn('[RealtimeService] Local event callback error:', err);
         }
       });
     }
@@ -486,12 +545,8 @@ class RealtimeService {
   ): () => void {
     let sub = this.channels.get(channelName);
     if (!sub) {
-      const dummyChannel = {
-        unsubscribe: () => {},
-        subscribe: (cb?: any) => (cb ? cb('SUBSCRIBED') : {}),
-      } as unknown as RealtimeChannel;
       sub = {
-        channel: dummyChannel,
+        channelName,
         refCount: 1,
         listeners: new Set<RealtimeEventListener>(),
       };

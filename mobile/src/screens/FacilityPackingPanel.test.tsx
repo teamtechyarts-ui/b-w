@@ -15,7 +15,7 @@ const base = {
   orderId: 'order-1',
   orderStatus: 'processing',
   facility: 'Local Facility',
-  cycleNumber: 1,
+  cycleNumber: 0,
   packingRequired: true,
   canPack: true,
   items: [
@@ -34,7 +34,7 @@ test('compares packed count with verified intake, confirms without a parcel ID, 
         {
           id: 'pack-1',
           parcel_id: 'BW-PARCEL-1',
-          cycle_number: 1,
+          cycle_number: 0,
           packed_by: 'staff-1',
           packed_at: 'today',
           notes: 'Packed clean',

@@ -131,4 +131,53 @@ describe('ForgotPasswordScreen', () => {
     });
     expect(onBackToLoginMock).toHaveBeenCalledTimes(1);
   });
+
+  it('displays server error when password reset request fails', async () => {
+    (authApi.requestPasswordReset as jest.Mock).mockRejectedValueOnce(
+      new Error('Unable to deliver password reset email right now. Please verify your SMTP settings or try again later.')
+    );
+
+    const view = await render(
+      <ForgotPasswordScreen
+        onBackToLogin={jest.fn()}
+        onBack={jest.fn()}
+      />,
+    );
+
+    await act(async () => {
+      fireEvent.changeText(view.getByPlaceholderText('Email'), 'customer@example.com');
+    });
+
+    await act(async () => {
+      fireEvent.press(view.getByText('Send Reset Link'));
+    });
+
+    expect(
+      view.getByText('Unable to deliver password reset email right now. Please verify your SMTP settings or try again later.')
+    ).toBeTruthy();
+  });
+
+  it('initiates cooldown timer upon entering OTP verification', async () => {
+    (authApi.requestPasswordReset as jest.Mock).mockResolvedValueOnce({
+      sent: true,
+    });
+
+    const view = await render(
+      <ForgotPasswordScreen
+        onBackToLogin={jest.fn()}
+        onBack={jest.fn()}
+      />,
+    );
+
+    // Navigate to Step 2
+    await act(async () => {
+      fireEvent.changeText(view.getByPlaceholderText('Email'), 'customer@example.com');
+    });
+    await act(async () => {
+      fireEvent.press(view.getByText('Send Reset Link'));
+    });
+
+    // Check that cooldown indicator is displayed to prevent duplicate spamming
+    expect(view.getByText(/Resend code in/)).toBeTruthy();
+  });
 });

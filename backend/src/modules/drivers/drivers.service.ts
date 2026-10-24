@@ -534,7 +534,7 @@ export class DriversService {
     if (typeof this.supabase?.broadcastEvent === "function") {
       const { data: ord } = await this.supabase.admin
         .from("orders")
-        .select("customer_id")
+        .select("customer_id,facility_id,customers(profile_id)")
         .eq("id", orderId)
         .maybeSingle();
 
@@ -545,10 +545,27 @@ export class DriversService {
         this.supabase.broadcastEvent(`driver:${driver.id}`, "ASSIGNMENT_UPDATED", claimPayload),
         this.supabase.broadcastEvent("admin:operations", "ORDER_STATUS_CHANGED", claimPayload),
         this.supabase.broadcastEvent(`order:${orderId}`, "ORDER_STATUS_CHANGED", claimPayload),
+        this.supabase.broadcastEvent("facility:all", "JOB_CLAIMED", claimPayload),
       ];
+      if (ord?.facility_id) {
+        broadcasts.push(
+          this.supabase.broadcastEvent(`facility:${ord.facility_id}`, "JOB_CLAIMED", claimPayload),
+        );
+      }
+      if (profileId && profileId !== driver.id) {
+        broadcasts.push(
+          this.supabase.broadcastEvent(`driver:${profileId}`, "ASSIGNMENT_UPDATED", claimPayload),
+        );
+      }
       if (ord?.customer_id) {
         broadcasts.push(
           this.supabase.broadcastEvent(`customer:${ord.customer_id}`, "ORDER_STATUS_CHANGED", claimPayload),
+        );
+      }
+      const customerProfileId = (ord as any)?.customers?.profile_id;
+      if (customerProfileId && customerProfileId !== ord?.customer_id) {
+        broadcasts.push(
+          this.supabase.broadcastEvent(`customer:${customerProfileId}`, "ORDER_STATUS_CHANGED", claimPayload),
         );
       }
       await Promise.allSettled(broadcasts);
@@ -749,6 +766,22 @@ export class DriversService {
       }
     }
 
+    let driverArrivedAtFacility = false;
+    let driverArrivedAtFacilityAt: string | null = null;
+
+    if (assignment.assignment_type === "pickup") {
+      const { data: navEvents } = await this.supabase.admin
+        .from("driver_navigation_events")
+        .select("event_type,created_at")
+        .eq("order_id", order.id)
+        .eq("event_type", "arrived_at_facility")
+        .order("created_at", { ascending: false })
+        .limit(1);
+      if (navEvents && navEvents.length > 0) {
+        driverArrivedAtFacility = true;
+        driverArrivedAtFacilityAt = navEvents[0].created_at;
+      }
+    }
     let customer: { name: string | null; phone: string | null } | null = null;
     if (
       operationallyRelevant(
@@ -794,6 +827,8 @@ export class DriversService {
       facilityCollected,
       facilityHandedOverAt,
       facilityCollectedAt,
+      driverArrivedAtFacility,
+      driverArrivedAtFacilityAt,
     };
   }
 

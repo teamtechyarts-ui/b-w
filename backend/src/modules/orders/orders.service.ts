@@ -465,8 +465,9 @@ export class OrdersService {
       idempotency_request_hash: requestHash,
     };
 
+    let orderId: string;
     if (packageQuote) {
-      const { data: orderId, error } = await this.db().rpc(
+      const { data: createdOrderId, error } = await this.db().rpc(
         "create_customer_order_with_package_atomic",
         {
           p_customer_id: customerId,
@@ -478,25 +479,26 @@ export class OrdersService {
           p_coverages: packageQuote.coverages,
         },
       );
-      if (error || !orderId)
+      if (error || !createdOrderId)
         throw new BadRequestException(
           error?.message ?? "Unable to use package credits",
         );
-      return this.getById(profileId, orderId);
-    }
-
-    const { data: orderId, error } = await this.db().rpc(
-      "create_customer_order_with_rewards_atomic",
-      {
-        p_customer_id: customerId,
-        p_order: rewardOrderPayload,
-        p_items: items,
-        p_target_status: targetStatus,
-        p_points: points,
-      },
-    );
-    if (error || !orderId) {
-      throw new BadRequestException(error?.message ?? "Unable to create order");
+      orderId = createdOrderId;
+    } else {
+      const { data: createdOrderId, error } = await this.db().rpc(
+        "create_customer_order_with_rewards_atomic",
+        {
+          p_customer_id: customerId,
+          p_order: rewardOrderPayload,
+          p_items: items,
+          p_target_status: targetStatus,
+          p_points: points,
+        },
+      );
+      if (error || !createdOrderId) {
+        throw new BadRequestException(error?.message ?? "Unable to create order");
+      }
+      orderId = createdOrderId;
     }
 
     const orderResult = await this.getById(profileId, orderId);
@@ -516,6 +518,8 @@ export class OrdersService {
 
       if (typeof this.supabase?.broadcastEvent === "function") {
         await Promise.allSettled([
+          this.supabase.broadcastEvent("orders:all", "ORDER_CREATED", broadcastPayload),
+          this.supabase.broadcastEvent("orders:all", "ORDER_STATUS_CHANGED", broadcastPayload),
           this.supabase.broadcastEvent("driver:available", "JOB_AVAILABLE", broadcastPayload),
           this.supabase.broadcastEvent("jobs:drivers", "JOB_AVAILABLE", broadcastPayload),
           this.supabase.broadcastEvent("admin:operations", "ORDER_CREATED", broadcastPayload),
@@ -524,6 +528,18 @@ export class OrdersService {
           this.supabase.broadcastEvent(`facility:${assignedFacilityId}`, "ORDER_CREATED", broadcastPayload),
           this.supabase.broadcastEvent(`order:${orderId}`, "ORDER_CREATED", broadcastPayload),
         ]);
+      }
+
+      if (typeof (this.supabase as any)?.createAndBroadcastNotification === "function") {
+        await (this.supabase as any).createAndBroadcastNotification({
+          profileId,
+          orderId,
+          notificationType: "order_created",
+          title: "Order Confirmed",
+          body: `Your order #${orderResult.order_number} has been placed and confirmed.`,
+          data: { orderId, orderNumber: orderResult.order_number, status: "confirmed" },
+          channels: [`customer:${profileId}`, `customer:${customerId}`, `order:${orderId}`],
+        });
       }
     }
 
@@ -584,6 +600,8 @@ export class OrdersService {
           this.supabase.broadcastEvent("admin:operations", "ORDER_STATUS_CHANGED", payload),
           this.supabase.broadcastEvent("facility:all", "ORDER_STATUS_CHANGED", payload),
           this.supabase.broadcastEvent(`customer:${profileId}`, "ORDER_STATUS_CHANGED", payload),
+          this.supabase.broadcastEvent("driver:available", "JOB_CLAIMED", payload),
+          this.supabase.broadcastEvent("jobs:drivers", "JOB_CLAIMED", payload),
         ];
 
         if (orderData?.customer_id) {
@@ -598,6 +616,18 @@ export class OrdersService {
         }
 
         await Promise.allSettled(broadcasts);
+
+        if (typeof (this.supabase as any)?.createAndBroadcastNotification === 'function') {
+          await (this.supabase as any).createAndBroadcastNotification({
+            profileId,
+            orderId,
+            notificationType: 'order_cancelled',
+            title: 'Order Cancelled',
+            body: `Your order #${orderData?.order_number || ''} was cancelled.`,
+            data: { orderId, orderNumber: orderData?.order_number, status: 'cancelled', reason },
+            channels: [`customer:${profileId}`, `customer:${orderData?.customer_id}`, `order:${orderId}`].filter(Boolean),
+          });
+        }
       }
     } catch {
       // Safe catch

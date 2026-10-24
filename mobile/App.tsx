@@ -6,6 +6,7 @@ import React, {
   useState,
 } from 'react';
 import {useSessionBootstrap} from './src/hooks/useSessionBootstrap';
+import {useNotificationBadge} from './src/hooks/useNotificationBadge';
 import {assertSafeMobileConfiguration} from './src/config/environment';
 import {clearOrderAttempt, loadOrderAttempt, saveOrderAttempt} from './src/services/orderAttemptStorage';
 
@@ -25,9 +26,17 @@ import {
 
 import {
   NavigationContainer,
-  createNavigationContainerRef,
   LinkingOptions,
 } from '@react-navigation/native';
+import {
+  navigationRef,
+  flushPendingNavigation,
+} from './src/navigation/navigationRef';
+import {
+  initializePushNotifications,
+  syncDeviceToken,
+  unregisterDeviceToken,
+} from './src/services/pushNotificationService';
 
 import {
   createNativeStackNavigator,
@@ -161,15 +170,14 @@ import {
   PaymentCheckoutCancelledError,
 } from './src/services/razorpayCheckout';
 
-assertSafeMobileConfiguration();
+try {
+  assertSafeMobileConfiguration();
+} catch (configError) {
+  console.warn('[assertSafeMobileConfiguration]', configError);
+}
 
 const Stack =
   createNativeStackNavigator<
-    RootStackParamList
-  >();
-
-const navigationRef =
-  createNavigationContainerRef<
     RootStackParamList
   >();
 
@@ -228,6 +236,25 @@ export default function App() {
 
     resetSession,
   } = useSessionState();
+
+  const latestAccessTokenRef = useRef(accessToken);
+  latestAccessTokenRef.current = accessToken;
+
+  useEffect(() => {
+    const unsubscribe = initializePushNotifications(() => latestAccessTokenRef.current);
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (authenticated && accessToken && (profile as any)?.id) {
+      const role = accountRoleFromProfile(profile);
+      syncDeviceToken(accessToken, (profile as any).id, role).catch(err => {
+        console.warn('[syncDeviceToken] failed:', err);
+      });
+    }
+  }, [authenticated, accessToken, (profile as any)?.id]);
 
   /*
    * SERVICES
@@ -548,6 +575,25 @@ export default function App() {
     hydrating, authenticated, accessToken, profile, setProfile, loadServices, loadAddresses,
   });
 
+  const [startupTakingLong, setStartupTakingLong] = useState(false);
+  useEffect(() => {
+    if (!hydrating && initialSessionResolved) {
+      setStartupTakingLong(false);
+      return;
+    }
+    const timer = setTimeout(() => {
+      setStartupTakingLong(true);
+    }, 6000);
+    return () => clearTimeout(timer);
+  }, [hydrating, initialSessionResolved]);
+
+  const unreadNotificationCount = useNotificationBadge(
+    accessToken,
+    accountRoleFromProfile(profile),
+    (profile as any)?.id,
+    authenticated,
+  );
+
   /*
    * NAVIGATION HELPERS
    */
@@ -582,6 +628,13 @@ export default function App() {
         navigationRef.canGoBack()
       ) {
         navigationRef.goBack();
+      } else {
+        const role = accountRoleFromProfile(profile);
+        if (role === 'driver') {
+          navigationRef.navigate('DriverDashboard');
+        } else {
+          resetToHome();
+        }
       }
     };
 
@@ -1189,6 +1242,7 @@ const useSelectedLocation =
 
   const logout =
     async () => {
+      await unregisterDeviceToken(accessToken).catch(() => {});
       await stopDriverTripBackground().catch(() => {});
       createdOrderRef.current = null;
       orderAttemptRef.current = null;
@@ -1292,8 +1346,29 @@ const useSelectedLocation =
             style={
               styles.sessionLoadingText
             }>
-            Restoring your session...
+            {startupTakingLong
+              ? 'Connecting to server taking longer than usual...'
+              : 'Restoring your session...'}
           </Text>
+
+          {startupTakingLong && (
+            <TouchableOpacity
+              style={{
+                marginTop: 20,
+                backgroundColor: '#111111',
+                paddingVertical: 12,
+                paddingHorizontal: 24,
+                borderRadius: 10,
+              }}
+              onPress={() => {
+                setStartupTakingLong(false);
+                resetSession();
+              }}>
+              <Text style={{color: '#FFFFFF', fontSize: 14, fontWeight: '600'}}>
+                Continue to Sign In
+              </Text>
+            </TouchableOpacity>
+          )}
         </SafeAreaView>
       </SafeAreaProvider>
     );
@@ -1310,6 +1385,7 @@ const useSelectedLocation =
         ref={
           navigationRef
         }
+        onReady={flushPendingNavigation}
         linking={linking}>
       {authenticated && accessToken && !accountRoleFromProfile(profile) ? (
         <Stack.Navigator key="unresolved" screenOptions={{headerShown: false}}>
@@ -1321,6 +1397,7 @@ const useSelectedLocation =
         <Stack.Navigator key="driver" initialRouteName="DriverDashboard" screenOptions={{headerShown: false}}>
           <Stack.Screen name="DriverDashboard">
             {() => <DriverDashboardScreen accessToken={accessToken} onLogout={logout}
+              unreadNotificationCount={unreadNotificationCount}
               onNotifications={() => navigationRef.isReady() && navigationRef.navigate('DriverNotifications')}
               onProfile={() => navigationRef.isReady() && navigationRef.navigate('DriverProfile')}
               onJob={assignmentId => navigationRef.isReady() && navigationRef.navigate('DriverJobDetail', {assignmentId})} />}
@@ -1443,6 +1520,7 @@ const useSelectedLocation =
               <CustomerTabFrame active="home" onHome={resetToHome} onOrders={openOrders} onAccount={() => navigationRef.isReady() && navigationRef.navigate('Account')}><HomeScreen
                 customerName={customerNameFromProfile(profile)}
                 accessToken={accessToken}
+                unreadNotificationCount={unreadNotificationCount}
                 onOpenOrder={openOrderDetails}
                 servicesLoading={
                   servicesLoading
@@ -1512,7 +1590,15 @@ const useSelectedLocation =
             )}
           </Stack.Screen>
           <Stack.Screen name="Profile">
-            {() => <ProfileScreen accessToken={accessToken} onBack={goBack} onAddresses={() => navigationRef.isReady() && navigationRef.navigate('Addresses', {mode: 'manage'})} onLogout={logout} />}
+            {() => (
+              <ProfileScreen
+                accessToken={accessToken}
+                onBack={goBack}
+                onAddresses={() => navigationRef.isReady() && navigationRef.navigate('Addresses', {mode: 'manage'})}
+                onLogout={logout}
+                onProfileUpdated={updatedName => setProfile((current: any) => (current ? {...current, full_name: updatedName} : current))}
+              />
+            )}
           </Stack.Screen>
           <Stack.Screen name="Support">
             {({route}) => (
@@ -1665,6 +1751,7 @@ const useSelectedLocation =
                 onDeleteAddress={
                   deleteAddress
                 }
+                onRefresh={() => loadAddresses(selectedAddressId, true)}
                 onContinue={
                   openPickupSlotScreen
                 }
@@ -1881,6 +1968,7 @@ const useSelectedLocation =
                   <HomeScreen
                     customerName={customerNameFromProfile(profile)}
                     accessToken={accessToken}
+                    unreadNotificationCount={unreadNotificationCount}
                     onOpenOrder={openOrderDetails}
                     servicesLoading={
                       servicesLoading

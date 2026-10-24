@@ -1,33 +1,62 @@
-import React, {useCallback, useEffect, useState} from 'react';
-import {ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View} from 'react-native';
+import React, {useCallback, useEffect, useRef, useState} from 'react';
+import {ActivityIndicator, Alert, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View} from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
 import {deleteCustomerAccount, getCustomerProfile, updateCustomerName, validateName} from '../services/profileApi';
 import type {CustomerRecord} from '../services/profileApi';
+import {useSafeFocusEffect} from '../hooks/useSafeFocusEffect';
 
-type Props = {accessToken: string; onBack: () => void; onAddresses: () => void; onLogout: () => Promise<void>};
-export default function ProfileScreen({accessToken, onBack, onAddresses, onLogout}: Props) {
+type Props = {
+  accessToken: string;
+  onBack: () => void;
+  onAddresses: () => void;
+  onLogout: () => Promise<void>;
+  onProfileUpdated?: (name: string) => void;
+};
+
+export default function ProfileScreen({accessToken, onBack, onAddresses, onLogout, onProfileUpdated}: Props) {
   const [record, setRecord] = useState<CustomerRecord | null>(null);
   const [name, setName] = useState('');
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
-  const load = useCallback(async () => {
-    setLoading(true); setError('');
+  const requestSeqRef = useRef(0);
+  const recordRef = useRef<CustomerRecord | null>(null);
+  recordRef.current = record;
+
+  const load = useCallback(async (isRefresh = false) => {
+    const seq = ++requestSeqRef.current;
+    if (isRefresh) setRefreshing(true);
+    else if (!recordRef.current) setLoading(true);
+    setError('');
     try {
       const result = await getCustomerProfile(accessToken);
-      setRecord(result);
-      setName(result.profiles?.full_name ?? '');
+      if (seq === requestSeqRef.current) {
+        setRecord(result);
+        setName(result.profiles?.full_name ?? '');
+      }
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Profile unavailable.');
+      if (seq === requestSeqRef.current) {
+        setError(cause instanceof Error ? cause.message : 'Profile unavailable.');
+      }
     } finally {
-      setLoading(false);
+      if (seq === requestSeqRef.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, [accessToken]);
 
   useEffect(() => {load();}, [load]);
+
+  useSafeFocusEffect(
+    useCallback(() => {
+      load(true);
+    }, [load]),
+  );
 
   const save = async () => {
     const issue = validateName(name);
@@ -36,6 +65,7 @@ export default function ProfileScreen({accessToken, onBack, onAddresses, onLogou
     try {
       const updated = await updateCustomerName(accessToken, name);
       setRecord(current => current ? {...current, profiles: {...current.profiles, ...updated}} : current);
+      onProfileUpdated?.(name);
       setSuccess('Profile saved.');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Unable to save profile.');
@@ -76,10 +106,14 @@ export default function ProfileScreen({accessToken, onBack, onAddresses, onLogou
 
   return (
     <SafeAreaView style={styles.page}>
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={() => load(true)} />
+        }>
         <TouchableOpacity onPress={onBack}><Text style={styles.link}>← Back</Text></TouchableOpacity>
         <Text style={styles.title}>Your profile</Text>
-        {loading ? <ActivityIndicator accessibilityLabel="Loading profile" /> : null}
+        {loading && !record ? <ActivityIndicator accessibilityLabel="Loading profile" /> : null}
         {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
         {success ? <Text accessibilityRole="alert">{success}</Text> : null}
         {!record && !loading ? <TouchableOpacity onPress={() => {load();}}><Text style={styles.link}>Retry</Text></TouchableOpacity> : null}

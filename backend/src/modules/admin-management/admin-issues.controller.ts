@@ -1,5 +1,5 @@
 import {Body, Controller, Get, Param, ParseUUIDPipe, Post, Req, UseGuards} from '@nestjs/common';
-import {IsIn, IsNumber, IsString, MaxLength, Min} from 'class-validator';
+import {IsBoolean, IsIn, IsNumber, IsOptional, IsString, MaxLength, Min} from 'class-validator';
 import {Roles} from '../../common/decorators/roles.decorator';
 import {RolesGuard} from '../../common/guards/roles.guard';
 import {AdminIssuesService} from './admin-issues.service';
@@ -9,6 +9,9 @@ class DecisionDto {
 }
 class ClaimDecisionDto extends DecisionDto {
   @IsIn(['under_review','approved','rejected','resolved']) status!: string;
+  @IsOptional() @IsNumber({maxDecimalPlaces: 2}) @Min(0.01) refundAmount?: number;
+  @IsOptional() @IsBoolean() approveRefund?: boolean;
+  @IsOptional() @IsString() @MaxLength(500) refundReason?: string;
 }
 class RefundRequestDto {
   @IsNumber({maxDecimalPlaces: 2}) @Min(0.01) amount!: number;
@@ -24,7 +27,11 @@ export class AdminIssuesController {
   @Get('orders/:orderId') order(@Param('orderId') id: string) { return this.issues.order(id); }
   @Post('orders/:orderId/claims/:claimId/decision') claim(@Req() req: any, @Param('orderId', ParseUUIDPipe) orderId: string,
     @Param('claimId', ParseUUIDPipe) claimId: string, @Body() body: ClaimDecisionDto) {
-    return this.issues.claimDecision(req.user.id, orderId, claimId, body.status, body.notes);
+    return this.issues.claimDecision(req.user.id, orderId, claimId, body.status, body.notes, {
+      refundAmount: body.refundAmount,
+      approveRefund: body.approveRefund,
+      refundReason: body.refundReason,
+    });
   }
   @Post('orders/:orderId/payments/:paymentId/refunds') requestRefund(@Req() req: any,
     @Param('orderId', ParseUUIDPipe) orderId: string, @Param('paymentId', ParseUUIDPipe) paymentId: string, @Body() body: RefundRequestDto) {
@@ -34,8 +41,13 @@ export class AdminIssuesController {
     @Param('orderId', ParseUUIDPipe) orderId: string, @Param('refundId', ParseUUIDPipe) refundId: string, @Body() body: DecisionDto) {
     return this.issues.approveRefund(req.user.id, orderId, refundId, body.notes);
   }
+  @Post('orders/:orderId/refunds/:refundId/execute') executeRefund(@Req() req: any,
+    @Param('orderId', ParseUUIDPipe) orderId: string, @Param('refundId', ParseUUIDPipe) refundId: string, @Body() body: DecisionDto) {
+    return this.issues.executeRefund(req.user.id, orderId, refundId, body?.notes);
+  }
   @Post('orders/:orderId/refunds/:refundId/reject') rejectRefund(@Req() req: any,
     @Param('orderId', ParseUUIDPipe) orderId: string, @Param('refundId', ParseUUIDPipe) refundId: string, @Body() body: DecisionDto) {
     return this.issues.rejectRefund(req.user.id, orderId, refundId, body.notes);
   }
 }
+

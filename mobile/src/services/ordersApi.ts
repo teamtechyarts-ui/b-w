@@ -120,7 +120,7 @@ export async function getOrders(
   }
 
   const requestKey = `${accessToken}:${limit ?? ''}:${offset ?? ''}`;
-  if (!forceRefresh && inFlightGetOrders && inFlightGetOrders.key === requestKey) {
+  if (inFlightGetOrders && inFlightGetOrders.key === requestKey) {
     return inFlightGetOrders.promise;
   }
 
@@ -161,12 +161,10 @@ export async function getOrders(
     }
   })();
 
-  if (!forceRefresh) {
-    inFlightGetOrders = {
-      key: requestKey,
-      promise: fetchPromise,
-    };
-  }
+  inFlightGetOrders = {
+    key: requestKey,
+    promise: fetchPromise,
+  };
 
   return fetchPromise;
 }

@@ -10,6 +10,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import AppIcon from '../components/AppIcon';
 import BrandLogo from '../components/BrandLogo';
 import { ActionError, FieldError } from '../components/FormError';
 import PasswordInput from '../components/PasswordInput';
@@ -51,6 +52,7 @@ export default function ForgotPasswordScreen({
   // Common UI states
   const [loading, setLoading] = useState(false);
   const [actionError, setActionError] = useState('');
+  const [infoBanner, setInfoBanner] = useState('');
 
   const emailInputRef = useRef<any>(null);
   const otpInputRef = useRef<any>(null);
@@ -70,6 +72,7 @@ export default function ForgotPasswordScreen({
     setPasswordError('');
     setConfirmPasswordError('');
     setActionError('');
+    setInfoBanner('');
   };
 
   // Helper to mask email for security guidance
@@ -116,8 +119,10 @@ export default function ForgotPasswordScreen({
       const msg = err?.message || '';
       if (msg.includes('wait') || msg.includes('cooldown') || msg.includes('seconds')) {
         setActionError(msg);
-      } else if (msg.includes('connection') || msg.includes('network')) {
+      } else if (msg.includes('connection') || msg.includes('network') || err?.isNetworkError) {
         setActionError('Unable to connect. Please check your internet connection.');
+      } else if (msg) {
+        setActionError(msg);
       } else {
         setActionError('Unable to send verification code. Please try again later.');
       }
@@ -136,6 +141,7 @@ export default function ForgotPasswordScreen({
       const cleanEmail = email.trim().toLowerCase();
       await requestPasswordReset(cleanEmail);
       setResendCooldown(60);
+      setInfoBanner('A new verification code has been sent to your email.');
     } catch (err: any) {
       const msg = err?.message || '';
       setActionError(msg || 'Unable to resend verification code right now.');
@@ -307,6 +313,12 @@ export default function ForgotPasswordScreen({
               </Text>
             </View>
 
+            {infoBanner ? (
+              <View style={[styles.bannerContainer, { borderColor: '#86EFAC', backgroundColor: '#F0FDF4' }]} accessibilityRole="alert">
+                <Text style={[styles.bannerText, { color: '#166534', fontWeight: '600' }]}>{infoBanner}</Text>
+              </View>
+            ) : null}
+
             <Text style={styles.title}>Enter Verification Code</Text>
             <Text style={styles.subtitle}>
               Please enter the 6-digit code sent to your email. The code expires in 10 minutes.
@@ -436,7 +448,7 @@ export default function ForgotPasswordScreen({
         {step === 'SUCCESS' && (
           <View style={styles.successWrapper} accessibilityRole="alert">
             <View style={styles.checkCircle}>
-              <Text style={styles.checkMark}>✓</Text>
+              <AppIcon name="check" size={38} color="#047857" strokeWidth={3} />
             </View>
             <Text style={styles.successTitle}>Password Reset Successfully</Text>
             <Text style={styles.successText}>

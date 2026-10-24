@@ -11,6 +11,7 @@ import {
   saveSecureSession,
 } from './secureSessionStorage';
 import {invalidateOrdersCache} from './ordersApi';
+import {realtimeService} from './realtimeService';
 
 type SessionListener = (
   session: StoredSession | null,
@@ -186,6 +187,12 @@ export async function persistSession(
   currentSession =
     session;
 
+  try {
+    realtimeService.setAuthToken(session.accessToken);
+  } catch {
+    // Non-blocking socket sync
+  }
+
   notify();
 
   return session;
@@ -228,6 +235,12 @@ export async function clearSession() {
 
   invalidateOrdersCache();
 
+  try {
+    realtimeService.disconnect();
+  } catch {
+    // Non-blocking socket cleanup
+  }
+
   await clearSecureSession();
 
   notify();
@@ -242,9 +255,10 @@ export async function refreshStoredSession(): Promise<string> {
 
   refreshPromise =
     (async () => {
+      // Use loadSecureSession directly if currentSession is null to prevent promise cycle/deadlock
       const session =
         currentSession ??
-        (await hydrateSession());
+        (await loadSecureSession());
 
       if (
         !session
@@ -257,6 +271,9 @@ export async function refreshStoredSession(): Promise<string> {
 
       let response:
         Response;
+
+      const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      const timeoutId = controller ? setTimeout(() => controller.abort(), 10_000) : null;
 
       try {
         response =
@@ -279,21 +296,37 @@ export async function refreshStoredSession(): Promise<string> {
                   refreshToken:
                     session.refreshToken,
                 }),
+              signal: controller?.signal,
             },
           );
       } catch {
+        if (timeoutId) clearTimeout(timeoutId);
+        // Network unavailable or request timed out: preserve session so user is not logged out
         throw new Error(
           'Unable to refresh your session. Please check your connection.',
         );
+      } finally {
+        if (timeoutId) clearTimeout(timeoutId);
       }
 
       if (
         !response.ok
       ) {
-        await clearSession();
+        // Only clear session on confirmed auth rejections (401, 403, or 400 invalid grant).
+        // Transient 5xx server errors, gateways, or rate limits must NEVER invalidate stored session.
+        if (response.status === 401 || response.status === 403 || response.status === 400) {
+          await clearSession();
+          throw new Error(
+            'Your session has expired. Please sign in again.',
+          );
+        }
+
+        if (response.status === 429) {
+          throw new Error('Rate limit exceeded. Please wait and try again.');
+        }
 
         throw new Error(
-          'Your session has expired. Please sign in again.',
+          'Authentication service temporarily unavailable. Please try again later.',
         );
       }
 
@@ -304,10 +337,9 @@ export async function refreshStoredSession(): Promise<string> {
         data =
           (await response.json()) as AuthSessionResponse;
       } catch {
-        await clearSession();
-
+        // Malformed server response / HTML error page: do not treat as auth revocation
         throw new Error(
-          'Unable to refresh your session.',
+          'Unable to process authentication response.',
         );
       }
 
@@ -338,48 +370,54 @@ export async function hydrateSession(): Promise<
 
   hydrationPromise =
     (async () => {
-      const stored =
-        await loadSecureSession();
-
-      currentSession =
-        stored;
-
-      notify();
-
-      if (
-        !stored
-      ) {
-        return null;
-      }
-
-      if (
-        !shouldRefreshSession(
-          stored,
-        )
-      ) {
-        return stored;
-      }
-
       try {
-        await refreshStoredSession();
+        const stored =
+          await loadSecureSession();
 
-        return currentSession;
-      } catch {
-        /*
-         * If refresh failed because
-         * the refresh token was
-         * rejected, clearSession()
-         * already removed the
-         * persisted session.
-         *
-         * If refresh failed only
-         * because the network is
-         * unavailable, preserve the
-         * encrypted session so the
-         * next authenticated API
-         * request can retry.
-         */
-        return currentSession;
+        currentSession =
+          stored;
+
+        notify();
+
+        if (
+          !stored
+        ) {
+          return null;
+        }
+
+        if (
+          !shouldRefreshSession(
+            stored,
+          )
+        ) {
+          return stored;
+        }
+
+        try {
+          await refreshStoredSession();
+
+          return currentSession;
+        } catch {
+          /*
+           * If refresh failed because
+           * the refresh token was
+           * rejected, clearSession()
+           * already removed the
+           * persisted session.
+           *
+           * If refresh failed only
+           * because the network is
+           * unavailable or server returned 5xx,
+           * preserve the encrypted session so the
+           * next authenticated API request can retry.
+           */
+          return currentSession;
+        }
+      } catch (err) {
+        console.warn('[sessionManager] Hydration error:', err);
+        currentSession = null;
+        notify();
+        return null;
       }
     })();
 

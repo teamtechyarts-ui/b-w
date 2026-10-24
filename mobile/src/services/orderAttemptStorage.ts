@@ -5,7 +5,13 @@ const SERVICE = 'com.brightwhitemobile.order-attempt';
 export type StoredOrderAttempt = {fingerprint: string; key: string};
 
 export async function loadOrderAttempt(): Promise<StoredOrderAttempt | null> {
-  const credentials = await Keychain.getGenericPassword({service: SERVICE});
+  let credentials: Keychain.UserCredentials | false | null = null;
+  try {
+    credentials = await Keychain.getGenericPassword({service: SERVICE});
+  } catch (error) {
+    console.warn('[orderAttemptStorage] Failed to read order attempt:', error);
+    return null;
+  }
   if (!credentials) return null;
   try {
     const attempt: unknown = JSON.parse(credentials.password);
@@ -17,17 +23,29 @@ export async function loadOrderAttempt(): Promise<StoredOrderAttempt | null> {
   } catch {
     // Remove invalid local retry state below.
   }
-  await clearOrderAttempt();
+  try {
+    await clearOrderAttempt();
+  } catch {
+    // Safe clear
+  }
   return null;
 }
 
 export async function saveOrderAttempt(attempt: StoredOrderAttempt): Promise<void> {
-  await Keychain.setGenericPassword('bright-white-order-attempt', JSON.stringify(attempt), {
-    service: SERVICE,
-    accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
-  });
+  try {
+    await Keychain.setGenericPassword('bright-white-order-attempt', JSON.stringify(attempt), {
+      service: SERVICE,
+      accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+    });
+  } catch (error) {
+    console.warn('[orderAttemptStorage] Failed to save order attempt:', error);
+  }
 }
 
 export async function clearOrderAttempt(): Promise<void> {
-  await Keychain.resetGenericPassword({service: SERVICE});
+  try {
+    await Keychain.resetGenericPassword({service: SERVICE});
+  } catch (error) {
+    console.warn('[orderAttemptStorage] Failed to clear order attempt:', error);
+  }
 }

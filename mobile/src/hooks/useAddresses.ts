@@ -1,6 +1,7 @@
 import {
   useCallback,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 
@@ -103,111 +104,91 @@ export function useAddresses(
       ],
     );
 
+  const requestSeqRef = useRef(0);
+  const addressesRef = useRef<AddressItem[]>([]);
+  addressesRef.current = addresses;
+
   const loadAddresses =
     useCallback(
       async (
         preferredAddressId?:
           | string
           | null,
+        silent?: boolean,
       ) => {
-        if (
-          !accessToken
-        ) {
+        if (!accessToken) {
           return;
         }
 
+        const seq = ++requestSeqRef.current;
+        const isSilent = silent === true || addressesRef.current.length > 0;
+
         try {
-          setAddressesLoading(
-            true,
-          );
+          if (!isSilent) {
+            setAddressesLoading(true);
+          }
 
-          const loadedAddresses =
-            await getMyAddresses(
-              accessToken,
-            );
+          const loadedAddresses = await getMyAddresses(accessToken);
+          if (seq !== requestSeqRef.current) {
+            return;
+          }
 
-          setAddresses(
-            loadedAddresses,
-          );
+          setAddresses(loadedAddresses);
 
           const preferred =
-            preferredAddressId ===
-            undefined
+            preferredAddressId === undefined
               ? selectedAddressId
               : preferredAddressId;
 
           const preferredExists =
-            preferred !==
-              null &&
-            loadedAddresses.some(
-              address =>
-                address.id ===
-                preferred,
-            );
+            preferred !== null &&
+            loadedAddresses.some(address => address.id === preferred);
 
-          if (
-            preferredExists
-          ) {
-            setSelectedAddressId(
-              preferred,
-            );
-
+          if (preferredExists) {
+            setSelectedAddressId(preferred);
             return;
           }
 
-          const defaultAddress =
-            loadedAddresses.find(
-              address =>
-                address.is_default,
+          const defaultAddress = loadedAddresses.find(
+            address => address.is_default,
           );
 
-          if (
-            defaultAddress
-          ) {
-            setSelectedAddressId(
-              defaultAddress.id,
-          );
-
+          if (defaultAddress) {
+            setSelectedAddressId(defaultAddress.id);
             return;
           }
 
           setSelectedAddressId(
-            loadedAddresses.length >
-              0
-              ? loadedAddresses[0]
-                  .id
-              : null,
+            loadedAddresses.length > 0 ? loadedAddresses[0].id : null,
           );
-        } catch (
-          error: unknown
-        ) {
+        } catch (error: unknown) {
+          if (seq !== requestSeqRef.current) {
+            return;
+          }
+
           const message =
             error instanceof Error
               ? error.message
               : 'Unable to load addresses';
 
-          Alert.alert(
-            'Address Error',
-            message,
-          );
-
-          setAddresses(
-            [],
-          );
-
-          setSelectedAddressId(
-            null,
-          );
+          if (addressesRef.current.length === 0) {
+            if (!isSilent && preferredAddressId !== undefined) {
+              Alert.alert('Address Error', message);
+            } else {
+              console.warn('[useAddresses] Initial load failed:', message);
+            }
+            setAddresses([]);
+            setSelectedAddressId(null);
+          } else {
+            console.warn('[useAddresses] Background refresh failed:', message);
+          }
         } finally {
-          setAddressesLoading(
-            false,
-          );
+          if (seq === requestSeqRef.current && !isSilent) {
+            setAddressesLoading(false);
+          }
         }
       },
-      [
-        accessToken,
-        selectedAddressId,
-      ],
+      [accessToken, selectedAddressId],
     );
 
   const prepareAddAddress =
@@ -371,6 +352,7 @@ export function useAddresses(
         }
 
         try {
+          requestSeqRef.current += 1;
           setAddressSaving(
             true,
           );
@@ -405,9 +387,7 @@ export function useAddresses(
               null;
           }
 
-          await loadAddresses(
-            savedAddressId,
-          );
+          await loadAddresses(savedAddressId, true);
 
           setEditingAddressId(
             null,
@@ -458,6 +438,7 @@ export function useAddresses(
         }
 
         try {
+          requestSeqRef.current += 1;
           setAddressSaving(
             true,
           );
@@ -467,9 +448,7 @@ export function useAddresses(
             address.id,
           );
 
-          await loadAddresses(
-            address.id,
-          );
+          await loadAddresses(address.id, true);
         } catch (
           error: unknown
         ) {
@@ -508,6 +487,7 @@ export function useAddresses(
         }
 
         try {
+          requestSeqRef.current += 1;
           setAddressSaving(true);
 
           await removeAddress(
@@ -515,12 +495,7 @@ export function useAddresses(
             address.id,
           );
 
-          await loadAddresses(
-            selectedAddressId ===
-              address.id
-              ? null
-              : selectedAddressId,
-          );
+          await loadAddresses(selectedAddressId === address.id ? null : selectedAddressId, true);
 
           return {
             success: true,

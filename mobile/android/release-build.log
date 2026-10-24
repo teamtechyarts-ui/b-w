@@ -1,0 +1,955 @@
+> Task :gradle-plugin:settings-plugin:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :gradle-plugin:shared:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :gradle-plugin:shared:compileKotlin UP-TO-DATE
+> Task :gradle-plugin:shared:compileJava NO-SOURCE
+> Task :gradle-plugin:shared:processResources NO-SOURCE
+> Task :gradle-plugin:shared:classes UP-TO-DATE
+> Task :gradle-plugin:shared:jar UP-TO-DATE
+> Task :gradle-plugin:settings-plugin:compileKotlin UP-TO-DATE
+> Task :gradle-plugin:settings-plugin:compileJava NO-SOURCE
+> Task :gradle-plugin:settings-plugin:pluginDescriptors UP-TO-DATE
+> Task :gradle-plugin:settings-plugin:processResources UP-TO-DATE
+> Task :gradle-plugin:settings-plugin:classes UP-TO-DATE
+> Task :gradle-plugin:settings-plugin:jar UP-TO-DATE
+> Task :gradle-plugin:react-native-gradle-plugin:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :gradle-plugin:react-native-gradle-plugin:compileKotlin UP-TO-DATE
+> Task :gradle-plugin:react-native-gradle-plugin:compileJava NO-SOURCE
+> Task :gradle-plugin:react-native-gradle-plugin:pluginDescriptors UP-TO-DATE
+> Task :gradle-plugin:react-native-gradle-plugin:processResources UP-TO-DATE
+> Task :gradle-plugin:react-native-gradle-plugin:classes UP-TO-DATE
+> Task :gradle-plugin:react-native-gradle-plugin:jar UP-TO-DATE
+
+> Configure project :app
+WARNING: The option setting 'android.builtInKotlin=false' is deprecated.
+The current default is 'true'.
+It will be removed in version 10.0 of the Android Gradle plugin.
+WARNING: The option setting 'android.newDsl=false' is deprecated.
+The current default is 'true'.
+It will be removed in version 10.0 of the Android Gradle plugin.
+WARNING: API 'applicationVariants' is obsolete and has been replaced with 'AndroidComponentsExtension'.
+It will be removed in version 10.0 of the Android Gradle plugin.
+The legacy variant API is disabled by default in AGP 9.0, but can be re-enabled by adding 
+    android.newDsl=false
+to this project's gradle.properties file.
+For more information, see http://developer.android.com/build/r/new-dsl.
+
+To determine what is calling applicationVariants, use -Pandroid.debug.obsoleteApi=true on the command line to display more information.
+WARNING: API 'testVariants' is obsolete and has been replaced with 'AndroidComponentsExtension'.
+It will be removed in version 10.0 of the Android Gradle plugin.
+The legacy variant API is disabled by default in AGP 9.0, but can be re-enabled by adding 
+    android.newDsl=false
+to this project's gradle.properties file.
+For more information, see http://developer.android.com/build/r/new-dsl.
+
+To determine what is calling testVariants, use -Pandroid.debug.obsoleteApi=true on the command line to display more information.
+WARNING: API 'unitTestVariants' is obsolete and has been replaced with 'AndroidComponentsExtension'.
+It will be removed in version 10.0 of the Android Gradle plugin.
+The legacy variant API is disabled by default in AGP 9.0, but can be re-enabled by adding 
+    android.newDsl=false
+to this project's gradle.properties file.
+For more information, see http://developer.android.com/build/r/new-dsl.
+
+To determine what is calling unitTestVariants, use -Pandroid.debug.obsoleteApi=true on the command line to display more information.
+Reading env from: .env
+
+> Configure project :react-native-data-scanner
+WARNING: API 'libraryVariants' is obsolete and has been replaced with 'AndroidComponentsExtension'.
+It will be removed in version 10.0 of the Android Gradle plugin.
+The legacy variant API is disabled by default in AGP 9.0, but can be re-enabled by adding 
+    android.newDsl=false
+to this project's gradle.properties file.
+For more information, see http://developer.android.com/build/r/new-dsl.
+
+To determine what is calling libraryVariants, use -Pandroid.debug.obsoleteApi=true on the command line to display more information.
+[NitroModules] ? NitroDataScanner is boosted by nitro!
+
+> Configure project :react-native-firebase_app
+:react-native-firebase_app package.json found at D:\techyArts\B-W\mobile\node_modules\@react-native-firebase\app\package.json
+:react-native-firebase_app:firebase.bom using default value: 34.18.0
+:react-native-firebase_app:play.play-services-auth using default value: 21.5.0
+:react-native-firebase_app package.json found at D:\techyArts\B-W\mobile\node_modules\@react-native-firebase\app\package.json
+:react-native-firebase_app:version set from package.json: 26.4.0 (26,4,0 - 26004000)
+:react-native-firebase_app:android.compileSdk using custom value: 37
+:react-native-firebase_app:android.targetSdk using custom value: 36
+:react-native-firebase_app:android.minSdk using custom value: 24
+:react-native-firebase_app:reactNativeAndroidDir D:\techyArts\B-W\mobile\node_modules\react-native
+
+> Configure project :react-native-firebase_messaging
+:react-native-firebase_messaging package.json found at D:\techyArts\B-W\mobile\node_modules\@react-native-firebase\messaging\package.json
+:react-native-firebase_app package.json found at D:\techyArts\B-W\mobile\node_modules\@react-native-firebase\app\package.json
+:react-native-firebase_messaging:firebase.bom using default value: 34.18.0
+:react-native-firebase_messaging package.json found at D:\techyArts\B-W\mobile\node_modules\@react-native-firebase\messaging\package.json
+:react-native-firebase_messaging:version set from package.json: 26.4.0 (26,4,0 - 26004000)
+:react-native-firebase_messaging:android.compileSdk using custom value: 37
+:react-native-firebase_messaging:android.targetSdk using custom value: 36
+:react-native-firebase_messaging:android.minSdk using custom value: 24
+:react-native-firebase_messaging:reactNativeAndroidDir D:\techyArts\B-W\mobile\node_modules\react-native
+
+> Configure project :react-native-nitro-modules
+[NitroModules] ? Your app is boosted by nitro modules!
+
+> Task :app:generateAutolinkingNewArchitectureFiles UP-TO-DATE
+> Task :app:generateAutolinkingPackageList UP-TO-DATE
+> Task :app:generateCodegenSchemaFromJavaScript SKIPPED
+> Task :app:generateCodegenArtifactsFromSchema SKIPPED
+> Task :app:generateReactNativeEntryPoint UP-TO-DATE
+> Task :react-native-community_geolocation:generateCodegenSchemaFromJavaScript UP-TO-DATE
+> Task :react-native-community_geolocation:generateCodegenArtifactsFromSchema UP-TO-DATE
+> Task :react-native-community_geolocation:preBuild UP-TO-DATE
+> Task :react-native-config:generateCodegenSchemaFromJavaScript UP-TO-DATE
+> Task :react-native-config:generateCodegenArtifactsFromSchema UP-TO-DATE
+> Task :react-native-config:preBuild UP-TO-DATE
+> Task :react-native-data-scanner:generateCodegenSchemaFromJavaScript UP-TO-DATE
+> Task :react-native-data-scanner:generateCodegenArtifactsFromSchema UP-TO-DATE
+> Task :react-native-data-scanner:preBuild UP-TO-DATE
+> Task :react-native-firebase_app:preBuild UP-TO-DATE
+> Task :react-native-firebase_messaging:preBuild UP-TO-DATE
+> Task :react-native-image-picker:generateCodegenSchemaFromJavaScript UP-TO-DATE
+> Task :react-native-image-picker:generateCodegenArtifactsFromSchema UP-TO-DATE
+> Task :react-native-image-picker:preBuild UP-TO-DATE
+> Task :react-native-keychain:generateCodegenSchemaFromJavaScript UP-TO-DATE
+> Task :react-native-keychain:generateCodegenArtifactsFromSchema UP-TO-DATE
+> Task :react-native-keychain:preBuild UP-TO-DATE
+> Task :react-native-maps:generateCodegenSchemaFromJavaScript SKIPPED
+> Task :react-native-maps:generateCodegenArtifactsFromSchema SKIPPED
+> Task :react-native-maps:preBuild UP-TO-DATE
+> Task :react-native-nitro-modules:generateCodegenSchemaFromJavaScript UP-TO-DATE
+> Task :react-native-nitro-modules:generateCodegenArtifactsFromSchema UP-TO-DATE
+> Task :react-native-nitro-modules:prepareHeaders UP-TO-DATE
+> Task :react-native-nitro-modules:preBuild UP-TO-DATE
+> Task :react-native-razorpay:generateCodegenSchemaFromJavaScript UP-TO-DATE
+> Task :react-native-razorpay:generateCodegenArtifactsFromSchema UP-TO-DATE
+> Task :react-native-razorpay:preBuild UP-TO-DATE
+> Task :react-native-safe-area-context:generateCodegenSchemaFromJavaScript UP-TO-DATE
+> Task :react-native-safe-area-context:generateCodegenArtifactsFromSchema UP-TO-DATE
+> Task :react-native-safe-area-context:preBuild UP-TO-DATE
+> Task :react-native-screens:generateCodegenSchemaFromJavaScript UP-TO-DATE
+> Task :react-native-screens:generateCodegenArtifactsFromSchema UP-TO-DATE
+> Task :react-native-screens:preBuild UP-TO-DATE
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preReleaseBuild UP-TO-DATE
+> Task :react-native-nitro-modules:preReleaseBuild UP-TO-DATE
+> Task :react-native-nitro-modules:configureCMakeRelWithDebInfo[arm64-v8a]
+> Task :react-native-nitro-modules:buildCMakeRelWithDebInfo[arm64-v8a]
+> Task :react-native-nitro-modules:configureCMakeRelWithDebInfo[armeabi-v7a]
+> Task :react-native-nitro-modules:buildCMakeRelWithDebInfo[armeabi-v7a]
+> Task :react-native-nitro-modules:configureCMakeRelWithDebInfo[x86]
+> Task :react-native-nitro-modules:buildCMakeRelWithDebInfo[x86]
+> Task :react-native-nitro-modules:configureCMakeRelWithDebInfo[x86_64]
+> Task :react-native-nitro-modules:buildCMakeRelWithDebInfo[x86_64]
+> Task :react-native-nitro-modules:externalNativeBuildRelease
+> Task :react-native-nitro-modules:generateJsonModelRelease
+> Task :react-native-nitro-modules:prefabReleaseConfigurePackage
+> Task :app:configureCMakeRelWithDebInfo[arm64-v8a]
+> Task :react-native-nitro-modules:prefabReleasePackage UP-TO-DATE
+> Task :app:buildCMakeRelWithDebInfo[arm64-v8a]
+> Task :app:configureCMakeRelWithDebInfo[armeabi-v7a]
+> Task :app:buildCMakeRelWithDebInfo[armeabi-v7a]
+> Task :app:configureCMakeRelWithDebInfo[x86]
+> Task :app:buildCMakeRelWithDebInfo[x86]
+> Task :app:configureCMakeRelWithDebInfo[x86_64]
+> Task :app:buildCMakeRelWithDebInfo[x86_64]
+> Task :app:mergeReleaseJniLibFolders UP-TO-DATE
+> Task :react-native-community_geolocation:preReleaseBuild UP-TO-DATE
+> Task :react-native-community_geolocation:mergeReleaseJniLibFolders UP-TO-DATE
+> Task :react-native-community_geolocation:mergeReleaseNativeLibs NO-SOURCE
+> Task :react-native-community_geolocation:copyReleaseJniLibsProjectOnly UP-TO-DATE
+> Task :react-native-config:preReleaseBuild UP-TO-DATE
+> Task :react-native-config:mergeReleaseJniLibFolders UP-TO-DATE
+> Task :react-native-config:mergeReleaseNativeLibs NO-SOURCE
+> Task :react-native-config:copyReleaseJniLibsProjectOnly UP-TO-DATE
+> Task :react-native-data-scanner:preReleaseBuild UP-TO-DATE
+> Task :react-native-data-scanner:configureCMakeRelWithDebInfo[arm64-v8a]
+> Task :react-native-data-scanner:buildCMakeRelWithDebInfo[arm64-v8a]
+> Task :react-native-data-scanner:configureCMakeRelWithDebInfo[armeabi-v7a]
+> Task :react-native-data-scanner:buildCMakeRelWithDebInfo[armeabi-v7a]
+> Task :react-native-data-scanner:configureCMakeRelWithDebInfo[x86]
+> Task :react-native-data-scanner:buildCMakeRelWithDebInfo[x86]
+> Task :react-native-data-scanner:configureCMakeRelWithDebInfo[x86_64]
+> Task :react-native-data-scanner:buildCMakeRelWithDebInfo[x86_64]
+> Task :react-native-data-scanner:mergeReleaseJniLibFolders UP-TO-DATE
+> Task :react-native-data-scanner:mergeReleaseNativeLibs UP-TO-DATE
+> Task :react-native-data-scanner:copyReleaseJniLibsProjectOnly UP-TO-DATE
+> Task :react-native-firebase_app:preReleaseBuild UP-TO-DATE
+> Task :react-native-firebase_app:mergeReleaseJniLibFolders UP-TO-DATE
+> Task :react-native-firebase_app:mergeReleaseNativeLibs NO-SOURCE
+> Task :react-native-firebase_app:copyReleaseJniLibsProjectOnly UP-TO-DATE
+> Task :react-native-firebase_messaging:preReleaseBuild UP-TO-DATE
+> Task :react-native-firebase_messaging:mergeReleaseJniLibFolders UP-TO-DATE
+> Task :react-native-firebase_messaging:mergeReleaseNativeLibs NO-SOURCE
+> Task :react-native-firebase_messaging:copyReleaseJniLibsProjectOnly UP-TO-DATE
+> Task :react-native-image-picker:preReleaseBuild UP-TO-DATE
+> Task :react-native-image-picker:mergeReleaseJniLibFolders UP-TO-DATE
+> Task :react-native-image-picker:mergeReleaseNativeLibs NO-SOURCE
+> Task :react-native-image-picker:copyReleaseJniLibsProjectOnly UP-TO-DATE
+> Task :react-native-keychain:preReleaseBuild UP-TO-DATE
+> Task :react-native-keychain:mergeReleaseJniLibFolders UP-TO-DATE
+> Task :react-native-keychain:mergeReleaseNativeLibs NO-SOURCE
+> Task :react-native-keychain:copyReleaseJniLibsProjectOnly UP-TO-DATE
+> Task :react-native-maps:preReleaseBuild UP-TO-DATE
+> Task :react-native-maps:mergeReleaseJniLibFolders UP-TO-DATE
+> Task :react-native-maps:mergeReleaseNativeLibs NO-SOURCE
+> Task :react-native-maps:copyReleaseJniLibsProjectOnly UP-TO-DATE
+> Task :react-native-nitro-modules:mergeReleaseJniLibFolders UP-TO-DATE
+> Task :react-native-nitro-modules:mergeReleaseNativeLibs UP-TO-DATE
+> Task :react-native-nitro-modules:copyReleaseJniLibsProjectOnly UP-TO-DATE
+> Task :react-native-razorpay:preReleaseBuild UP-TO-DATE
+> Task :react-native-razorpay:mergeReleaseJniLibFolders UP-TO-DATE
+> Task :react-native-razorpay:mergeReleaseNativeLibs NO-SOURCE
+> Task :react-native-razorpay:copyReleaseJniLibsProjectOnly UP-TO-DATE
+> Task :react-native-safe-area-context:preReleaseBuild UP-TO-DATE
+> Task :react-native-safe-area-context:mergeReleaseJniLibFolders UP-TO-DATE
+> Task :react-native-safe-area-context:mergeReleaseNativeLibs NO-SOURCE
+> Task :react-native-safe-area-context:copyReleaseJniLibsProjectOnly UP-TO-DATE
+> Task :react-native-screens:preReleaseBuild UP-TO-DATE
+> Task :react-native-screens:configureCMakeRelWithDebInfo[arm64-v8a]
+> Task :react-native-screens:buildCMakeRelWithDebInfo[arm64-v8a]
+> Task :react-native-screens:configureCMakeRelWithDebInfo[armeabi-v7a]
+
+> Task :react-native-screens:buildCMakeRelWithDebInfo[armeabi-v7a]
+C/C++: Hard link from 'C:\Users\pavan\.gradle\caches\9.4.1\transforms\5bd2118bfa0cba4f2d5bc0b8d2d03a13\transformed\react-android-0.87.1-release\prefab\modules\reactnative\libs\android.armeabi-v7a\libreactnative.so' to 'D:\techyArts\B-W\mobile\node_modules\react-native-screens\android\build\intermediates\cxx\RelWithDebInfo\25541210\obj\armeabi-v7a\libreactnative.so' failed. Doing a slower copy instead.
+C/C++: Hard link from 'C:\Users\pavan\.gradle\caches\9.4.1\transforms\5bd2118bfa0cba4f2d5bc0b8d2d03a13\transformed\react-android-0.87.1-release\prefab\modules\reactnative\libs\android.armeabi-v7a\libreactnative.so' to 'D:\techyArts\B-W\mobile\node_modules\react-native-screens\android\build\intermediates\cxx\RelWithDebInfo\25541210\obj\armeabi-v7a\libreactnative.so' failed. Doing a slower copy instead.
+
+> Task :react-native-screens:configureCMakeRelWithDebInfo[x86]
+
+> Task :react-native-screens:buildCMakeRelWithDebInfo[x86]
+C/C++: Hard link from 'C:\Users\pavan\.gradle\caches\9.4.1\transforms\5bd2118bfa0cba4f2d5bc0b8d2d03a13\transformed\react-android-0.87.1-release\prefab\modules\reactnative\libs\android.x86\libreactnative.so' to 'D:\techyArts\B-W\mobile\node_modules\react-native-screens\android\build\intermediates\cxx\RelWithDebInfo\25541210\obj\x86\libreactnative.so' failed. Doing a slower copy instead.
+C/C++: Hard link from 'C:\Users\pavan\.gradle\caches\9.4.1\transforms\5bd2118bfa0cba4f2d5bc0b8d2d03a13\transformed\react-android-0.87.1-release\prefab\modules\reactnative\libs\android.x86\libreactnative.so' to 'D:\techyArts\B-W\mobile\node_modules\react-native-screens\android\build\intermediates\cxx\RelWithDebInfo\25541210\obj\x86\libreactnative.so' failed. Doing a slower copy instead.
+
+> Task :react-native-screens:configureCMakeRelWithDebInfo[x86_64]
+
+> Task :react-native-screens:buildCMakeRelWithDebInfo[x86_64]
+C/C++: Hard link from 'C:\Users\pavan\.gradle\caches\9.4.1\transforms\5bd2118bfa0cba4f2d5bc0b8d2d03a13\transformed\react-android-0.87.1-release\prefab\modules\reactnative\libs\android.x86_64\libreactnative.so' to 'D:\techyArts\B-W\mobile\node_modules\react-native-screens\android\build\intermediates\cxx\RelWithDebInfo\25541210\obj\x86_64\libreactnative.so' failed. Doing a slower copy instead.
+C/C++: Hard link from 'C:\Users\pavan\.gradle\caches\9.4.1\transforms\5bd2118bfa0cba4f2d5bc0b8d2d03a13\transformed\react-android-0.87.1-release\prefab\modules\reactnative\libs\android.x86_64\libreactnative.so' to 'D:\techyArts\B-W\mobile\node_modules\react-native-screens\android\build\intermediates\cxx\RelWithDebInfo\25541210\obj\x86_64\libreactnative.so' failed. Doing a slower copy instead.
+
+> Task :react-native-screens:mergeReleaseJniLibFolders
+> Task :react-native-data-scanner:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :react-native-data-scanner:generateReleaseBuildConfig
+> Task :react-native-data-scanner:generateReleaseResources
+> Task :react-native-data-scanner:packageReleaseResources
+> Task :react-native-data-scanner:processReleaseNavigationResources
+> Task :react-native-screens:mergeReleaseNativeLibs
+> Task :react-native-nitro-modules:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :react-native-nitro-modules:generateReleaseBuildConfig
+> Task :react-native-nitro-modules:generateReleaseResources
+> Task :react-native-screens:copyReleaseJniLibsProjectOnly
+> Task :react-native-data-scanner:parseReleaseLocalResources
+> Task :react-native-nitro-modules:packageReleaseResources
+> Task :react-native-nitro-modules:processReleaseNavigationResources
+> Task :react-native-nitro-modules:javaPreCompileRelease
+> Task :react-native-keychain:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :react-native-data-scanner:javaPreCompileRelease
+> Task :react-native-nitro-modules:parseReleaseLocalResources
+> Task :react-native-keychain:generateReleaseBuildConfig
+> Task :react-native-keychain:generateReleaseResources
+> Task :react-native-keychain:packageReleaseResources
+> Task :react-native-keychain:processReleaseNavigationResources
+> Task :react-native-maps:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :react-native-keychain:javaPreCompileRelease
+> Task :react-native-nitro-modules:generateReleaseRFile
+> Task :react-native-keychain:parseReleaseLocalResources
+> Task :react-native-maps:generateReleaseBuildConfig
+> Task :react-native-data-scanner:generateReleaseRFile
+> Task :react-native-maps:generateReleaseResources
+> Task :react-native-keychain:generateReleaseRFile
+> Task :react-native-maps:packageReleaseResources
+> Task :app:mergeReleaseNativeLibs
+> Task :react-native-maps:processReleaseNavigationResources
+> Task :react-native-safe-area-context:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :react-native-maps:javaPreCompileRelease
+> Task :react-native-maps:parseReleaseLocalResources
+> Task :react-native-safe-area-context:generateReleaseBuildConfig
+> Task :react-native-safe-area-context:generateReleaseResources
+> Task :react-native-safe-area-context:packageReleaseResources
+> Task :react-native-safe-area-context:processReleaseNavigationResources
+> Task :react-native-safe-area-context:parseReleaseLocalResources
+> Task :react-native-screens:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :react-native-screens:generateReleaseBuildConfig
+> Task :react-native-maps:generateReleaseRFile
+> Task :react-native-safe-area-context:javaPreCompileRelease
+> Task :react-native-screens:generateReleaseResources
+> Task :react-native-safe-area-context:generateReleaseRFile
+> Task :react-native-maps:compileReleaseKotlin NO-SOURCE
+> Task :app:stripReleaseDebugSymbols
+> Task :react-native-nitro-modules:compileReleaseKotlin
+
+> Task :react-native-keychain:compileReleaseKotlin
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-keychain/android/src/main/java/com/oblador/keychain/KeychainPackage.kt:11:16 This declaration overrides a deprecated member but is not marked as deprecated itself. Add the '@Deprecated' annotation or suppress the diagnostic.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-keychain/android/src/main/java/com/oblador/keychain/cipherStorage/CipherStorageBase.kt:256:40 'val isInsideSecureHardware: Boolean' is deprecated. Deprecated in Java.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-keychain/android/src/main/java/com/oblador/keychain/cipherStorage/CipherStorageKeystoreAesGcm.kt:175:44 'fun setUserAuthenticationValidityDurationSeconds(p0: Int): KeyGenParameterSpec.Builder' is deprecated. Deprecated in Java.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-keychain/android/src/main/java/com/oblador/keychain/cipherStorage/CipherStorageKeystoreRsaEcb.kt:200:40 'fun setUserAuthenticationValidityDurationSeconds(p0: Int): KeyGenParameterSpec.Builder' is deprecated. Deprecated in Java.
+
+> Task :react-native-maps:compileReleaseJavaWithJavac
+Note: Some input files use or override a deprecated API.
+Note: Recompile with -Xlint:deprecation for details.
+Note: Some input files use unchecked or unsafe operations.
+Note: Recompile with -Xlint:unchecked for details.
+
+> Task :app:extractReleaseNativeSymbolTables
+> Task :react-native-nitro-modules:compileReleaseJavaWithJavac
+> Task :react-native-nitro-modules:bundleLibCompileToJarRelease
+> Task :react-native-keychain:compileReleaseJavaWithJavac
+> Task :react-native-keychain:bundleLibRuntimeToDirRelease
+> Task :react-native-nitro-modules:bundleLibRuntimeToDirRelease
+> Task :react-native-maps:bundleLibRuntimeToDirRelease
+> Task :react-native-screens:packageReleaseResources
+> Task :react-native-screens:processReleaseNavigationResources
+> Task :react-native-screens:javaPreCompileRelease
+> Task :react-native-community_geolocation:generateReleaseBuildConfig
+> Task :react-native-community_geolocation:generateReleaseResources
+> Task :react-native-community_geolocation:packageReleaseResources
+> Task :react-native-community_geolocation:processReleaseNavigationResources
+> Task :react-native-community_geolocation:parseReleaseLocalResources
+> Task :react-native-screens:parseReleaseLocalResources
+> Task :react-native-community_geolocation:generateReleaseRFile
+> Task :react-native-community_geolocation:javaPreCompileRelease
+> Task :react-native-screens:generateReleaseRFile
+> Task :app:mergeReleaseNativeDebugMetadata
+
+> Task :react-native-community_geolocation:compileReleaseJavaWithJavac
+Note: Some input files use or override a deprecated API.
+Note: Recompile with -Xlint:deprecation for details.
+
+> Task :react-native-safe-area-context:compileReleaseKotlin
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-safe-area-context/android/src/main/java/com/th3rdwave/safeareacontext/SafeAreaProviderManager.kt:40:19 'fun getEventDispatcherForReactTag(context: ReactContext, reactTag: Int): EventDispatcher?' is deprecated. reactTag is no longer needed.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-safe-area-context/android/src/main/java/com/th3rdwave/safeareacontext/SafeAreaView.kt:8:8 'class UIManagerModule : ReactContextBaseJavaModule, LifecycleEventListener, UIManager' is deprecated. This class is part of Legacy Architecture and will be removed in a future release.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-safe-area-context/android/src/main/java/com/th3rdwave/safeareacontext/SafeAreaView.kt:46:54 'class UIManagerModule : ReactContextBaseJavaModule, LifecycleEventListener, UIManager' is deprecated. This class is part of Legacy Architecture and will be removed in a future release.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-safe-area-context/android/src/main/java/com/th3rdwave/safeareacontext/SafeAreaViewShadowNode.kt:9:32 'class LayoutShadowNode : ReactShadowNodeImpl' is deprecated. This class is part of Legacy Architecture and will be removed in a future release.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-safe-area-context/android/src/main/java/com/th3rdwave/safeareacontext/SafeAreaViewShadowNode.kt:110:61 'class NativeViewHierarchyOptimizer : Any' is deprecated. This class is part of Legacy Architecture and will be removed in a future release.
+
+> Task :react-native-firebase_app:generateReleaseBuildConfig
+> Task :react-native-community_geolocation:bundleLibRuntimeToDirRelease
+> Task :react-native-firebase_app:generateReleaseResources
+> Task :react-native-data-scanner:compileReleaseKotlin
+> Task :react-native-safe-area-context:compileReleaseJavaWithJavac
+> Task :react-native-data-scanner:compileReleaseJavaWithJavac
+> Task :react-native-firebase_app:packageReleaseResources
+> Task :react-native-firebase_app:processReleaseNavigationResources
+> Task :react-native-data-scanner:bundleLibRuntimeToDirRelease
+> Task :react-native-firebase_app:javaPreCompileRelease
+> Task :react-native-firebase_app:parseReleaseLocalResources
+> Task :react-native-firebase_messaging:generateReleaseBuildConfig
+> Task :react-native-safe-area-context:bundleLibRuntimeToDirRelease
+> Task :react-native-firebase_messaging:generateReleaseResources
+> Task :react-native-firebase_messaging:packageReleaseResources
+> Task :react-native-firebase_messaging:processReleaseNavigationResources
+> Task :react-native-firebase_app:generateReleaseRFile
+> Task :react-native-firebase_messaging:parseReleaseLocalResources
+
+> Task :react-native-firebase_app:compileReleaseJavaWithJavac
+Note: Some input files use or override a deprecated API.
+Note: Recompile with -Xlint:deprecation for details.
+
+> Task :react-native-firebase_messaging:javaPreCompileRelease
+> Task :react-native-firebase_app:bundleLibCompileToJarRelease
+> Task :react-native-config:generateReleaseBuildConfig
+> Task :react-native-config:generateReleaseResources
+> Task :react-native-firebase_app:bundleLibRuntimeToDirRelease
+> Task :react-native-firebase_messaging:generateReleaseRFile
+> Task :react-native-config:packageReleaseResources
+
+> Task :react-native-firebase_messaging:compileReleaseJavaWithJavac
+Note: Some input files use or override a deprecated API.
+Note: Recompile with -Xlint:deprecation for details.
+
+> Task :react-native-config:processReleaseNavigationResources
+> Task :react-native-config:parseReleaseLocalResources
+> Task :react-native-config:javaPreCompileRelease
+> Task :react-native-firebase_messaging:bundleLibRuntimeToDirRelease
+> Task :react-native-image-picker:generateReleaseBuildConfig
+> Task :react-native-image-picker:generateReleaseResources
+> Task :react-native-config:generateReleaseRFile
+> Task :react-native-image-picker:packageReleaseResources
+
+> Task :react-native-config:compileReleaseJavaWithJavac
+Note: D:\techyArts\B-W\mobile\node_modules\react-native-config\android\src\main\java\com\lugg\RNCConfig\RNCConfigPackage.java uses or overrides a deprecated API.
+Note: Recompile with -Xlint:deprecation for details.
+
+> Task :react-native-image-picker:processReleaseNavigationResources
+> Task :react-native-config:bundleLibRuntimeToDirRelease
+> Task :react-native-image-picker:javaPreCompileRelease
+> Task :react-native-image-picker:parseReleaseLocalResources
+> Task :react-native-razorpay:generateReleaseBuildConfig
+> Task :react-native-razorpay:generateReleaseResources
+> Task :react-native-image-picker:generateReleaseRFile
+> Task :react-native-razorpay:packageReleaseResources
+
+> Task :react-native-image-picker:compileReleaseJavaWithJavac
+Note: D:\techyArts\B-W\mobile\node_modules\react-native-image-picker\android\src\main\java\com\imagepicker\ImagePickerPackage.java uses or overrides a deprecated API.
+Note: Recompile with -Xlint:deprecation for details.
+
+> Task :react-native-razorpay:processReleaseNavigationResources
+> Task :react-native-razorpay:javaPreCompileRelease
+> Task :react-native-razorpay:parseReleaseLocalResources
+> Task :react-native-image-picker:bundleLibRuntimeToDirRelease
+> Task :react-native-razorpay:generateReleaseRFile
+> Task :app:checkReleaseDuplicateClasses
+> Task :app:buildKotlinToolingMetadata
+
+> Task :react-native-razorpay:compileReleaseJavaWithJavac
+Note: Some input files use or override a deprecated API.
+Note: Recompile with -Xlint:deprecation for details.
+
+> Task :app:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :app:generateReleaseBuildConfig
+> Task :react-native-razorpay:bundleLibRuntimeToDirRelease
+> Task :react-native-screens:compileReleaseKotlin
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/RNScreensPackage.kt:70:9 The corresponding parameter in the supertype 'BaseReactPackage' is named 'name'. This may cause problems when calling this function with named arguments.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/RNScreensPackage.kt:71:9 The corresponding parameter in the supertype 'BaseReactPackage' is named 'reactContext'. This may cause problems when calling this function with named arguments.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/RNScreensPackage.kt:83:17 'constructor(name: String, className: String, canOverrideExistingModule: Boolean, needsEagerInit: Boolean, hasConstants: Boolean, isCxxModule: Boolean, isTurboModule: Boolean): ReactModuleInfo' is deprecated. This constructor is deprecated and will be removed in the future. Use ReactModuleInfo(String, String, boolean, boolean, boolean, boolean)].
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/Screen.kt:54:77 Unchecked cast of '(CoordinatorLayout.Behavior<View!>?..CoordinatorLayout.Behavior<*>?)' to 'BottomSheetBehavior<Screen>'.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/Screen.kt:59:33 'fun getEventDispatcherForReactTag(context: ReactContext, reactTag: Int): EventDispatcher?' is deprecated. reactTag is no longer needed.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/Screen.kt:534:14 'fun getEventDispatcherForReactTag(context: ReactContext, reactTag: Int): EventDispatcher?' is deprecated. reactTag is no longer needed.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/ScreenContainer.kt:71:74 'static field HIDE_NOT_ALWAYS: Int' is deprecated. Deprecated in Java.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/ScreenContainer.kt:250:18 'fun getEventDispatcherForReactTag(context: ReactContext, reactTag: Int): EventDispatcher?' is deprecated. reactTag is no longer needed.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/ScreenContainer.kt:260:18 'fun getEventDispatcherForReactTag(context: ReactContext, reactTag: Int): EventDispatcher?' is deprecated. reactTag is no longer needed.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/ScreenFragment.kt:225:37 'fun getEventDispatcherForReactTag(context: ReactContext, reactTag: Int): EventDispatcher?' is deprecated. reactTag is no longer needed.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/ScreenFragment.kt:242:14 'fun getEventDispatcherForReactTag(context: ReactContext, reactTag: Int): EventDispatcher?' is deprecated. reactTag is no longer needed.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/ScreenFragment.kt:258:22 'fun getEventDispatcherForReactTag(context: ReactContext, reactTag: Int): EventDispatcher?' is deprecated. reactTag is no longer needed.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/ScreenFragment.kt:327:22 'fun getEventDispatcherForReactTag(context: ReactContext, reactTag: Int): EventDispatcher?' is deprecated. reactTag is no longer needed.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/ScreenModalFragment.kt:180:22 'fun getEventDispatcherForReactTag(context: ReactContext, reactTag: Int): EventDispatcher?' is deprecated. reactTag is no longer needed.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/ScreenStack.kt:120:14 'fun getEventDispatcherForReactTag(context: ReactContext, reactTag: Int): EventDispatcher?' is deprecated. reactTag is no longer needed.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/ScreenStackFragment.kt:179:18 'fun getEventDispatcherForReactTag(context: ReactContext, reactTag: Int): EventDispatcher?' is deprecated. reactTag is no longer needed.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/ScreenStackFragment.kt:236:31 'var targetElevation: Float' is deprecated. Deprecated in Java.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/ScreenStackFragment.kt:239:13 'fun setHasOptionsMenu(p0: Boolean): Unit' is deprecated. Deprecated in Java.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/ScreenStackFragment.kt:450:18 This declaration overrides a deprecated member but is not marked as deprecated itself. Add the '@Deprecated' annotation or suppress the diagnostic.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/ScreenStackFragment.kt:457:22 'fun onPrepareOptionsMenu(p0: Menu): Unit' is deprecated. Deprecated in Java.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/ScreenStackFragment.kt:460:18 This declaration overrides a deprecated member but is not marked as deprecated itself. Add the '@Deprecated' annotation or suppress the diagnostic.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/ScreenStackFragment.kt:465:22 'fun onCreateOptionsMenu(p0: Menu, p1: MenuInflater): Unit' is deprecated. Deprecated in Java.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/ScreenStackHeaderConfig.kt:199:14 'fun getEventDispatcherForReactTag(context: ReactContext, reactTag: Int): EventDispatcher?' is deprecated. reactTag is no longer needed.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/ScreenStackHeaderConfig.kt:209:14 'fun getEventDispatcherForReactTag(context: ReactContext, reactTag: Int): EventDispatcher?' is deprecated. reactTag is no longer needed.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/ScreenWindowTraits.kt:48:42 'fun replaceSystemWindowInsets(p0: Int, p1: Int, p2: Int, p3: Int): @NonNull() WindowInsetsCompat' is deprecated. Deprecated in Java.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/ScreenWindowTraits.kt:49:39 'val systemWindowInsetLeft: Int' is deprecated. Deprecated in Java.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/ScreenWindowTraits.kt:51:39 'val systemWindowInsetRight: Int' is deprecated. Deprecated in Java.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/ScreenWindowTraits.kt:52:39 'val systemWindowInsetBottom: Int' is deprecated. Deprecated in Java.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/ScreensModule.kt:100:14 'fun getEventDispatcherForReactTag(context: ReactContext, reactTag: Int): EventDispatcher?' is deprecated. reactTag is no longer needed.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/SearchBarView.kt:137:29 'fun getEventDispatcherForReactTag(context: ReactContext, reactTag: Int): EventDispatcher?' is deprecated. reactTag is no longer needed.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/bottomsheet/BottomSheetDialogRootView.kt:7:8 'object ReactFeatureFlags : Any' is deprecated. Use com.facebook.react.internal.featureflags.ReactNativeFeatureFlags instead.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/bottomsheet/BottomSheetDialogRootView.kt:25:13 'object ReactFeatureFlags : Any' is deprecated. Use com.facebook.react.internal.featureflags.ReactNativeFeatureFlags instead.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/bottomsheet/BottomSheetDialogRootView.kt:32:9 The corresponding parameter in the supertype 'ReactViewGroup' is named 'left'. This may cause problems when calling this function with named arguments.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/bottomsheet/BottomSheetDialogRootView.kt:33:9 The corresponding parameter in the supertype 'ReactViewGroup' is named 'top'. This may cause problems when calling this function with named arguments.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/bottomsheet/BottomSheetDialogRootView.kt:34:9 The corresponding parameter in the supertype 'ReactViewGroup' is named 'right'. This may cause problems when calling this function with named arguments.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/bottomsheet/BottomSheetDialogRootView.kt:35:9 The corresponding parameter in the supertype 'ReactViewGroup' is named 'bottom'. This may cause problems when calling this function with named arguments.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/bottomsheet/BottomSheetDialogRootView.kt:71:9 The corresponding parameter in the supertype 'RootView' is named 'childView'. This may cause problems when calling this function with named arguments.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/bottomsheet/BottomSheetDialogRootView.kt:72:9 The corresponding parameter in the supertype 'RootView' is named 'ev'. This may cause problems when calling this function with named arguments.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/bottomsheet/BottomSheetDialogRootView.kt:79:46 The corresponding parameter in the supertype 'RootView' is named 'ev'. This may cause problems when calling this function with named arguments.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/bottomsheet/BottomSheetDialogRootView.kt:83:9 The corresponding parameter in the supertype 'RootView' is named 'childView'. This may cause problems when calling this function with named arguments.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/bottomsheet/BottomSheetDialogRootView.kt:84:9 The corresponding parameter in the supertype 'RootView' is named 'ev'. This may cause problems when calling this function with named arguments.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/bottomsheet/BottomSheetDialogRootView.kt:95:34 The corresponding parameter in the supertype 'RootView' is named 't'. This may cause problems when calling this function with named arguments.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/bottomsheet/DimmingView.kt:64:9 The corresponding parameter in the supertype 'ReactCompoundView' is named 'touchX'. This may cause problems when calling this function with named arguments.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/bottomsheet/DimmingView.kt:65:9 The corresponding parameter in the supertype 'ReactCompoundView' is named 'touchY'. This may cause problems when calling this function with named arguments.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/bottomsheet/DimmingView.kt:69:9 The corresponding parameter in the supertype 'ReactCompoundViewGroup' is named 'touchX'. This may cause problems when calling this function with named arguments.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/bottomsheet/DimmingView.kt:70:9 The corresponding parameter in the supertype 'ReactCompoundViewGroup' is named 'touchY'. This may cause problems when calling this function with named arguments.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/gamma/common/event/BaseEventEmitter.kt:12:38 'fun getEventDispatcherForReactTag(context: ReactContext, reactTag: Int): EventDispatcher?' is deprecated. reactTag is no longer needed.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/gamma/modals/dimmingview/DimmingView.kt:64:9 The corresponding parameter in the supertype 'ReactCompoundView' is named 'touchX'. This may cause problems when calling this function with named arguments.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/gamma/modals/dimmingview/DimmingView.kt:65:9 The corresponding parameter in the supertype 'ReactCompoundView' is named 'touchY'. This may cause problems when calling this function with named arguments.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/gamma/modals/dimmingview/DimmingView.kt:69:9 The corresponding parameter in the supertype 'ReactCompoundViewGroup' is named 'touchX'. This may cause problems when calling this function with named arguments.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/gamma/modals/dimmingview/DimmingView.kt:70:9 The corresponding parameter in the supertype 'ReactCompoundViewGroup' is named 'touchY'. This may cause problems when calling this function with named arguments.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/gamma/modals/formsheet/FormSheetContentView.kt:11:8 'object ReactFeatureFlags : Any' is deprecated. Use com.facebook.react.internal.featureflags.ReactNativeFeatureFlags instead.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/gamma/modals/formsheet/FormSheetContentView.kt:39:33 'fun getEventDispatcher(context: ReactContext, uiManagerType: Int): EventDispatcher?' is deprecated. UIManagerType is no longer needed.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/gamma/modals/formsheet/FormSheetContentView.kt:44:13 'object ReactFeatureFlags : Any' is deprecated. Use com.facebook.react.internal.featureflags.ReactNativeFeatureFlags instead.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/gamma/modals/formsheet/FormSheetHostViewManager.kt:38:9 The corresponding parameter in the supertype 'ViewGroupManager' is named 'view'. This may cause problems when calling this function with named arguments.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/gamma/tabs/host/TabsHostViewManager.kt:44:9 The corresponding parameter in the supertype 'ViewGroupManager' is named 'view'. This may cause problems when calling this function with named arguments.
+w: file:///D:/techyArts/B-W/mobile/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/safearea/SafeAreaView.kt:143:45 'fun consumeDisplayCutout(): @NonNull() WindowInsetsCompat' is deprecated. Deprecated in Java.
+
+> Task :app:createBundleReleaseJsAndAssets
+[34m
+                        ▒▒▓▓▓▓▒▒
+                     ▒▓▓▓▒▒░░▒▒▓▓▓▒
+                  ▒▓▓▓▓░░░▒▒▒▒░░░▓▓▓▓▒
+                 ▓▓▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓▒▒▒▓▓
+                 ▓▓░░░░░▒▓▓▓▓▓▓▒░░░░░▓▓
+                 ▓▓░░▓▓▒░░░▒▒░░░▒▓▒░░▓▓
+                 ▓▓░░▓▓▓▓▓▒▒▒▒▓▓▓▓▒░░▓▓
+                 ▓▓░░▓▓▓▓▓▓▓▓▓▓▓▓▓▒░░▓▓
+                 ▓▓▒░░▒▒▓▓▓▓▓▓▓▓▒░░░▒▓▓
+                  ▒▓▓▓▒░░░▒▓▓▒░░░▒▓▓▓▒
+                     ▒▓▓▓▒░░░░▒▓▓▓▒
+                        ▒▒▓▓▓▓▒▒
+
+[39m
+[33m[7m[1m WARN [22m[27m[39m the transform cache was reset.
+[34m[1m                Welcome to Metro [37mv0.87.0[39m
+[22m[39m[2m              Fast - Scalable - Integrated
+
+[22m
+[33m[7m[1m WARN [22m[27m[39m Attempted to import the module "D:\techyArts\B-W\mobile\node_modules\react-native\src\private\featureflags\ReactNativeFeatureFlags" which is not listed in the "exports" of "D:\techyArts\B-W\mobile\node_modules\react-native" under the requested subpath "./src/private/featureflags/ReactNativeFeatureFlags". Falling back to file-based resolution. Consider updating the call site or asking the package maintainer(s) to expose this API.
+LOG:Writing bundle output to: android\app\build\generated\assets\react\release\index.android.bundle
+LOG:Writing sourcemap output to: android\app\build\intermediates\sourcemaps\react\release\index.android.bundle.packager.map
+LOG:Done writing bundle output
+LOG:Done writing sourcemap output
+Copying 20 asset files
+Done copying assets
+
+> Task :react-native-screens:compileReleaseJavaWithJavac
+> Task :app:generateReleaseResValues
+> Task :app:generateReleaseResources
+> Task :app:processReleaseGoogleServices
+> Task :app:packageReleaseResources
+> Task :app:processReleaseNavigationResources
+> Task :app:parseReleaseLocalResources
+> Task :react-native-config:bundleLibCompileToJarRelease
+> Task :react-native-community_geolocation:bundleLibCompileToJarRelease
+> Task :react-native-firebase_messaging:bundleLibCompileToJarRelease
+> Task :react-native-image-picker:bundleLibCompileToJarRelease
+> Task :react-native-razorpay:bundleLibCompileToJarRelease
+> Task :app:javaPreCompileRelease
+> Task :react-native-keychain:bundleLibCompileToJarRelease
+> Task :react-native-safe-area-context:bundleLibCompileToJarRelease
+> Task :react-native-config:writeReleaseAarMetadata
+> Task :react-native-community_geolocation:writeReleaseAarMetadata
+> Task :react-native-data-scanner:writeReleaseAarMetadata
+> Task :react-native-data-scanner:bundleLibCompileToJarRelease
+> Task :react-native-firebase_app:writeReleaseAarMetadata
+> Task :react-native-firebase_messaging:writeReleaseAarMetadata
+> Task :react-native-keychain:writeReleaseAarMetadata
+> Task :react-native-image-picker:writeReleaseAarMetadata
+> Task :react-native-maps:writeReleaseAarMetadata
+> Task :react-native-nitro-modules:writeReleaseAarMetadata
+> Task :react-native-razorpay:writeReleaseAarMetadata
+> Task :app:generateReleaseRFile
+> Task :react-native-safe-area-context:writeReleaseAarMetadata
+> Task :react-native-screens:writeReleaseAarMetadata
+> Task :app:mapReleaseSourceSetPaths
+> Task :react-native-maps:bundleLibCompileToJarRelease
+> Task :react-native-screens:bundleLibCompileToJarRelease
+> Task :react-native-screens:bundleLibRuntimeToDirRelease
+> Task :app:checkReleaseAarMetadata
+> Task :app:compileReleaseNavigationResources
+
+> Task :app:compileReleaseKotlin
+w: file:///D:/techyArts/B-W/mobile/android/app/src/main/java/com/brightwhitemobile/DriverTripLocationPackage.kt:16:16 This declaration overrides a deprecated member but is not marked as deprecated itself. Add the '@Deprecated' annotation or suppress the diagnostic.
+w: file:///D:/techyArts/B-W/mobile/android/app/src/main/java/com/brightwhitemobile/DriverTripLocationPackage.kt:16:36 The corresponding parameter in the supertype 'ReactPackage' is named 'reactContext'. This may cause problems when calling this function with named arguments.
+w: file:///D:/techyArts/B-W/mobile/android/app/src/main/java/com/brightwhitemobile/DriverTripLocationPackage.kt:19:35 The corresponding parameter in the supertype 'ReactPackage' is named 'reactContext'. This may cause problems when calling this function with named arguments.
+w: file:///D:/techyArts/B-W/mobile/android/app/src/main/java/com/brightwhitemobile/DriverTripLocationService.kt:73:25 'constructor(p0: Context!): Notification.Builder' is deprecated. Deprecated in Java.
+w: file:///D:/techyArts/B-W/mobile/android/app/src/main/java/com/brightwhitemobile/MainActivity.kt:21:7 'constructor(activity: ReactActivity, mainComponentName: String, fabricEnabled: Boolean): DefaultReactActivityDelegate' is deprecated. Creating DefaultReactActivityDelegate with flags is deprecated.
+
+> Task :app:compileReleaseJavaWithJavac
+> Task :app:createReleaseCompatibleScreenManifests
+> Task :app:extractDeepLinksRelease
+> Task :react-native-community_geolocation:extractDeepLinksRelease
+> Task :react-native-config:extractDeepLinksRelease
+> Task :react-native-data-scanner:extractDeepLinksRelease
+> Task :react-native-firebase_app:extractDeepLinksRelease
+> Task :react-native-firebase_messaging:extractDeepLinksRelease
+> Task :react-native-image-picker:extractDeepLinksRelease
+
+> Task :react-native-community_geolocation:processReleaseManifest
+package="com.reactnativecommunity.geolocation" found in source AndroidManifest.xml: D:\techyArts\B-W\mobile\node_modules\@react-native-community\geolocation\android\src\main\AndroidManifest.xml.
+Setting the namespace via the package attribute in the source AndroidManifest.xml is no longer supported, and the value is ignored.
+Recommendation: remove package="com.reactnativecommunity.geolocation" from the source AndroidManifest.xml: D:\techyArts\B-W\mobile\node_modules\@react-native-community\geolocation\android\src\main\AndroidManifest.xml.
+
+> Task :react-native-firebase_app:processReleaseManifest
+package="io.invertase.firebase" found in source AndroidManifest.xml: D:\techyArts\B-W\mobile\node_modules\@react-native-firebase\app\android\src\main\AndroidManifest.xml.
+Setting the namespace via the package attribute in the source AndroidManifest.xml is no longer supported, and the value is ignored.
+Recommendation: remove package="io.invertase.firebase" from the source AndroidManifest.xml: D:\techyArts\B-W\mobile\node_modules\@react-native-firebase\app\android\src\main\AndroidManifest.xml.
+
+> Task :react-native-config:processReleaseManifest
+> Task :react-native-keychain:extractDeepLinksRelease
+> Task :react-native-data-scanner:processReleaseManifest
+> Task :react-native-maps:extractDeepLinksRelease
+
+> Task :react-native-image-picker:processReleaseManifest
+package="com.imagepicker" found in source AndroidManifest.xml: D:\techyArts\B-W\mobile\node_modules\react-native-image-picker\android\src\main\AndroidManifest.xml.
+Setting the namespace via the package attribute in the source AndroidManifest.xml is no longer supported, and the value is ignored.
+Recommendation: remove package="com.imagepicker" from the source AndroidManifest.xml: D:\techyArts\B-W\mobile\node_modules\react-native-image-picker\android\src\main\AndroidManifest.xml.
+
+> Task :react-native-firebase_messaging:processReleaseManifest
+package="io.invertase.firebase.messaging" found in source AndroidManifest.xml: D:\techyArts\B-W\mobile\node_modules\@react-native-firebase\messaging\android\src\main\AndroidManifest.xml.
+Setting the namespace via the package attribute in the source AndroidManifest.xml is no longer supported, and the value is ignored.
+Recommendation: remove package="io.invertase.firebase.messaging" from the source AndroidManifest.xml: D:\techyArts\B-W\mobile\node_modules\@react-native-firebase\messaging\android\src\main\AndroidManifest.xml.
+
+> Task :react-native-keychain:processReleaseManifest
+package="com.oblador.keychain" found in source AndroidManifest.xml: D:\techyArts\B-W\mobile\node_modules\react-native-keychain\android\src\main\AndroidManifest.xml.
+Setting the namespace via the package attribute in the source AndroidManifest.xml is no longer supported, and the value is ignored.
+Recommendation: remove package="com.oblador.keychain" from the source AndroidManifest.xml: D:\techyArts\B-W\mobile\node_modules\react-native-keychain\android\src\main\AndroidManifest.xml.
+
+> Task :react-native-nitro-modules:extractDeepLinksRelease
+> Task :react-native-razorpay:extractDeepLinksRelease
+> Task :react-native-safe-area-context:extractDeepLinksRelease
+> Task :app:mergeReleaseResources
+> Task :react-native-screens:extractDeepLinksRelease
+
+> Task :react-native-razorpay:processReleaseManifest
+package="com.razorpay.rn" found in source AndroidManifest.xml: D:\techyArts\B-W\mobile\node_modules\react-native-razorpay\android\src\main\AndroidManifest.xml.
+Setting the namespace via the package attribute in the source AndroidManifest.xml is no longer supported, and the value is ignored.
+Recommendation: remove package="com.razorpay.rn" from the source AndroidManifest.xml: D:\techyArts\B-W\mobile\node_modules\react-native-razorpay\android\src\main\AndroidManifest.xml.
+
+> Task :react-native-maps:processReleaseManifest
+> Task :react-native-nitro-modules:processReleaseManifest
+> Task :react-native-community_geolocation:mapReleaseSourceSetPaths
+> Task :react-native-screens:processReleaseManifest
+> Task :react-native-community_geolocation:compileReleaseLibraryResources
+
+> Task :react-native-safe-area-context:processReleaseManifest
+package="com.th3rdwave.safeareacontext" found in source AndroidManifest.xml: D:\techyArts\B-W\mobile\node_modules\react-native-safe-area-context\android\src\main\AndroidManifest.xml.
+Setting the namespace via the package attribute in the source AndroidManifest.xml is no longer supported, and the value is ignored.
+Recommendation: remove package="com.th3rdwave.safeareacontext" from the source AndroidManifest.xml: D:\techyArts\B-W\mobile\node_modules\react-native-safe-area-context\android\src\main\AndroidManifest.xml.
+
+> Task :react-native-config:mapReleaseSourceSetPaths
+> Task :app:processReleaseMainManifest
+> Task :app:processReleaseManifest
+> Task :react-native-config:compileReleaseLibraryResources
+> Task :react-native-data-scanner:mapReleaseSourceSetPaths
+> Task :react-native-data-scanner:compileReleaseLibraryResources
+> Task :app:processReleaseManifestForPackage
+> Task :react-native-firebase_app:mapReleaseSourceSetPaths
+> Task :react-native-firebase_app:compileReleaseLibraryResources
+> Task :react-native-firebase_messaging:mapReleaseSourceSetPaths
+> Task :react-native-firebase_messaging:compileReleaseLibraryResources
+> Task :react-native-image-picker:mapReleaseSourceSetPaths
+> Task :react-native-image-picker:compileReleaseLibraryResources
+> Task :react-native-keychain:mapReleaseSourceSetPaths
+> Task :react-native-keychain:compileReleaseLibraryResources
+> Task :react-native-maps:mapReleaseSourceSetPaths
+> Task :react-native-maps:compileReleaseLibraryResources
+> Task :react-native-nitro-modules:mapReleaseSourceSetPaths
+> Task :react-native-nitro-modules:compileReleaseLibraryResources
+> Task :react-native-razorpay:mapReleaseSourceSetPaths
+> Task :react-native-razorpay:compileReleaseLibraryResources
+> Task :react-native-safe-area-context:mapReleaseSourceSetPaths
+> Task :react-native-safe-area-context:compileReleaseLibraryResources
+> Task :react-native-screens:mapReleaseSourceSetPaths
+> Task :app:desugarReleaseFileDependencies
+> Task :app:mergeReleaseStartupProfile
+> Task :react-native-screens:compileReleaseLibraryResources
+
+> Task :app:mergeExtDexRelease
+WARNING: C:\Users\pavan\.gradle\caches\9.4.1\transforms\2de7f2a333cd3cf8126e893c4ee9d4a7\transformed\play-services-auth-21.5.0-runtime.jar: D8: Invalid stack map table at instruction index 2: invokespecial Ljava/lang/Object;<init>()V, error: Constructor mismatch, expected constructor from com.google.android.gms.auth.api.identity.zbd, but was java.lang.Object.<init>().
+WARNING: C:\Users\pavan\.gradle\caches\9.4.1\transforms\2de7f2a333cd3cf8126e893c4ee9d4a7\transformed\play-services-auth-21.5.0-runtime.jar: D8: Invalid stack map table at instruction index 2: invokespecial Ljava/lang/Object;<init>()V, error: Constructor mismatch, expected constructor from com.google.android.gms.auth.api.identity.zbo, but was java.lang.Object.<init>().
+WARNING: C:\Users\pavan\.gradle\caches\9.4.1\transforms\2de7f2a333cd3cf8126e893c4ee9d4a7\transformed\play-services-auth-21.5.0-runtime.jar: D8: Invalid stack map table at instruction index 2: invokespecial Ljava/lang/Object;<init>()V, error: Constructor mismatch, expected constructor from com.google.android.gms.auth.api.signin.zbb, but was java.lang.Object.<init>().
+WARNING: C:\Users\pavan\.gradle\caches\9.4.1\transforms\2de7f2a333cd3cf8126e893c4ee9d4a7\transformed\play-services-auth-21.5.0-runtime.jar: D8: Invalid stack map table at instruction index 7: invokespecial Ljava/lang/Object;<init>()V, error: Constructor mismatch, expected constructor from com.google.android.gms.auth.api.identity.zbv, but was java.lang.Object.<init>().
+WARNING: C:\Users\pavan\.gradle\caches\9.4.1\transforms\2de7f2a333cd3cf8126e893c4ee9d4a7\transformed\play-services-auth-21.5.0-runtime.jar: D8: Invalid stack map table at instruction index 7: invokespecial Ljava/lang/Object;<init>()V, error: Constructor mismatch, expected constructor from com.google.android.gms.auth.api.identity.zbv, but was java.lang.Object.<init>().
+WARNING: C:\Users\pavan\.gradle\caches\9.4.1\transforms\2de7f2a333cd3cf8126e893c4ee9d4a7\transformed\play-services-auth-21.5.0-runtime.jar: D8: Invalid stack map table at instruction index 7: invokespecial Ljava/lang/Object;<init>()V, error: Constructor mismatch, expected constructor from com.google.android.gms.auth.api.identity.zbi, but was java.lang.Object.<init>().
+WARNING: C:\Users\pavan\.gradle\caches\9.4.1\transforms\2de7f2a333cd3cf8126e893c4ee9d4a7\transformed\play-services-auth-21.5.0-runtime.jar: D8: Invalid stack map table at instruction index 7: invokespecial Ljava/lang/Object;<init>()V, error: Constructor mismatch, expected constructor from com.google.android.gms.auth.api.identity.zbi, but was java.lang.Object.<init>().
+WARNING: C:\Users\pavan\.gradle\caches\9.4.1\transforms\2de7f2a333cd3cf8126e893c4ee9d4a7\transformed\play-services-auth-21.5.0-runtime.jar: D8: Invalid stack map table at instruction index 2: invokespecial Ljava/lang/Object;<init>()V, error: Constructor mismatch, expected constructor from com.google.android.gms.auth.api.identity.zbp, but was java.lang.Object.<init>().
+WARNING: C:\Users\pavan\.gradle\caches\9.4.1\transforms\2de7f2a333cd3cf8126e893c4ee9d4a7\transformed\play-services-auth-21.5.0-runtime.jar: D8: Invalid stack map table at instruction index 2: invokespecial Ljava/lang/Object;<init>()V, error: Constructor mismatch, expected constructor from com.google.android.gms.auth.api.identity.zbs, but was java.lang.Object.<init>().
+WARNING: C:\Users\pavan\.gradle\caches\9.4.1\transforms\2de7f2a333cd3cf8126e893c4ee9d4a7\transformed\play-services-auth-21.5.0-runtime.jar: D8: Invalid stack map table at instruction index 10: invokespecial Lcom/google/android/gms/common/api/Api$AbstractClientBuilder;<init>()V, error: Constructor mismatch, expected constructor from com.google.android.gms.auth.api.zba, but was com.google.android.gms.common.api.Api$AbstractClientBuilder.<init>().
+WARNING: C:\Users\pavan\.gradle\caches\9.4.1\transforms\2de7f2a333cd3cf8126e893c4ee9d4a7\transformed\play-services-auth-21.5.0-runtime.jar: D8: Invalid stack map table at instruction index 2: invokespecial Ljava/lang/Object;<init>()V, error: Constructor mismatch, expected constructor from com.google.android.gms.auth.api.identity.zbl, but was java.lang.Object.<init>().
+WARNING: C:\Users\pavan\.gradle\caches\9.4.1\transforms\2de7f2a333cd3cf8126e893c4ee9d4a7\transformed\play-services-auth-21.5.0-runtime.jar: D8: Invalid stack map table at instruction index 2: invokespecial Ljava/lang/Object;<init>()V, error: Constructor mismatch, expected constructor from com.google.android.gms.auth.api.identity.zbn, but was java.lang.Object.<init>().
+WARNING: C:\Users\pavan\.gradle\caches\9.4.1\transforms\2de7f2a333cd3cf8126e893c4ee9d4a7\transformed\play-services-auth-21.5.0-runtime.jar: D8: Invalid stack map table at instruction index 2: invokespecial Ljava/lang/Object;<init>()V, error: Constructor mismatch, expected constructor from com.google.android.gms.auth.api.identity.zbu, but was java.lang.Object.<init>().
+WARNING: C:\Users\pavan\.gradle\caches\9.4.1\transforms\2de7f2a333cd3cf8126e893c4ee9d4a7\transformed\play-services-auth-21.5.0-runtime.jar: D8: Invalid stack map table at instruction index 2: invokespecial Ljava/lang/Object;<init>()V, error: Constructor mismatch, expected constructor from com.google.android.gms.auth.api.identity.zbq, but was java.lang.Object.<init>().
+WARNING: C:\Users\pavan\.gradle\caches\9.4.1\transforms\2de7f2a333cd3cf8126e893c4ee9d4a7\transformed\play-services-auth-21.5.0-runtime.jar: D8: Invalid stack map table at instruction index 6: invokespecial Lcom/google/android/gms/common/api/Api$AbstractClientBuilder;<init>()V, error: Constructor mismatch, expected constructor from com.google.android.gms.internal.auth-api.zbae, but was com.google.android.gms.common.api.Api$AbstractClientBuilder.<init>().
+WARNING: C:\Users\pavan\.gradle\caches\9.4.1\transforms\2de7f2a333cd3cf8126e893c4ee9d4a7\transformed\play-services-auth-21.5.0-runtime.jar: D8: Invalid stack map table at instruction index 2: invokespecial Ljava/lang/Object;<init>()V, error: Constructor mismatch, expected constructor from com.google.android.gms.auth.api.identity.zbh, but was java.lang.Object.<init>().
+WARNING: C:\Users\pavan\.gradle\caches\9.4.1\transforms\2de7f2a333cd3cf8126e893c4ee9d4a7\transformed\play-services-auth-21.5.0-runtime.jar: D8: Invalid stack map table at instruction index 2: invokespecial Ljava/lang/Object;<init>()V, error: Constructor mismatch, expected constructor from com.google.android.gms.auth.api.identity.zbg, but was java.lang.Object.<init>().
+WARNING: C:\Users\pavan\.gradle\caches\9.4.1\transforms\2de7f2a333cd3cf8126e893c4ee9d4a7\transformed\play-services-auth-21.5.0-runtime.jar: D8: Invalid stack map table at instruction index 2: invokespecial Ljava/lang/Object;<init>()V, error: Constructor mismatch, expected constructor from com.google.android.gms.auth.api.identity.zbm, but was java.lang.Object.<init>().
+WARNING: C:\Users\pavan\.gradle\caches\9.4.1\transforms\2de7f2a333cd3cf8126e893c4ee9d4a7\transformed\play-services-auth-21.5.0-runtime.jar: D8: Invalid stack map table at instruction index 2: invokespecial Ljava/lang/Object;<init>()V, error: Constructor mismatch, expected constructor from com.google.android.gms.auth.api.identity.zbk, but was java.lang.Object.<init>().
+WARNING: C:\Users\pavan\.gradle\caches\9.4.1\transforms\2de7f2a333cd3cf8126e893c4ee9d4a7\transformed\play-services-auth-21.5.0-runtime.jar: D8: Invalid stack map table at instruction index 17: invokespecial Lcom/google/android/gms/auth/api/signin/internal/zbl;<init>(Lcom/google/android/gms/common/api/GoogleApiClient;)V, error: Constructor mismatch, expected constructor from com.google.android.gms.auth.api.signin.internal.zbi, but was com.google.android.gms.auth.api.signin.internal.zbl.<init>(com.google.android.gms.common.api.GoogleApiClient).
+WARNING: C:\Users\pavan\.gradle\caches\9.4.1\transforms\2de7f2a333cd3cf8126e893c4ee9d4a7\transformed\play-services-auth-21.5.0-runtime.jar: D8: Invalid stack map table at instruction index 20: invokespecial Lcom/google/android/gms/auth/api/signin/internal/zbl;<init>(Lcom/google/android/gms/common/api/GoogleApiClient;)V, error: Constructor mismatch, expected constructor from com.google.android.gms.auth.api.signin.internal.zbk, but was com.google.android.gms.auth.api.signin.internal.zbl.<init>(com.google.android.gms.common.api.GoogleApiClient).
+WARNING: C:\Users\pavan\.gradle\caches\9.4.1\transforms\2de7f2a333cd3cf8126e893c4ee9d4a7\transformed\play-services-auth-21.5.0-runtime.jar: D8: Invalid stack map table at instruction index 2: invokespecial Ljava/lang/Object;<init>()V, error: Constructor mismatch, expected constructor from com.google.android.gms.auth.api.identity.zbw, but was java.lang.Object.<init>().
+WARNING: C:\Users\pavan\.gradle\caches\9.4.1\transforms\2de7f2a333cd3cf8126e893c4ee9d4a7\transformed\play-services-auth-21.5.0-runtime.jar: D8: Invalid stack map table at instruction index 2: invokespecial Ljava/lang/Object;<init>()V, error: Constructor mismatch, expected constructor from com.google.android.gms.auth.api.identity.zbc, but was java.lang.Object.<init>().
+WARNING: C:\Users\pavan\.gradle\caches\9.4.1\transforms\2de7f2a333cd3cf8126e893c4ee9d4a7\transformed\play-services-auth-21.5.0-runtime.jar: D8: Invalid stack map table at instruction index 2: invokespecial Ljava/lang/Object;<init>()V, error: Constructor mismatch, expected constructor from com.google.android.gms.auth.api.identity.zbe, but was java.lang.Object.<init>().
+WARNING: C:\Users\pavan\.gradle\caches\9.4.1\transforms\2de7f2a333cd3cf8126e893c4ee9d4a7\transformed\play-services-auth-21.5.0-runtime.jar: D8: Invalid stack map table at instruction index 2: invokespecial Ljava/lang/Object;<init>()V, error: Constructor mismatch, expected constructor from com.google.android.gms.auth.api.identity.zbj, but was java.lang.Object.<init>().
+WARNING: C:\Users\pavan\.gradle\caches\9.4.1\transforms\2de7f2a333cd3cf8126e893c4ee9d4a7\transformed\play-services-auth-21.5.0-runtime.jar: D8: Invalid stack map table at instruction index 2: invokespecial Ljava/lang/Object;<init>()V, error: Constructor mismatch, expected constructor from com.google.android.gms.auth.api.identity.zbr, but was java.lang.Object.<init>().
+WARNING: C:\Users\pavan\.gradle\caches\9.4.1\transforms\2de7f2a333cd3cf8126e893c4ee9d4a7\transformed\play-services-auth-21.5.0-runtime.jar: D8: Invalid stack map table at instruction index 2: invokespecial Ljava/lang/Object;<init>()V, error: Constructor mismatch, expected constructor from com.google.android.gms.internal.auth-api.zbay, but was java.lang.Object.<init>().
+WARNING: C:\Users\pavan\.gradle\caches\9.4.1\transforms\2de7f2a333cd3cf8126e893c4ee9d4a7\transformed\play-services-auth-21.5.0-runtime.jar: D8: Invalid stack map table at instruction index 6: invokespecial Lcom/google/android/gms/common/api/Api$AbstractClientBuilder;<init>()V, error: Constructor mismatch, expected constructor from com.google.android.gms.internal.auth-api.zbak, but was com.google.android.gms.common.api.Api$AbstractClientBuilder.<init>().
+WARNING: C:\Users\pavan\.gradle\caches\9.4.1\transforms\2de7f2a333cd3cf8126e893c4ee9d4a7\transformed\play-services-auth-21.5.0-runtime.jar: D8: Invalid stack map table at instruction index 2: invokespecial Ljava/lang/Object;<init>()V, error: Constructor mismatch, expected constructor from com.google.android.gms.auth.api.identity.zbt, but was java.lang.Object.<init>().
+WARNING: C:\Users\pavan\.gradle\caches\9.4.1\transforms\2de7f2a333cd3cf8126e893c4ee9d4a7\transformed\play-services-auth-21.5.0-runtime.jar: D8: Invalid stack map table at instruction index 2: invokespecial Ljava/lang/Object;<init>()V, error: Constructor mismatch, expected constructor from com.google.android.gms.auth.api.signin.internal.zbu, but was java.lang.Object.<init>().
+WARNING: C:\Users\pavan\.gradle\caches\9.4.1\transforms\2de7f2a333cd3cf8126e893c4ee9d4a7\transformed\play-services-auth-21.5.0-runtime.jar: D8: Invalid stack map table at instruction index 2: invokespecial Ljava/lang/Object;<init>()V, error: Constructor mismatch, expected constructor from com.google.android.gms.auth.api.identity.zbb, but was java.lang.Object.<init>().
+WARNING: C:\Users\pavan\.gradle\caches\9.4.1\transforms\2de7f2a333cd3cf8126e893c4ee9d4a7\transformed\play-services-auth-21.5.0-runtime.jar: D8: Invalid stack map table at instruction index 6: invokespecial Lcom/google/android/gms/common/api/Api$AbstractClientBuilder;<init>()V, error: Constructor mismatch, expected constructor from com.google.android.gms.internal.auth-api.zbw, but was com.google.android.gms.common.api.Api$AbstractClientBuilder.<init>().
+
+> Task :react-native-community_geolocation:prepareReleaseArtProfile
+> Task :react-native-config:prepareReleaseArtProfile
+> Task :react-native-data-scanner:prepareReleaseArtProfile
+> Task :react-native-firebase_app:prepareReleaseArtProfile
+> Task :react-native-firebase_messaging:prepareReleaseArtProfile
+> Task :react-native-image-picker:prepareReleaseArtProfile
+> Task :react-native-keychain:prepareReleaseArtProfile
+> Task :react-native-maps:prepareReleaseArtProfile
+> Task :react-native-nitro-modules:prepareReleaseArtProfile
+> Task :react-native-razorpay:prepareReleaseArtProfile
+> Task :react-native-safe-area-context:prepareReleaseArtProfile
+> Task :react-native-screens:prepareReleaseArtProfile
+> Task :app:mergeReleaseArtProfile
+> Task :react-native-data-scanner:bundleLibRuntimeToJarRelease
+> Task :react-native-safe-area-context:bundleLibRuntimeToJarRelease
+> Task :react-native-nitro-modules:bundleLibRuntimeToJarRelease
+> Task :react-native-keychain:bundleLibRuntimeToJarRelease
+> Task :react-native-community_geolocation:bundleLibRuntimeToJarRelease
+> Task :react-native-firebase_messaging:bundleLibRuntimeToJarRelease
+> Task :react-native-firebase_app:bundleLibRuntimeToJarRelease
+> Task :react-native-config:bundleLibRuntimeToJarRelease
+> Task :react-native-image-picker:bundleLibRuntimeToJarRelease
+> Task :app:generateReleaseAssets UP-TO-DATE
+> Task :react-native-community_geolocation:generateReleaseAssets UP-TO-DATE
+> Task :react-native-community_geolocation:mergeReleaseAssets
+> Task :react-native-maps:bundleLibRuntimeToJarRelease
+> Task :react-native-config:generateReleaseAssets UP-TO-DATE
+> Task :react-native-razorpay:bundleLibRuntimeToJarRelease
+> Task :react-native-config:mergeReleaseAssets
+> Task :react-native-data-scanner:generateReleaseAssets UP-TO-DATE
+> Task :react-native-data-scanner:mergeReleaseAssets
+> Task :react-native-firebase_app:generateReleaseAssets UP-TO-DATE
+> Task :react-native-firebase_app:mergeReleaseAssets
+> Task :react-native-firebase_messaging:generateReleaseAssets UP-TO-DATE
+> Task :react-native-firebase_messaging:mergeReleaseAssets
+> Task :react-native-image-picker:generateReleaseAssets UP-TO-DATE
+> Task :react-native-image-picker:mergeReleaseAssets
+> Task :react-native-keychain:generateReleaseAssets UP-TO-DATE
+> Task :react-native-keychain:mergeReleaseAssets
+> Task :react-native-maps:generateReleaseAssets UP-TO-DATE
+> Task :react-native-maps:mergeReleaseAssets
+> Task :react-native-nitro-modules:generateReleaseAssets UP-TO-DATE
+> Task :react-native-nitro-modules:mergeReleaseAssets
+> Task :react-native-razorpay:generateReleaseAssets UP-TO-DATE
+> Task :react-native-razorpay:mergeReleaseAssets
+> Task :react-native-safe-area-context:generateReleaseAssets UP-TO-DATE
+> Task :react-native-safe-area-context:mergeReleaseAssets
+> Task :react-native-screens:generateReleaseAssets UP-TO-DATE
+> Task :react-native-screens:mergeReleaseAssets
+> Task :app:mergeReleaseAssets
+> Task :app:compressReleaseAssets
+> Task :app:extractReleaseVersionControlInfo
+> Task :app:extractProguardFiles
+> Task :react-native-community_geolocation:processReleaseJavaRes NO-SOURCE
+> Task :react-native-community_geolocation:createFullJarRelease
+> Task :react-native-community_geolocation:extractProguardFiles
+> Task :react-native-screens:bundleLibRuntimeToJarRelease
+> Task :react-native-community_geolocation:generateReleaseLintModel
+> Task :react-native-community_geolocation:prepareLintJarForPublish UP-TO-DATE
+> Task :react-native-config:processReleaseJavaRes NO-SOURCE
+> Task :react-native-config:createFullJarRelease
+> Task :react-native-config:extractProguardFiles
+> Task :react-native-config:generateReleaseLintModel
+> Task :react-native-config:prepareLintJarForPublish UP-TO-DATE
+> Task :react-native-data-scanner:processReleaseJavaRes
+> Task :react-native-data-scanner:createFullJarRelease
+> Task :react-native-data-scanner:extractProguardFiles
+> Task :react-native-nitro-modules:processReleaseJavaRes
+> Task :react-native-nitro-modules:createFullJarRelease
+> Task :react-native-nitro-modules:extractProguardFiles
+> Task :react-native-nitro-modules:generateReleaseLintModel
+> Task :react-native-nitro-modules:prepareLintJarForPublish UP-TO-DATE
+> Task :react-native-data-scanner:generateReleaseLintModel
+> Task :react-native-data-scanner:prepareLintJarForPublish UP-TO-DATE
+> Task :react-native-firebase_app:processReleaseJavaRes NO-SOURCE
+> Task :react-native-firebase_app:createFullJarRelease
+> Task :react-native-firebase_app:extractProguardFiles
+> Task :react-native-firebase_app:generateReleaseLintModel
+> Task :react-native-firebase_app:prepareLintJarForPublish UP-TO-DATE
+> Task :react-native-firebase_messaging:processReleaseJavaRes NO-SOURCE
+> Task :react-native-firebase_messaging:createFullJarRelease
+> Task :react-native-firebase_messaging:extractProguardFiles
+> Task :react-native-firebase_messaging:generateReleaseLintModel
+> Task :react-native-firebase_messaging:prepareLintJarForPublish UP-TO-DATE
+> Task :react-native-image-picker:processReleaseJavaRes NO-SOURCE
+> Task :react-native-image-picker:createFullJarRelease
+> Task :react-native-image-picker:extractProguardFiles
+> Task :react-native-image-picker:generateReleaseLintModel
+> Task :react-native-image-picker:prepareLintJarForPublish UP-TO-DATE
+> Task :react-native-keychain:processReleaseJavaRes
+> Task :react-native-keychain:createFullJarRelease
+> Task :react-native-keychain:extractProguardFiles
+> Task :react-native-keychain:generateReleaseLintModel
+> Task :react-native-keychain:prepareLintJarForPublish UP-TO-DATE
+> Task :react-native-maps:processReleaseJavaRes NO-SOURCE
+> Task :react-native-maps:createFullJarRelease
+> Task :react-native-maps:extractProguardFiles
+> Task :react-native-maps:generateReleaseLintModel
+> Task :react-native-maps:prepareLintJarForPublish UP-TO-DATE
+> Task :react-native-razorpay:processReleaseJavaRes NO-SOURCE
+> Task :app:processReleaseResources
+> Task :react-native-razorpay:createFullJarRelease
+> Task :app:dexBuilderRelease
+> Task :react-native-razorpay:extractProguardFiles
+> Task :app:mergeReleaseGlobalSynthetics
+> Task :react-native-razorpay:generateReleaseLintModel
+> Task :react-native-razorpay:prepareLintJarForPublish UP-TO-DATE
+> Task :react-native-safe-area-context:processReleaseJavaRes
+> Task :react-native-safe-area-context:createFullJarRelease
+> Task :react-native-safe-area-context:extractProguardFiles
+> Task :react-native-safe-area-context:generateReleaseLintModel
+> Task :react-native-safe-area-context:prepareLintJarForPublish UP-TO-DATE
+> Task :react-native-screens:processReleaseJavaRes
+> Task :react-native-screens:createFullJarRelease
+> Task :react-native-screens:extractProguardFiles
+> Task :react-native-screens:generateReleaseLintModel
+> Task :react-native-screens:prepareLintJarForPublish UP-TO-DATE
+> Task :app:generateReleaseLintVitalReportModel
+> Task :react-native-data-scanner:extractDeepLinksForAarRelease
+> Task :react-native-data-scanner:checkReleaseAarMetadata
+> Task :react-native-data-scanner:extractReleaseAnnotations
+> Task :react-native-data-scanner:mergeReleaseGeneratedProguardFiles
+> Task :react-native-data-scanner:mergeReleaseConsumerProguardFiles
+> Task :react-native-data-scanner:stripReleaseDebugSymbols
+> Task :react-native-keychain:stripReleaseDebugSymbols NO-SOURCE
+> Task :react-native-keychain:copyReleaseJniLibsProjectAndLocalJars
+> Task :react-native-keychain:extractDeepLinksForAarRelease
+> Task :react-native-keychain:checkReleaseAarMetadata
+> Task :react-native-keychain:mergeReleaseGeneratedProguardFiles
+> Task :react-native-data-scanner:copyReleaseJniLibsProjectAndLocalJars
+> Task :react-native-keychain:mergeReleaseConsumerProguardFiles
+> Task :react-native-maps:stripReleaseDebugSymbols NO-SOURCE
+> Task :react-native-maps:copyReleaseJniLibsProjectAndLocalJars
+> Task :react-native-maps:extractDeepLinksForAarRelease
+> Task :react-native-maps:checkReleaseAarMetadata
+> Task :react-native-data-scanner:mergeReleaseJavaResource
+> Task :react-native-keychain:mergeReleaseJavaResource
+> Task :react-native-maps:extractReleaseAnnotations
+> Task :react-native-data-scanner:syncReleaseLibJars
+> Task :react-native-data-scanner:bundleReleaseLocalLintAar
+> Task :react-native-maps:mergeReleaseGeneratedProguardFiles
+> Task :react-native-maps:mergeReleaseConsumerProguardFiles
+> Task :react-native-maps:mergeReleaseJavaResource
+> Task :react-native-nitro-modules:checkReleaseAarMetadata
+> Task :react-native-maps:syncReleaseLibJars
+> Task :react-native-maps:bundleReleaseLocalLintAar
+> Task :react-native-nitro-modules:extractDeepLinksForAarRelease
+> Task :react-native-nitro-modules:extractReleaseAnnotations
+> Task :react-native-nitro-modules:mergeReleaseGeneratedProguardFiles
+> Task :react-native-nitro-modules:mergeReleaseConsumerProguardFiles
+> Task :react-native-safe-area-context:stripReleaseDebugSymbols NO-SOURCE
+> Task :react-native-safe-area-context:extractDeepLinksForAarRelease
+> Task :react-native-safe-area-context:extractReleaseAnnotations
+> Task :react-native-safe-area-context:mergeReleaseGeneratedProguardFiles
+> Task :react-native-safe-area-context:mergeReleaseConsumerProguardFiles
+> Task :react-native-nitro-modules:mergeReleaseJavaResource
+> Task :react-native-safe-area-context:copyReleaseJniLibsProjectAndLocalJars
+> Task :react-native-safe-area-context:checkReleaseAarMetadata
+> Task :react-native-safe-area-context:mergeReleaseJavaResource
+> Task :react-native-nitro-modules:stripReleaseDebugSymbols
+> Task :react-native-screens:checkReleaseAarMetadata
+> Task :react-native-nitro-modules:syncReleaseLibJars
+> Task :react-native-nitro-modules:copyReleaseJniLibsProjectAndLocalJars
+> Task :react-native-safe-area-context:syncReleaseLibJars
+> Task :react-native-nitro-modules:bundleReleaseLocalLintAar
+> Task :react-native-safe-area-context:bundleReleaseLocalLintAar
+> Task :react-native-screens:extractDeepLinksForAarRelease
+> Task :react-native-screens:extractReleaseAnnotations
+> Task :react-native-screens:mergeReleaseGeneratedProguardFiles
+> Task :react-native-screens:mergeReleaseConsumerProguardFiles
+> Task :react-native-screens:mergeReleaseJavaResource
+> Task :react-native-screens:stripReleaseDebugSymbols
+> Task :react-native-screens:syncReleaseLibJars
+> Task :react-native-community_geolocation:stripReleaseDebugSymbols NO-SOURCE
+> Task :react-native-community_geolocation:copyReleaseJniLibsProjectAndLocalJars
+> Task :react-native-community_geolocation:extractDeepLinksForAarRelease
+> Task :react-native-community_geolocation:checkReleaseAarMetadata
+> Task :react-native-community_geolocation:extractReleaseAnnotations
+> Task :react-native-community_geolocation:mergeReleaseGeneratedProguardFiles
+> Task :react-native-screens:copyReleaseJniLibsProjectAndLocalJars
+> Task :react-native-community_geolocation:mergeReleaseConsumerProguardFiles
+> Task :react-native-screens:bundleReleaseLocalLintAar
+> Task :react-native-community_geolocation:mergeReleaseJavaResource
+> Task :react-native-firebase_messaging:checkReleaseAarMetadata
+> Task :react-native-community_geolocation:syncReleaseLibJars
+> Task :react-native-community_geolocation:bundleReleaseLocalLintAar
+> Task :react-native-firebase_messaging:stripReleaseDebugSymbols NO-SOURCE
+> Task :react-native-firebase_messaging:copyReleaseJniLibsProjectAndLocalJars
+> Task :react-native-firebase_messaging:extractDeepLinksForAarRelease
+> Task :react-native-firebase_messaging:extractReleaseAnnotations
+> Task :react-native-firebase_messaging:mergeReleaseGeneratedProguardFiles
+> Task :react-native-firebase_messaging:mergeReleaseConsumerProguardFiles
+> Task :react-native-firebase_messaging:mergeReleaseJavaResource
+> Task :react-native-firebase_messaging:syncReleaseLibJars
+> Task :react-native-firebase_app:checkReleaseAarMetadata
+> Task :react-native-firebase_messaging:bundleReleaseLocalLintAar
+> Task :react-native-firebase_app:stripReleaseDebugSymbols NO-SOURCE
+> Task :react-native-firebase_app:copyReleaseJniLibsProjectAndLocalJars
+> Task :react-native-firebase_app:extractDeepLinksForAarRelease
+> Task :react-native-firebase_app:extractReleaseAnnotations
+> Task :react-native-firebase_app:mergeReleaseGeneratedProguardFiles
+> Task :react-native-firebase_app:mergeReleaseConsumerProguardFiles
+> Task :react-native-firebase_app:mergeReleaseJavaResource
+> Task :react-native-config:checkReleaseAarMetadata
+> Task :react-native-firebase_app:syncReleaseLibJars
+> Task :react-native-firebase_app:bundleReleaseLocalLintAar
+> Task :react-native-config:stripReleaseDebugSymbols NO-SOURCE
+> Task :react-native-config:copyReleaseJniLibsProjectAndLocalJars
+> Task :react-native-config:extractDeepLinksForAarRelease
+> Task :react-native-config:extractReleaseAnnotations
+> Task :react-native-config:mergeReleaseGeneratedProguardFiles
+> Task :react-native-config:mergeReleaseConsumerProguardFiles
+> Task :react-native-config:mergeReleaseJavaResource
+> Task :react-native-image-picker:checkReleaseAarMetadata
+> Task :react-native-config:syncReleaseLibJars
+> Task :react-native-config:bundleReleaseLocalLintAar
+> Task :react-native-image-picker:stripReleaseDebugSymbols NO-SOURCE
+> Task :react-native-image-picker:copyReleaseJniLibsProjectAndLocalJars
+> Task :react-native-image-picker:extractDeepLinksForAarRelease
+> Task :react-native-image-picker:extractReleaseAnnotations
+> Task :react-native-image-picker:mergeReleaseGeneratedProguardFiles
+> Task :react-native-image-picker:mergeReleaseConsumerProguardFiles
+> Task :react-native-image-picker:mergeReleaseJavaResource
+> Task :react-native-razorpay:checkReleaseAarMetadata
+> Task :react-native-image-picker:syncReleaseLibJars
+> Task :react-native-image-picker:bundleReleaseLocalLintAar
+> Task :react-native-razorpay:stripReleaseDebugSymbols NO-SOURCE
+> Task :react-native-razorpay:copyReleaseJniLibsProjectAndLocalJars
+> Task :react-native-razorpay:extractDeepLinksForAarRelease
+> Task :react-native-razorpay:extractReleaseAnnotations
+> Task :react-native-razorpay:mergeReleaseGeneratedProguardFiles
+> Task :react-native-razorpay:mergeReleaseConsumerProguardFiles
+> Task :react-native-razorpay:mergeReleaseJavaResource
+> Task :react-native-razorpay:syncReleaseLibJars
+> Task :react-native-razorpay:bundleReleaseLocalLintAar
+> Task :react-native-community_geolocation:writeReleaseLintModelMetadata
+> Task :react-native-config:writeReleaseLintModelMetadata
+> Task :react-native-nitro-modules:writeReleaseLintModelMetadata
+> Task :react-native-data-scanner:writeReleaseLintModelMetadata
+> Task :react-native-firebase_app:writeReleaseLintModelMetadata
+> Task :react-native-firebase_messaging:writeReleaseLintModelMetadata
+> Task :react-native-image-picker:writeReleaseLintModelMetadata
+> Task :react-native-keychain:writeReleaseLintModelMetadata
+> Task :react-native-maps:writeReleaseLintModelMetadata
+> Task :react-native-razorpay:writeReleaseLintModelMetadata
+> Task :react-native-safe-area-context:writeReleaseLintModelMetadata
+> Task :react-native-screens:writeReleaseLintModelMetadata
+> Task :react-native-community_geolocation:generateReleaseLintVitalModel
+> Task :react-native-config:generateReleaseLintVitalModel
+> Task :react-native-data-scanner:generateReleaseLintVitalModel
+> Task :react-native-firebase_app:generateReleaseLintVitalModel
+> Task :react-native-firebase_messaging:generateReleaseLintVitalModel
+> Task :react-native-image-picker:generateReleaseLintVitalModel
+> Task :react-native-keychain:generateReleaseLintVitalModel
+> Task :react-native-maps:generateReleaseLintVitalModel
+> Task :react-native-nitro-modules:generateReleaseLintVitalModel
+> Task :react-native-razorpay:generateReleaseLintVitalModel
+> Task :react-native-safe-area-context:generateReleaseLintVitalModel
+> Task :react-native-screens:generateReleaseLintVitalModel
+> Task :app:mergeDexRelease
+> Task :app:processReleaseJavaRes
+> Task :app:compileReleaseArtProfile
+> Task :app:collectReleaseDependencies
+> Task :app:sdkReleaseDependencyData
+> Task :app:validateSigningRelease
+> Task :app:writeReleaseAppMetadata
+> Task :app:writeReleaseSigningConfigVersions
+> Task :app:optimizeReleaseResources
+> Task :react-native-community_geolocation:lintVitalAnalyzeRelease
+> Task :react-native-config:lintVitalAnalyzeRelease
+
+> Task :react-native-keychain:extractReleaseAnnotations
+Warning: com.oblador.keychain.KeychainModule.AccessControl: The typedef annotation should have @Retention(RetentionPolicy.SOURCE)
+Warning: com.oblador.keychain.KeychainModule.KnownCiphers: The typedef annotation should have @Retention(RetentionPolicy.SOURCE)
+
+> Task :react-native-keychain:syncReleaseLibJars
+> Task :react-native-keychain:bundleReleaseLocalLintAar
+> Task :react-native-firebase_messaging:lintVitalAnalyzeRelease
+> Task :react-native-firebase_app:lintVitalAnalyzeRelease
+> Task :app:mergeReleaseJavaResource
+> Task :react-native-image-picker:lintVitalAnalyzeRelease
+> Task :react-native-data-scanner:lintVitalAnalyzeRelease
+> Task :react-native-nitro-modules:lintVitalAnalyzeRelease
+> Task :react-native-maps:lintVitalAnalyzeRelease
+> Task :react-native-razorpay:lintVitalAnalyzeRelease
+> Task :react-native-safe-area-context:lintVitalAnalyzeRelease
+> Task :react-native-keychain:lintVitalAnalyzeRelease
+> Task :react-native-screens:lintVitalAnalyzeRelease
+> Task :app:lintVitalAnalyzeRelease
+> Task :app:lintVitalReportRelease
+> Task :app:lintVitalRelease
+> Task :app:packageRelease
+> Task :app:createReleaseApkListingFileRedirect
+> Task :app:assembleRelease
+
+[Incubating] Problems report is available at: file:///D:/techyArts/B-W/mobile/android/build/reports/problems/problems-report.html
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 10.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/9.4.1/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+
+BUILD SUCCESSFUL in 6m 3s
+571 actionable tasks: 501 executed, 70 up-to-date

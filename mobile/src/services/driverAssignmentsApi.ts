@@ -43,6 +43,8 @@ export type DriverJobDetail = DriverJob & {
   facilityCollected?: boolean;
   facilityHandedOverAt?: string | null;
   facilityCollectedAt?: string | null;
+  driverArrivedAtFacility?: boolean;
+  driverArrivedAtFacilityAt?: string | null;
 };
 
 export type DriverDashboard = {
@@ -139,11 +141,21 @@ export function rejectDriverJob(
   );
 }
 
+export interface DriverNavigationResult {
+  assignmentId: string;
+  orderId?: string;
+  provider?: string;
+  status: string;
+  destination?: string;
+  assignmentStatus?: string;
+  orderStatus?: string;
+}
+
 export function startDriverNavigation(
   accessToken: string,
   assignmentId: string,
 ) {
-  return apiRequest(
+  return apiRequest<DriverNavigationResult>(
     `/driver-assignments/${encodeURIComponent(assignmentId)}/navigation`,
     {
       accessToken,
@@ -161,6 +173,8 @@ export function markDriverArrived(accessToken: string, assignmentId: string) {
     },
   );
 }
+
+export const markDriverArrivedAtFacility = markDriverArrived;
 
 export function beginFacilityTransit(
   accessToken: string,

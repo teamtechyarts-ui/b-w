@@ -43,4 +43,83 @@ describe('7C assignment decisions', () => {
     });
     await expect(fixture({data: null, error: {code: '42501'}}).service.reassignDriver('driver-profile', 'job-1', 'driver-2')).rejects.toBeInstanceOf(ForbiddenException);
   });
+
+  it('rejects arrive transition for unaccepted or invalid assignment state', async () => {
+    const driverQuery: any = {};
+    driverQuery.select = jest.fn(() => driverQuery);
+    driverQuery.eq = jest.fn(() => driverQuery);
+    driverQuery.maybeSingle = jest.fn().mockResolvedValue({ data: { id: 'driver-1', is_active: true }, error: null });
+
+    const assignmentQuery: any = {};
+    assignmentQuery.select = jest.fn(() => assignmentQuery);
+    assignmentQuery.eq = jest.fn(() => assignmentQuery);
+    assignmentQuery.maybeSingle = jest.fn().mockResolvedValue({
+      data: { id: 'job-1', order_id: 'order-1', assignment_type: 'delivery', status: 'assigned' },
+      error: null,
+    });
+
+    const service = new LogisticsService({
+      admin: {
+        from: jest.fn((table: string) => (table === 'drivers' ? driverQuery : assignmentQuery)),
+        rpc: jest.fn(),
+      },
+    } as any, {} as any);
+
+    await expect(service.arrive('driver-profile', 'job-1')).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('transitions accepted delivery with collection confirmed through arrival successfully', async () => {
+    const driverQuery: any = {};
+    driverQuery.select = jest.fn(() => driverQuery);
+    driverQuery.eq = jest.fn(() => driverQuery);
+    driverQuery.maybeSingle = jest.fn().mockResolvedValue({ data: { id: 'driver-1', is_active: true }, error: null });
+
+    const assignmentQuery: any = {};
+    assignmentQuery.select = jest.fn(() => assignmentQuery);
+    assignmentQuery.eq = jest.fn(() => assignmentQuery);
+    assignmentQuery.maybeSingle = jest.fn().mockResolvedValue({
+      data: { id: 'job-1', order_id: 'order-1', assignment_type: 'delivery', status: 'accepted' },
+      error: null,
+    });
+
+    const navQuery: any = {};
+    navQuery.select = jest.fn(() => navQuery);
+    navQuery.eq = jest.fn(() => navQuery);
+    navQuery.limit = jest.fn().mockResolvedValue({
+      data: [{ id: 'nav-collection-1', event_type: 'driver_collection_confirmed' }],
+      error: null,
+    });
+
+    const rpc = jest.fn().mockResolvedValue({
+      data: { orderId: 'order-1', assignmentStatus: 'arrived', orderStatus: 'delivery_otp_pending' },
+      error: null,
+    });
+
+    const service = new LogisticsService({
+      admin: {
+        from: jest.fn((table: string) => {
+          if (table === 'drivers') return driverQuery;
+          if (table === 'driver_navigation_events') return navQuery;
+          return assignmentQuery;
+        }),
+        rpc,
+      },
+    } as any, {} as any);
+
+    const result = await service.arrive('driver-profile', 'job-1');
+    expect(result).toMatchObject({
+      assignmentId: 'job-1',
+      orderId: 'order-1',
+      assignmentStatus: 'arrived',
+      orderStatus: 'delivery_otp_pending',
+    });
+    expect(rpc).toHaveBeenCalledWith('transition_driver_assignment_atomic', expect.objectContaining({
+      p_assignment_id: 'job-1',
+      p_action: 'start_navigation',
+    }));
+    expect(rpc).toHaveBeenCalledWith('transition_driver_assignment_atomic', expect.objectContaining({
+      p_assignment_id: 'job-1',
+      p_action: 'arrive',
+    }));
+  });
 });

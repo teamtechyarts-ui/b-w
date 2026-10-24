@@ -10,7 +10,10 @@ jest.mock('@react-navigation/native', () => ({
     require('react').useEffect(callback, [callback]);
   },
 }));
-jest.mock('../services/ordersApi', () => ({getOrders: jest.fn()}));
+jest.mock('../services/ordersApi', () => ({
+  getOrders: jest.fn(),
+  invalidateOrdersCache: jest.fn(),
+}));
 
 describe('OrdersScreen', () => {
   test('returning from a cancelled order refreshes history and moves it to Past', async () => {
@@ -46,5 +49,55 @@ describe('OrdersScreen', () => {
     expect(view.getByText('BW-20261001-3F97A3B9')).toBeTruthy();
     expect(view.getByText('Completed')).toBeTruthy();
     expect(view.getByText(/Delivered/)).toBeTruthy();
+  });
+
+  test('discards older in-flight response when real-time event updates order status', async () => {
+    let resolveFirstFetch: (orders: any) => void;
+    const firstFetchPromise = new Promise(resolve => {
+      resolveFirstFetch = resolve;
+    });
+
+    const initialOrder = {
+      id: 'ord-race',
+      order_number: 'BW-RACE-01',
+      current_status: 'pickup_assigned',
+      total_amount: 150,
+      order_items: [],
+    };
+
+    // First fetch is slow / in-flight
+    (getOrders as jest.Mock).mockReturnValueOnce(firstFetchPromise);
+
+    const view = await render(
+      <OrdersScreen accessToken="token" onBack={jest.fn()} onOpenOrder={jest.fn()} />,
+    );
+
+    // Realtime status update arrives while first fetch is still in flight
+    const { realtimeService } = require('../services/realtimeService');
+    await act(async () => {
+      realtimeService.emitLocalEvent('orders:all', {
+        eventType: 'ORDER_STATUS_CHANGED',
+        entityId: 'ord-race',
+        orderId: 'ord-race',
+        status: 'picked_up',
+        timestamp: new Date().toISOString(),
+      });
+    });
+
+    // Next fetch (queued reload) returns updated authoritative data
+    (getOrders as jest.Mock).mockResolvedValueOnce([
+      { ...initialOrder, current_status: 'picked_up' },
+    ]);
+
+    // Now resolve the older first fetch with the OLD status ('pickup_assigned')
+    await act(async () => {
+      resolveFirstFetch!([initialOrder]);
+    });
+
+    // The order must NOT revert to the old status; it must reflect 'picked_up' ('Laundry Picked Up')
+    await waitFor(() => {
+      expect(view.getByText('BW-RACE-01')).toBeTruthy();
+      expect(view.getByText('Laundry Picked Up')).toBeTruthy();
+    });
   });
 });

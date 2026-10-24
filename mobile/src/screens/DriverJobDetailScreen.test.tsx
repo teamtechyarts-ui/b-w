@@ -47,6 +47,10 @@ jest.mock('../services/driverAssignmentsApi', () => ({
   formatDriverAddress: jest.fn(() => '1 Test Road'),
 }));
 jest.mock('../services/deviceLocationService', () => ({
+  checkLocationPermissionStatus: jest.fn().mockResolvedValue('granted'),
+  requestLocationPermissionDetailed: jest
+    .fn()
+    .mockResolvedValue({ status: 'granted', canAskAgain: true }),
   requestAndroidLocationPermission: jest.fn().mockResolvedValue(true),
   getCurrentDeviceLocation: jest
     .fn()
@@ -500,9 +504,14 @@ test('only a picked-up job can start facility transit and show its scoped handof
   expect(view.getByText('Original customer pickup')).toBeTruthy();
   fireEvent.press(view.getByText('Start facility transit'));
   await waitFor(() =>
-    expect(view.getByText('Show facility handoff QR')).toBeTruthy(),
+    expect(view.getByText('Arrived at Facility')).toBeTruthy(),
   );
   expect(beginFacilityTransit).toHaveBeenCalledWith('token', 'job-1');
+  fireEvent.press(view.getByText('Arrived at Facility'));
+  await waitFor(() =>
+    expect(view.getByText('Show facility handoff QR')).toBeTruthy(),
+  );
+  expect(markDriverArrived).toHaveBeenCalledWith('token', 'job-1');
   await waitFor(() =>
     expect(openUrl).toHaveBeenCalledWith(expect.stringContaining('17.4,78.4')),
   );
@@ -1412,5 +1421,498 @@ test('in transit to facility displays correct destination, status badge, and hid
   expect(view.queryByText('CUSTOMER')).toBeNull();
   expect(view.queryByText('Call')).toBeNull();
 });
+
+test('start trip to customer successfully transitions to active delivery trip without flickering', async () => {
+  const collectedDeliveryJob = {
+    ...offeredJob,
+    id: 'job-delivery-1',
+    type: 'delivery',
+    assignmentStatus: 'accepted',
+    orderStatus: 'delivery_accepted',
+    facilityCollected: true,
+    facility: { name: 'Central Facility', address: '10 Industrial Rd' },
+    address: {
+      label: 'Home',
+      address_line1: '123 Customer St',
+      city: 'Hyderabad',
+      state: 'TS',
+      postal_code: '500001',
+      latitude: 17.44,
+      longitude: 78.38,
+    },
+  };
+
+  const inTransitDeliveryJob = {
+    ...collectedDeliveryJob,
+    assignmentStatus: 'en_route',
+    orderStatus: 'en_route_delivery',
+  };
+
+  load
+    .mockResolvedValueOnce(collectedDeliveryJob)
+    .mockResolvedValue(inTransitDeliveryJob);
+
+  (startDriverNavigation as jest.Mock).mockResolvedValue({
+    status: 'en_route',
+    assignmentStatus: 'en_route',
+    orderStatus: 'en_route_delivery',
+  });
+
+  const view = await render(
+    <DriverJobDetailScreen
+      accessToken="token"
+      assignmentId="job-delivery-1"
+      onBack={jest.fn()}
+    />,
+  );
+
+  await waitFor(() =>
+    expect(view.getByText('Start trip to customer')).toBeTruthy(),
+  );
+
+  await fireEvent.press(view.getByText('Start trip to customer'));
+
+  expect(startDriverNavigation).toHaveBeenCalledWith('token', 'job-delivery-1');
+  await waitFor(() =>
+    expect(view.getByText('Navigate to delivery')).toBeTruthy(),
+  );
+  expect(view.queryByText('Start trip to customer')).toBeNull();
+});
+
+test('start trip to customer failure restores action and displays inline error with retry capability', async () => {
+  let currentTime = 10000;
+  const dateSpy = jest.spyOn(Date, 'now').mockImplementation(() => currentTime);
+  try {
+    const collectedDeliveryJob = {
+      ...offeredJob,
+      id: 'job-delivery-1',
+      type: 'delivery',
+      assignmentStatus: 'accepted',
+      orderStatus: 'delivery_accepted',
+      facilityCollected: true,
+    };
+
+    load.mockResolvedValue(collectedDeliveryJob);
+    (startDriverNavigation as jest.Mock).mockRejectedValueOnce(
+      new Error('Network error starting navigation. Please retry.'),
+    );
+
+    const view = await render(
+      <DriverJobDetailScreen
+        accessToken="token"
+        assignmentId="job-delivery-1"
+        onBack={jest.fn()}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(view.getByText('Start trip to customer')).toBeTruthy(),
+    );
+
+    await fireEvent.press(view.getByText('Start trip to customer'));
+
+    await waitFor(() =>
+      expect(
+        view.getByText('Network error starting navigation. Please retry.'),
+      ).toBeTruthy(),
+    );
+    expect(view.getByText('Start trip to customer')).toBeTruthy();
+    expect(startDriverNavigation).toHaveBeenCalledTimes(1);
+
+    // Retry succeeded
+    (startDriverNavigation as jest.Mock).mockResolvedValueOnce({
+      status: 'en_route',
+      assignmentStatus: 'en_route',
+      orderStatus: 'en_route_delivery',
+    });
+
+    // Advance time past 1000ms debounce
+    currentTime += 1500;
+
+    await fireEvent.press(view.getByText('Start trip to customer'));
+
+    await waitFor(() =>
+      expect(view.getByText('Navigate to delivery')).toBeTruthy(),
+    );
+    expect(startDriverNavigation).toHaveBeenCalledTimes(2);
+  } finally {
+    dateSpy.mockRestore();
+  }
+});
+
+test('start trip to customer prevents rapid repeated taps from triggering duplicate mutations', async () => {
+  const collectedDeliveryJob = {
+    ...offeredJob,
+    id: 'job-delivery-1',
+    type: 'delivery',
+    assignmentStatus: 'accepted',
+    orderStatus: 'delivery_accepted',
+    facilityCollected: true,
+  };
+
+  load.mockResolvedValue(collectedDeliveryJob);
+
+  let resolveNavigation: any;
+  const navigationPromise = new Promise(resolve => {
+    resolveNavigation = resolve;
+  });
+  (startDriverNavigation as jest.Mock).mockImplementation(() => navigationPromise);
+
+  const view = await render(
+    <DriverJobDetailScreen
+      accessToken="token"
+      assignmentId="job-delivery-1"
+      onBack={jest.fn()}
+    />,
+  );
+
+  await waitFor(() =>
+    expect(view.getByText('Start trip to customer')).toBeTruthy(),
+  );
+
+  // Trigger first tap
+  const firstPress = fireEvent.press(view.getByText('Start trip to customer'));
+
+  await waitFor(() =>
+    expect(view.getByText('Starting trip...')).toBeTruthy(),
+  );
+
+  // Immediate subsequent taps while in flight
+  fireEvent.press(view.getByText('Starting trip...'));
+  fireEvent.press(view.getByText('Starting trip...'));
+
+  expect(startDriverNavigation).toHaveBeenCalledTimes(1);
+
+  // Settle request
+  resolveNavigation({
+    status: 'en_route',
+    assignmentStatus: 'en_route',
+    orderStatus: 'en_route_delivery',
+  });
+
+  await waitFor(() =>
+    expect(view.getByText('Navigate to delivery')).toBeTruthy(),
+  );
+  expect(startDriverNavigation).toHaveBeenCalledTimes(1);
+});
+
+test('stale background refetches do not regress confirmed forward delivery status to accepted', async () => {
+  const collectedDeliveryJob = {
+    ...offeredJob,
+    id: 'job-delivery-1',
+    type: 'delivery',
+    assignmentStatus: 'accepted',
+    orderStatus: 'delivery_accepted',
+    facilityCollected: true,
+  };
+
+  const staleServerResponse = {
+    ...collectedDeliveryJob,
+    assignmentStatus: 'accepted',
+    orderStatus: 'delivery_accepted',
+  };
+
+  load
+    .mockResolvedValueOnce(collectedDeliveryJob)
+    .mockResolvedValue(staleServerResponse); // subsequent fetch returns stale accepted status
+
+  (startDriverNavigation as jest.Mock).mockResolvedValue({
+    status: 'en_route',
+    assignmentStatus: 'en_route',
+    orderStatus: 'en_route_delivery',
+  });
+
+  const view = await render(
+    <DriverJobDetailScreen
+      accessToken="token"
+      assignmentId="job-delivery-1"
+      onBack={jest.fn()}
+    />,
+  );
+
+  await waitFor(() =>
+    expect(view.getByText('Start trip to customer')).toBeTruthy(),
+  );
+
+  await fireEvent.press(view.getByText('Start trip to customer'));
+
+  await waitFor(() =>
+    expect(view.getByText('Navigate to delivery')).toBeTruthy(),
+  );
+
+  // Even though load resolved with stale accepted status, screen stays in active trip
+  expect(view.queryByText('Start trip to customer')).toBeNull();
+  expect(view.getByText('Navigate to delivery')).toBeTruthy();
+});
+
+test('start trip to customer keeps loading state stable under slow network conditions until completion', async () => {
+  const collectedDeliveryJob = {
+    ...offeredJob,
+    id: 'job-delivery-1',
+    type: 'delivery',
+    assignmentStatus: 'accepted',
+    orderStatus: 'delivery_accepted',
+    facilityCollected: true,
+  };
+
+  load.mockResolvedValue(collectedDeliveryJob);
+
+  let resolveNavigation: any;
+  const navigationPromise = new Promise(resolve => {
+    resolveNavigation = resolve;
+  });
+  (startDriverNavigation as jest.Mock).mockImplementation(() => navigationPromise);
+
+  const view = await render(
+    <DriverJobDetailScreen
+      accessToken="token"
+      assignmentId="job-delivery-1"
+      onBack={jest.fn()}
+    />,
+  );
+
+  await waitFor(() =>
+    expect(view.getByText('Start trip to customer')).toBeTruthy(),
+  );
+
+  fireEvent.press(view.getByText('Start trip to customer'));
+
+  await waitFor(() =>
+    expect(view.getByText('Starting trip...')).toBeTruthy(),
+  );
+
+  // Remains disabled while slow network request is in flight
+  expect(view.getByText('Starting trip...')).toBeTruthy();
+  expect(view.queryByText('Start trip to customer')).toBeNull();
+
+  resolveNavigation({
+    status: 'en_route',
+    assignmentStatus: 'en_route',
+    orderStatus: 'en_route_delivery',
+  });
+
+  await waitFor(() =>
+    expect(view.getByText('Navigate to delivery')).toBeTruthy(),
+  );
+  expect(view.queryByText('Starting trip...')).toBeNull();
+  expect(view.queryByText('Start trip to customer')).toBeNull();
+});
+
+test('pickup OTP input triggers scrollToEnd and expands scroll padding on keyboard show', async () => {
+  const arrivedPickupJob = {
+    id: 'job-pickup-arrived',
+    orderId: 'order-123456',
+    orderNumber: 'BW-20260921-ABC12345',
+    type: 'pickup',
+    assignmentStatus: 'arrived',
+    orderStatus: 'pickup_otp_pending',
+    customer: { name: 'Pavan Test', phone: '9876543210' },
+    address: { addressLine1: 'Road 1', city: 'Hyderabad' },
+    items: [{ id: 'item-1', item_name: 'Shirt', quantity: 2 }],
+  };
+
+  load.mockResolvedValue(arrivedPickupJob);
+
+  const view = await render(
+    <DriverJobDetailScreen
+      accessToken="test-driver-token"
+      assignmentId="job-pickup-arrived"
+      onBack={jest.fn()}
+    />,
+  );
+
+  await waitFor(() => {
+    expect(view.getByLabelText('Customer pickup OTP')).toBeTruthy();
+  });
+
+  const otpInput = view.getByLabelText('Customer pickup OTP');
+  expect(otpInput).toBeTruthy();
+  expect(view.getByText('Verify OTP and complete pickup')).toBeTruthy();
+
+  // Focus the pickup OTP input
+  fireEvent(otpInput, 'focus');
+
+  // Verify the submit button and input are accessible
+  expect(view.getByText('Verify OTP and complete pickup')).toBeTruthy();
+});
+
+describe('Delivery arrival action flow', () => {
+  const baseCollectedJob = {
+    ...offeredJob,
+    id: 'job-delivery-arrived-test',
+    type: 'delivery',
+    assignmentStatus: 'accepted',
+    orderStatus: 'delivery_accepted',
+    facilityCollected: true,
+    facility: { name: 'Central Facility', address: '10 Industrial Rd' },
+    address: {
+      label: 'Home',
+      address_line1: '456 Customer Ave',
+      city: 'Hyderabad',
+      state: 'TS',
+      postal_code: '500001',
+    },
+    customer: { name: 'Recipient Customer', phone: '+919876543210' },
+  };
+
+  test('accepted assignment with collection confirmed shows both Navigate and I\'ve Arrived buttons', async () => {
+    load.mockResolvedValue(baseCollectedJob);
+
+    const view = await render(
+      <DriverJobDetailScreen
+        accessToken="token"
+        assignmentId="job-delivery-arrived-test"
+        onBack={jest.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(view.getByText('Navigate')).toBeTruthy();
+      expect(view.getByText("I've Arrived")).toBeTruthy();
+    });
+
+    expect(view.getByText('ORDER COLLECTED')).toBeTruthy();
+    expect(view.getByText('Start trip to customer')).toBeTruthy();
+  });
+
+  test('arrival recorded replaces arrival action with next valid action (delivery OTP)', async () => {
+    const arrivedState = {
+      ...baseCollectedJob,
+      assignmentStatus: 'arrived',
+      orderStatus: 'delivery_otp_pending',
+    };
+
+    load.mockResolvedValueOnce(baseCollectedJob).mockResolvedValue(arrivedState);
+    (markDriverArrived as jest.Mock).mockResolvedValueOnce({
+      assignmentId: 'job-delivery-arrived-test',
+      assignmentStatus: 'arrived',
+      orderStatus: 'delivery_otp_pending',
+    });
+
+    const view = await render(
+      <DriverJobDetailScreen
+        accessToken="token"
+        assignmentId="job-delivery-arrived-test"
+        onBack={jest.fn()}
+      />,
+    );
+
+    await waitFor(() => expect(view.getByText("I've Arrived")).toBeTruthy());
+
+    await fireEvent.press(view.getByText("I've Arrived"));
+
+    expect(markDriverArrived).toHaveBeenCalledWith('token', 'job-delivery-arrived-test');
+
+    await waitFor(() => {
+      // Arrival button should disappear
+      expect(view.queryByText("I've Arrived")).toBeNull();
+      // Next valid action (Delivery handover / OTP) should appear
+      expect(view.getByText('DELIVERY HANDOVER')).toBeTruthy();
+      expect(view.getByText('Verify OTP and complete delivery')).toBeTruthy();
+    });
+  });
+
+  test('arrival API failure shows error message without false arrival status and allows retry', async () => {
+    load.mockResolvedValue(baseCollectedJob);
+    (markDriverArrived as jest.Mock).mockRejectedValueOnce(
+      new Error('Network error marking arrival. Please try again.'),
+    );
+
+    const view = await render(
+      <DriverJobDetailScreen
+        accessToken="token"
+        assignmentId="job-delivery-arrived-test"
+        onBack={jest.fn()}
+      />,
+    );
+
+    await waitFor(() => expect(view.getByText("I've Arrived")).toBeTruthy());
+
+    await fireEvent.press(view.getByText("I've Arrived"));
+
+    await waitFor(() => {
+      expect(
+        view.getByText('Network error marking arrival. Please try again.'),
+      ).toBeTruthy();
+    });
+
+    // Arrival button remains visible for retry; delivery handover does NOT appear
+    expect(view.getByText("I've Arrived")).toBeTruthy();
+    expect(view.queryByText('DELIVERY HANDOVER')).toBeNull();
+
+    // Now retry successfully
+    const arrivedState = {
+      ...baseCollectedJob,
+      assignmentStatus: 'arrived',
+      orderStatus: 'delivery_otp_pending',
+    };
+    load.mockResolvedValue(arrivedState);
+    (markDriverArrived as jest.Mock).mockResolvedValueOnce({
+      assignmentId: 'job-delivery-arrived-test',
+      assignmentStatus: 'arrived',
+      orderStatus: 'delivery_otp_pending',
+    });
+
+    await fireEvent.press(view.getByText("I've Arrived"));
+
+    await waitFor(() => {
+      expect(view.queryByText("I've Arrived")).toBeNull();
+      expect(view.getByText('DELIVERY HANDOVER')).toBeTruthy();
+    });
+  });
+
+  test('duplicate rapid taps on I\'ve Arrived only invoke backend arrival transition once', async () => {
+    load.mockResolvedValue(baseCollectedJob);
+
+    let resolveArrival: any;
+    const arrivalPromise = new Promise(resolve => {
+      resolveArrival = resolve;
+    });
+    (markDriverArrived as jest.Mock).mockImplementation(() => arrivalPromise);
+
+    const view = await render(
+      <DriverJobDetailScreen
+        accessToken="token"
+        assignmentId="job-delivery-arrived-test"
+        onBack={jest.fn()}
+      />,
+    );
+
+    await waitFor(() => expect(view.getByText("I've Arrived")).toBeTruthy());
+
+    // First tap initiates in-flight request
+    fireEvent.press(view.getByText("I've Arrived"));
+
+    await waitFor(() => expect(view.getByText('Marking arrival...')).toBeTruthy());
+
+    // Subsequent rapid duplicate taps while in-flight
+    fireEvent.press(view.getByText('Marking arrival...'));
+    fireEvent.press(view.getByText('Marking arrival...'));
+
+    expect(markDriverArrived).toHaveBeenCalledTimes(1);
+
+    // Settle promise
+    const arrivedState = {
+      ...baseCollectedJob,
+      assignmentStatus: 'arrived',
+      orderStatus: 'delivery_otp_pending',
+    };
+    load.mockResolvedValue(arrivedState);
+    resolveArrival({
+      assignmentId: 'job-delivery-arrived-test',
+      assignmentStatus: 'arrived',
+      orderStatus: 'delivery_otp_pending',
+    });
+
+    await waitFor(() => {
+      expect(view.queryByText("I've Arrived")).toBeNull();
+      expect(view.getByText('DELIVERY HANDOVER')).toBeTruthy();
+    });
+
+    expect(markDriverArrived).toHaveBeenCalledTimes(1);
+  });
+});
+
+
 
 

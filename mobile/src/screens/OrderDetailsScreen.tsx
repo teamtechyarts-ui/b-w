@@ -7,6 +7,9 @@ import React, {
 } from 'react';
 import {
   Animated,
+  AppState,
+  AppStateStatus,
+  BackHandler,
   Platform,
   RefreshControl,
   ScrollView,
@@ -16,6 +19,7 @@ import {
   View,
 } from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
+import {useSafeFocusEffect} from '../hooks/useSafeFocusEffect';
 
 import {formatPaymentMethod, customerTimelineReason} from '../utils/customerPresentation';
 import {getMyAddresses} from '../services/customersApi';
@@ -147,6 +151,10 @@ export default function OrderDetailsScreen({
   const successScale = useRef(new Animated.Value(0.7)).current;
   const successOpacity = useRef(new Animated.Value(0)).current;
   const previousStatusRef = useRef<string | null>(null);
+  const requestSeqRef = useRef(0);
+  const lastFetchRef = useRef(0);
+  const orderRef = useRef<CustomerOrder | null>(null);
+  orderRef.current = order;
 
   const triggerSuccessAnimation = useCallback(
     (data: OtpVerificationSuccess) => {
@@ -265,11 +273,17 @@ export default function OrderDetailsScreen({
   };
 
   const loadDetails = useCallback(
-    async (isRefresh = false) => {
+    async (isRefresh = false, isUserOrRealtime = false) => {
+      const now = Date.now();
+      if (!isUserOrRealtime && isRefresh && now - lastFetchRef.current < 1500) {
+        return;
+      }
+      lastFetchRef.current = now;
+      const seq = ++requestSeqRef.current;
       try {
         if (isRefresh) {
           setRefreshing(true);
-        } else {
+        } else if (!orderRef.current) {
           setLoading(true);
         }
         setError(null);
@@ -279,17 +293,23 @@ export default function OrderDetailsScreen({
           getOrderStatusHistory(accessToken, orderId),
         ]);
 
-        if (orderResult?.current_status) {
-          checkStatusTransition(orderResult.current_status);
+        if (seq === requestSeqRef.current) {
+          if (orderResult?.current_status) {
+            checkStatusTransition(orderResult.current_status);
+          }
+          setOrder(orderResult);
+          setHistory(historyResult);
+          setCareRefreshKey(value => value + 1);
         }
-        setOrder(orderResult);
-        setHistory(historyResult);
-        setCareRefreshKey(value => value + 1);
       } catch (loadError: any) {
-        setError(loadError?.message || 'Unable to load order details.');
+        if (seq === requestSeqRef.current) {
+          setError(loadError?.message || 'Unable to load order details.');
+        }
       } finally {
-        setLoading(false);
-        setRefreshing(false);
+        if (seq === requestSeqRef.current) {
+          setLoading(false);
+          setRefreshing(false);
+        }
       }
     },
     [accessToken, orderId, checkStatusTransition],
@@ -299,11 +319,17 @@ export default function OrderDetailsScreen({
     orderId,
     useCallback(
       (event: RealtimeEventPayload) => {
-        if (event.status) {
-          checkStatusTransition(event.status);
-          setOrder(prev => (prev ? {...prev, current_status: event.status as any} : prev));
+        // Bump sequence counter so in-flight background requests started BEFORE this real-time event
+        // cannot overwrite the freshly received state
+        requestSeqRef.current += 1;
+
+        const nextStatus = event.status || (event as any).data?.current_status || (event as any).data?.status;
+        if (nextStatus) {
+          checkStatusTransition(nextStatus);
+          setOrder(prev => (prev ? {...prev, current_status: nextStatus as any} : prev));
         }
-        loadDetails(true);
+        setOtpError(null);
+        loadDetails(true, true);
       },
       [loadDetails, checkStatusTransition],
     ),
@@ -313,6 +339,55 @@ export default function OrderDetailsScreen({
   useEffect(() => {
     loadDetails();
   }, [loadDetails]);
+
+  useSafeFocusEffect(
+    useCallback(() => {
+      loadDetails(true);
+    }, [loadDetails]),
+  );
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener(
+      'change',
+      (nextState: AppStateStatus) => {
+        if (nextState === 'active') {
+          loadDetails(true);
+        }
+      },
+    );
+    return () => subscription.remove();
+  }, [loadDetails]);
+
+  // Fallback gentle polling for in-flight active orders (recovers if WebSocket disconnects)
+  useEffect(() => {
+    const activeInFlightStatuses = [
+      'driver_assigned_pickup',
+      'en_route_pickup',
+      'pickup_arrived',
+      'pickup_otp_pending',
+      'driver_assigned_delivery',
+      'en_route_delivery',
+      'delivery_arrived',
+      'delivery_otp_pending',
+    ];
+    if (!order?.current_status || !activeInFlightStatuses.includes(order.current_status)) {
+      return;
+    }
+    const interval = setInterval(() => {
+      loadDetails(true);
+    }, 8000);
+    return () => clearInterval(interval);
+  }, [order?.current_status, loadDetails]);
+
+  // Predictable Android hardware back handling
+  useEffect(() => {
+    const onBackPress = () => {
+      onBack();
+      return true;
+    };
+    const sub = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+    return () => sub.remove();
+  }, [onBack]);
 
   const itemCount = useMemo(() => {
     return (order?.order_items ?? []).reduce(
@@ -391,7 +466,7 @@ export default function OrderDetailsScreen({
     }
   }, [otpType, customerOtp, otpLoading, otpError, showOtp]);
 
-  if (loading) {
+  if (loading && !order) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.header}>
@@ -406,7 +481,7 @@ export default function OrderDetailsScreen({
     );
   }
 
-  if (error || !order) {
+  if (!order) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.header}>

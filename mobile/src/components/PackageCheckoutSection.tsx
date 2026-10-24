@@ -24,12 +24,35 @@ export default function PackageCheckoutSection({accessToken, items, selected, on
     {loading ? <ActivityIndicator accessibilityLabel="Loading package credits" /> : null}
     {error ? <Text style={styles.error}>{error}</Text> : null}
     {!loading && !error && !eligible.length ? <Text>No package credits apply to these services.</Text> : null}
-    {eligible.map(item => <TouchableOpacity key={item.id} onPress={() => onChange(selected?.id === item.id ? null : item)} style={styles.row}>
-      <Text>{selected?.id === item.id ? '◉' : '○'} {item.packages?.name ?? 'Package'} · save about ₹{formatMoney(packageDiscount(item, items))}</Text>
-      <Text>Valid until {new Date(item.expires_at).toLocaleDateString()}</Text>
-    </TouchableOpacity>)}
+    {eligible.map(item => {
+      const isChecked = selected?.id === item.id;
+      return (
+        <TouchableOpacity key={item.id} onPress={() => onChange(isChecked ? null : item)} style={styles.row}>
+          <View style={styles.radioRow}>
+            <View style={[styles.radioOuter, isChecked && styles.radioOuterSelected]}>
+              {isChecked ? <View style={styles.radioInner} /> : null}
+            </View>
+            <Text style={styles.packageLabel}>{item.packages?.name ?? 'Package'} · save about ₹{formatMoney(packageDiscount(item, items))}</Text>
+          </View>
+          <Text style={styles.validityText}>Valid until {new Date(item.expires_at).toLocaleDateString()}</Text>
+        </TouchableOpacity>
+      );
+    })}
     {selected ? <TouchableOpacity onPress={() => onChange(null)}><Text style={styles.link}>Remove package</Text></TouchableOpacity> : null}
     <Text style={styles.note}>Final credit use and price are confirmed by the server when you place the order.</Text>
   </View>;
 }
-const styles = StyleSheet.create({card: {borderWidth: 1, borderColor: '#ddd', borderRadius: 16, padding: 16, gap: 10, marginBottom: 14}, title: {fontWeight: '700', fontSize: 16}, row: {paddingVertical: 8}, link: {fontWeight: '700'}, note: {color: '#555'}, error: {color: '#a11'}});
+const styles = StyleSheet.create({
+  card: {borderWidth: 1, borderColor: '#ddd', borderRadius: 16, padding: 16, gap: 10, marginBottom: 14},
+  title: {fontWeight: '700', fontSize: 16},
+  row: {paddingVertical: 8, gap: 4},
+  radioRow: {flexDirection: 'row', alignItems: 'center', gap: 8},
+  radioOuter: {width: 18, height: 18, borderRadius: 9, borderWidth: 2, borderColor: '#888', alignItems: 'center', justifyContent: 'center'},
+  radioOuterSelected: {borderColor: '#111'},
+  radioInner: {width: 10, height: 10, borderRadius: 5, backgroundColor: '#111'},
+  packageLabel: {flex: 1, fontWeight: '600', color: '#111'},
+  validityText: {fontSize: 12, color: '#666', marginLeft: 26},
+  link: {fontWeight: '700'},
+  note: {color: '#555', fontSize: 12},
+  error: {color: '#a11'},
+});

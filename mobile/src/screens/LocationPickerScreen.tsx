@@ -632,12 +632,15 @@ export default function LocationPickerScreen({
                 color="#111111"
               />
             ) : (
-              <Text
-                style={
-                  styles.currentLocationButtonText
-                }>
-                ◎ Use Current Location
-              </Text>
+              <View style={styles.currentLocationRow}>
+                <AppIcon name="location" size={16} color="#111111" />
+                <Text
+                  style={
+                    styles.currentLocationButtonText
+                  }>
+                  Use Current Location
+                </Text>
+              </View>
             )}
           </TouchableOpacity>
 
@@ -1156,6 +1159,13 @@ const styles =
       marginBottom: 20,
       backgroundColor:
         '#FFFFFF',
+    },
+
+    currentLocationRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
     },
 
     currentLocationButtonText: {

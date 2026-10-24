@@ -7,6 +7,7 @@ export type FacilityDashboardOrder = {
   created_at: string;
   updated_at: string;
   pickupDriverName?: string | null;
+  driverArrivedAtFacility?: boolean;
   pickupAssignment?: {
     id: string;
     driverId: string;

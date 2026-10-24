@@ -89,6 +89,15 @@ export class NotificationsService {
       throw new BadRequestException(error.message);
     }
 
+    if (row?.id && typeof (this.supabase as any).getNotificationDispatcher === 'function') {
+      const dispatcher = (this.supabase as any).getNotificationDispatcher();
+      if (dispatcher) {
+        dispatcher(row.id).catch((err: any) => {
+          console.warn('[NotificationsService] Push notification dispatch failed:', err?.message);
+        });
+      }
+    }
+
     return row;
   }
 

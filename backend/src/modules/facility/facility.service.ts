@@ -29,7 +29,7 @@ export class FacilityService {
     try {
       const { data: order } = await this.db()
         .from("orders")
-        .select("id,order_number,current_status,facility_id,customer_id")
+        .select("id,order_number,current_status,facility_id,customer_id,customers(profile_id)")
         .eq("id", orderId)
         .maybeSingle();
 
@@ -45,19 +45,33 @@ export class FacilityService {
       };
 
       if (typeof this.supabase?.broadcastEvent === "function") {
-        await Promise.allSettled([
+        const broadcasts: Promise<any>[] = [
           this.supabase.broadcastEvent("orders:all", "ORDER_STATUS_CHANGED", payload),
           this.supabase.broadcastEvent("driver:available", "JOB_AVAILABLE", payload),
           this.supabase.broadcastEvent("jobs:drivers", "JOB_AVAILABLE", payload),
           this.supabase.broadcastEvent("admin:operations", "ORDER_STATUS_CHANGED", payload),
           this.supabase.broadcastEvent(`order:${orderId}`, "ORDER_STATUS_CHANGED", payload),
-          order?.facility_id
-            ? this.supabase.broadcastEvent(`facility:${order.facility_id}`, "ORDER_STATUS_CHANGED", payload)
-            : Promise.resolve(),
-          order?.customer_id
-            ? this.supabase.broadcastEvent(`customer:${order.customer_id}`, "ORDER_STATUS_CHANGED", payload)
-            : Promise.resolve(),
-        ]);
+          this.supabase.broadcastEvent("facility:all", "ORDER_STATUS_CHANGED", payload),
+        ];
+
+        if (order?.facility_id) {
+          broadcasts.push(
+            this.supabase.broadcastEvent(`facility:${order.facility_id}`, "ORDER_STATUS_CHANGED", payload),
+          );
+        }
+        if (order?.customer_id) {
+          broadcasts.push(
+            this.supabase.broadcastEvent(`customer:${order.customer_id}`, "ORDER_STATUS_CHANGED", payload),
+          );
+        }
+        const profileId = (order as any)?.customers?.profile_id;
+        if (profileId && profileId !== order?.customer_id) {
+          broadcasts.push(
+            this.supabase.broadcastEvent(`customer:${profileId}`, "ORDER_STATUS_CHANGED", payload),
+          );
+        }
+
+        await Promise.allSettled(broadcasts);
       }
     } catch {
       // Safe catch
@@ -74,7 +88,7 @@ export class FacilityService {
       if (typeof this.supabase?.broadcastEvent !== "function") return;
       const { data: order } = await this.db()
         .from("orders")
-        .select("id,order_number,current_status,facility_id,customer_id")
+        .select("id,order_number,current_status,facility_id,customer_id,customers(profile_id)")
         .eq("id", orderId)
         .maybeSingle();
 
@@ -106,6 +120,12 @@ export class FacilityService {
       if (order?.customer_id) {
         broadcasts.push(
           this.supabase.broadcastEvent(`customer:${order.customer_id}`, "ORDER_STATUS_CHANGED", payload),
+        );
+      }
+      const profileId = (order as any)?.customers?.profile_id;
+      if (profileId && profileId !== order?.customer_id) {
+        broadcasts.push(
+          this.supabase.broadcastEvent(`customer:${profileId}`, "ORDER_STATUS_CHANGED", payload),
         );
       }
 
@@ -202,20 +222,32 @@ export class FacilityService {
 
     const neededDriverIds: string[] = [];
 
-    // Load pickup assignments for incoming orders
+    const incomingArrivedOrderIds = new Set<string>();
+    // Load pickup assignments and arrival events for incoming orders
     if (incomingOrderIds.length) {
-      const { data: pickupAssignments } = await this.db()
-        .from("driver_assignments")
-        .select("id,order_id,driver_id,status,assigned_at")
-        .eq("assignment_type", "pickup")
-        .in("order_id", incomingOrderIds)
-        .order("assigned_at", { ascending: false });
+      const [pickupAssignmentsRes, navEventsRes] = await Promise.all([
+        this.db()
+          .from("driver_assignments")
+          .select("id,order_id,driver_id,status,assigned_at")
+          .eq("assignment_type", "pickup")
+          .in("order_id", incomingOrderIds)
+          .order("assigned_at", { ascending: false }),
+        this.db()
+          .from("driver_navigation_events")
+          .select("order_id,event_type,created_at")
+          .in("order_id", incomingOrderIds)
+          .eq("event_type", "arrived_at_facility"),
+      ]);
 
-      for (const assignment of pickupAssignments ?? []) {
+      for (const assignment of pickupAssignmentsRes.data ?? []) {
         if (!pickupAssignmentByOrder.has(assignment.order_id)) {
           pickupAssignmentByOrder.set(assignment.order_id, assignment);
           neededDriverIds.push(assignment.driver_id);
         }
+      }
+
+      for (const ev of navEventsRes.data ?? []) {
+        incomingArrivedOrderIds.add(ev.order_id);
       }
     }
 
@@ -323,6 +355,7 @@ export class FacilityService {
       return {
         ...order,
         pickupDriverName,
+        driverArrivedAtFacility: incomingArrivedOrderIds.has(order.id),
         pickupAssignment: pickupAssignment
           ? {
               id: pickupAssignment.id,
@@ -654,7 +687,7 @@ export class FacilityService {
     throw new BadRequestException(message);
   }
 
-  private async receiptCandidate(profileId: string, token: string) {
+  private async receiptCandidate(profileId: string, token: string, requireArrival = false) {
     const access = await this.requireFacilityEmployee(profileId);
     if (
       typeof token !== "string" ||
@@ -684,12 +717,27 @@ export class FacilityService {
         `Facility receipt is not allowed while order is ${order.current_status}`,
       );
     }
+    if (requireArrival) {
+      const { data: arrivalEvents } = await this.db()
+        .from("driver_navigation_events")
+        .select("id")
+        .eq("order_id", order.id)
+        .eq("event_type", "arrived_at_facility")
+        .limit(1);
+
+      if (!arrivalEvents || !arrivalEvents.length) {
+        throw new ConflictException(
+          "Driver has not yet confirmed arrival at the facility",
+        );
+      }
+    }
     return { access, qr, order, secureToken };
   }
 
   private async receiptCandidateByOrderNumber(
     profileId: string,
     rawOrderNumber: string,
+    requireArrival = false,
   ) {
     const access = await this.requireFacilityEmployee(profileId);
     const orderNumber = rawOrderNumber?.trim().toUpperCase();
@@ -707,6 +755,20 @@ export class FacilityService {
       throw new ConflictException(
         `Facility receipt is not allowed while order is ${order.current_status}`,
       );
+    }
+    if (requireArrival) {
+      const { data: arrivalEvents } = await this.db()
+        .from("driver_navigation_events")
+        .select("id")
+        .eq("order_id", order.id)
+        .eq("event_type", "arrived_at_facility")
+        .limit(1);
+
+      if (!arrivalEvents || !arrivalEvents.length) {
+        throw new ConflictException(
+          "Driver has not yet confirmed arrival at the facility",
+        );
+      }
     }
     const { data: qr, error: qrError } = await this.db()
       .from("order_qr_codes")
@@ -762,7 +824,7 @@ export class FacilityService {
     latitude?: number,
     longitude?: number,
   ) {
-    const { secureToken } = await this.receiptCandidate(profileId, token);
+    const { secureToken } = await this.receiptCandidate(profileId, token, true);
 
     const { data: receipt, error: receiptError } = await this.db().rpc(
       "receive_facility_order_atomic",
@@ -806,6 +868,7 @@ export class FacilityService {
     const { secureToken } = await this.receiptCandidateByOrderNumber(
       profileId,
       orderNumber,
+      true,
     );
     return this.receiveByQr(
       profileId,
@@ -1024,81 +1087,61 @@ export class FacilityService {
     const access = await this.requireFacilityEmployee(profileId);
     const order = await this.requireOrder(orderId);
     this.ensureFacilityMatch(access, order.facility_id);
-    const { data, error } = await this.db()
-      .from("facility_order_operations")
-      .select(
-        "id,operation_type,current_status,started_at,completed_at,performed_by,notes",
-      )
-      .eq("order_id", orderId)
-      .order("started_at", { ascending: true })
-      .order("id", { ascending: true });
-    if (error) {
+
+    const [operationsResult, discrepancyResult, qcResult, policyResult, packingsResult] = await Promise.all([
+      this.db()
+        .from("facility_order_operations")
+        .select(
+          "id,operation_type,current_status,started_at,completed_at,performed_by,notes",
+        )
+        .eq("order_id", orderId)
+        .order("started_at", { ascending: true })
+        .order("id", { ascending: true }),
+      this.db()
+        .from("facility_intake_discrepancies")
+        .select("id", { count: "exact", head: true })
+        .eq("order_id", orderId)
+        .eq("status", "open"),
+      this.db()
+        .from("facility_qc_decisions")
+        .select(
+          "id,operation_id,cycle_number,approved,rewash_required,defect_code,reason,affected_item_ids,decided_by,created_at",
+        )
+        .eq("order_id", orderId)
+        .order("created_at", { ascending: true }),
+      this.db()
+        .from("facility_packing_policy_orders")
+        .select("order_id")
+        .eq("order_id", orderId)
+        .maybeSingle(),
+      this.db()
+        .from("facility_packings")
+        .select("id,cycle_number")
+        .eq("order_id", orderId),
+    ]);
+
+    if (operationsResult.error) {
       throw new BadRequestException(
-        error.message || "Facility processing history unavailable",
+        operationsResult.error.message || "Facility processing history unavailable",
       );
     }
-    const stages = (data ?? [])
-      .filter((operation) =>
-        ["washing", "drying", "ironing", "folding", "packaging"].includes(
-          operation.operation_type,
-        ),
-      )
-      .map((operation) => ({
-        id: operation.id,
-        operation_type: operation.operation_type,
-        current_status: operation.current_status,
-        started_at: operation.started_at,
-        completed_at: operation.completed_at,
-        started_by: operation.performed_by,
-        completed_by: operation.completed_at ? operation.performed_by : null,
-        performed_by: operation.performed_by,
-        rewash_cycle: 0,
-      }));
-    const active = stages.find((operation) => !operation.completed_at);
-    const completed = stages.filter((operation) => operation.completed_at);
-    const next: Record<string, string> = {
-      verification: "washing",
-      washing: "drying",
-      drying: "ironing",
-      ironing: "folding",
-      folding: "packaging",
-    };
-    const latest = stages[stages.length - 1];
-    const expectedStage = active
-      ? null
-      : ["verification", "rework_required"].includes(order.current_status)
-        ? "washing"
-        : order.current_status === "processing" && latest?.completed_at
-          ? (next[latest.operation_type] ?? null)
-          : null;
-    const { count: openCount, error: discrepancyError } = await this.db()
-      .from("facility_intake_discrepancies")
-      .select("id", { count: "exact", head: true })
-      .eq("order_id", orderId)
-      .eq("status", "open");
-    if (discrepancyError) {
+    if (discrepancyResult.error) {
       throw new BadRequestException(
-        discrepancyError.message || "Facility discrepancy status unavailable",
+        discrepancyResult.error.message || "Facility discrepancy status unavailable",
       );
     }
-    const { data: decisions, error: qcError } = await this.db()
-      .from("facility_qc_decisions")
-      .select(
-        "id,operation_id,cycle_number,approved,rewash_required,defect_code,reason,affected_item_ids,decided_by,created_at",
-      )
-      .eq("order_id", orderId)
-      .order("created_at", { ascending: true });
-    if (qcError) {
+    if (qcResult.error) {
       throw new BadRequestException(
-        qcError.message || "Facility QC history unavailable",
+        qcResult.error.message || "Facility QC history unavailable",
       );
     }
-    const qcOperations = (data ?? []).filter(
+
+    const qcOperations = (operationsResult.data ?? []).filter(
       (operation) => operation.operation_type === "quality_check",
     );
     const resolvedDecisions =
-      decisions && decisions.length > 0
-        ? decisions
+      qcResult.data && qcResult.data.length > 0
+        ? qcResult.data
         : qcOperations.map((op, idx) => ({
             id: op.id,
             operation_id: op.id,
@@ -1125,14 +1168,67 @@ export class FacilityService {
             decided_by: op.performed_by,
             created_at: op.completed_at || op.started_at,
           }));
+
+    const qcFailures = resolvedDecisions.filter((decision) => !decision.approved);
+
+    const stages = (operationsResult.data ?? [])
+      .filter((operation) =>
+        ["washing", "drying", "ironing", "folding", "packaging"].includes(
+          operation.operation_type,
+        ),
+      )
+      .map((operation) => ({
+        id: operation.id,
+        operation_type: operation.operation_type,
+        current_status: operation.current_status,
+        started_at: operation.started_at,
+        completed_at: operation.completed_at,
+        started_by: operation.performed_by,
+        completed_by: operation.completed_at ? operation.performed_by : null,
+        performed_by: operation.performed_by,
+        rewash_cycle:
+          (operation as any).rewash_cycle != null
+            ? (operation as any).rewash_cycle
+            : qcFailures.filter(
+                (qc) =>
+                  new Date(qc.created_at).getTime() <=
+                  new Date(operation.started_at).getTime(),
+              ).length,
+      }));
+    const active = stages.find((operation) => !operation.completed_at);
+    const completed = stages.filter((operation) => operation.completed_at);
+    const next: Record<string, string> = {
+      verification: "washing",
+      washing: "drying",
+      drying: "ironing",
+      ironing: "folding",
+      folding: "packaging",
+    };
+    const latest = stages[stages.length - 1];
+    const expectedStage = active
+      ? null
+      : ["verification", "rework_required"].includes(order.current_status)
+        ? "washing"
+        : order.current_status === "processing" && latest?.completed_at
+          ? (next[latest.operation_type] ?? null)
+          : null;
+    const openCount = discrepancyResult.count ?? 0;
+
+    const isPackingRequired = !policyResult?.error && !!policyResult?.data;
+    const packings = packingsResult?.data ?? [];
+    const isPacked = packings.some((p: any) => p.cycle_number === qcFailures.length);
+    const packingReady = !isPackingRequired || isPacked;
+
     return {
       orderId,
       orderStatus: order.current_status,
       stages,
       qualityDecisions: resolvedDecisions,
       role: access.role,
-      rewashCycle: resolvedDecisions.filter((decision) => !decision.approved)
-        .length,
+      rewashCycle: qcFailures.length,
+      packingRequired: isPackingRequired,
+      isPacked,
+      packingReady,
       canQualityCheck:
         order.current_status === "processing" &&
         latest?.operation_type === "packaging" &&
@@ -1140,7 +1236,7 @@ export class FacilityService {
         !openCount,
       activeOperationId: active?.id ?? null,
       nextStage: openCount ? null : expectedStage,
-      openDiscrepancies: openCount ?? 0,
+      openDiscrepancies: openCount,
       completedStageCount: completed.length,
     };
   }
@@ -1160,7 +1256,7 @@ export class FacilityService {
       .maybeSingle();
     if (verificationError)
       throw new BadRequestException("Facility verification unavailable");
-    const [items, inspections, packings, policy] = await Promise.all([
+    const [items, inspections, packings, policy, qcDecisions] = await Promise.all([
       this.db()
         .from("order_items")
         .select("id,item_name,quantity")
@@ -1184,10 +1280,21 @@ export class FacilityService {
         .select("order_id")
         .eq("order_id", orderId)
         .maybeSingle(),
+      this.db()
+        .from("facility_qc_decisions")
+        .select("id,approved")
+        .eq("order_id", orderId),
     ]);
-    if (items.error || inspections.error || packings.error || policy.error) {
+    if (items.error || inspections.error || packings.error || policy.error || qcDecisions.error) {
       throw new BadRequestException("Facility packing unavailable");
     }
+    const qcFailuresCount = (qcDecisions.data ?? []).filter(
+      (decision) => !decision.approved,
+    ).length;
+    const currentCycle =
+      (latest as any)?.rewash_cycle != null
+        ? (latest as any).rewash_cycle
+        : qcFailuresCount;
     const verified = new Map(
       (inspections.data ?? []).map((row) => [
         row.order_item_id,
@@ -1214,7 +1321,7 @@ export class FacilityService {
       orderStatus: order.current_status,
       facility: access.facility.name,
       packingRequired: !!policy.data,
-      cycleNumber: latest?.rewash_cycle ?? 0,
+      cycleNumber: currentCycle,
       canPack:
         order.current_status === "processing" &&
         latest?.operation_type === "packaging" &&
@@ -1223,7 +1330,7 @@ export class FacilityService {
         (items.data ?? []).length > 0 &&
         (items.data ?? []).every((item) => verified.has(item.id)) &&
         !history.some(
-          (packing) => packing.cycle_number === latest.rewash_cycle,
+          (packing) => packing.cycle_number === currentCycle,
         ),
       items: (items.data ?? []).map((item) => ({
         ...item,
@@ -1262,12 +1369,66 @@ export class FacilityService {
         p_notes: body.notes?.trim() || null,
       },
     );
-    if (error || !data)
+    let packingResult = data;
+    if (error && error.code === "PGRST202") {
+      const latest = await this.operationForOrder(orderId);
+      if (!latest || latest.operation_type !== "packaging" || !latest.completed_at) {
+        throw new ConflictException("Complete current Pack-prep before final packing");
+      }
+      const qcResult = await this.db()
+        .from("facility_qc_decisions")
+        .select("id,approved")
+        .eq("order_id", orderId);
+      const cycleNumber = (qcResult.data ?? []).filter((d) => !d.approved).length;
+
+      const existingPacking = await this.db()
+        .from("facility_packings")
+        .select("id")
+        .eq("order_id", orderId)
+        .eq("cycle_number", cycleNumber)
+        .maybeSingle();
+      if (existingPacking.data) {
+        throw new ConflictException("Final packing has already been confirmed for this cycle");
+      }
+
+      const parcelId =
+        body.parcelId?.trim().toUpperCase() ||
+        `BW-${orderId.slice(0, 8).toUpperCase()}-${Date.now()}`;
+      const { data: inserted, error: insertError } = await this.db()
+        .from("facility_packings")
+        .insert({
+          order_id: orderId,
+          facility_id: access.facilityId,
+          packaging_operation_id: latest.id,
+          cycle_number: cycleNumber,
+          parcel_id: parcelId,
+          packed_by: profileId,
+          notes: body.notes?.trim() || null,
+        })
+        .select("id,parcel_id,cycle_number")
+        .single();
+      if (insertError || !inserted) {
+        this.throwProcessingRpcError(insertError, "Unable to record facility packing");
+      }
+
+      if (body.items?.length) {
+        const itemRows = body.items.map((i) => ({
+          packing_id: inserted.id,
+          order_item_id: i.orderItemId,
+          verified_quantity: i.packedQuantity,
+          packed_quantity: i.packedQuantity,
+        }));
+        await this.db().from("facility_packing_items").insert(itemRows);
+      }
+
+      packingResult = { packingId: inserted.id, parcelId: inserted.parcel_id, cycleNumber };
+    } else if (error || !data) {
       this.throwProcessingRpcError(error, "Unable to confirm packing");
+    }
     await this.broadcastFacilityEvent(access.facilityId, orderId, "FACILITY_PACKING_CONFIRMED", {
       status: order.current_status,
     });
-    return data;
+    return packingResult;
   }
 
   async startProcessing(
@@ -1502,6 +1663,30 @@ export class FacilityService {
       throw new ConflictException(
         "Washing, drying, ironing, folding, and packaging must complete in order before quality check",
       );
+    }
+
+    if (approved) {
+      const { data: policy } = await this.db()
+        .from("facility_packing_policy_orders")
+        .select("order_id")
+        .eq("order_id", orderId)
+        .maybeSingle();
+      if (policy) {
+        const { data: packings } = await this.db()
+          .from("facility_packings")
+          .select("id,cycle_number")
+          .eq("order_id", orderId);
+        const qcDecisions = await this.db()
+          .from("facility_qc_decisions")
+          .select("id,approved")
+          .eq("order_id", orderId);
+        const cycleNumber = (qcDecisions.data ?? []).filter((d) => !d.approved).length;
+        if (!(packings ?? []).some((p) => p.cycle_number === cycleNumber)) {
+          throw new ConflictException(
+            "Confirm current-cycle final packing before quality check approval",
+          );
+        }
+      }
     }
 
     let qualityOperation = null;

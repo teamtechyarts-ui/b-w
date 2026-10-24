@@ -70,28 +70,40 @@ export default function FacilityVerificationScreen({
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [packingReady, setPackingReady] = useState(false);
-  const [workflowRefresh, setWorkflowRefresh] = useState(0);
+  const [packingRefreshTrigger, setPackingRefreshTrigger] = useState(0);
+  const scrollViewRef = useRef<any>(null);
+  const packingLayoutY = useRef<number>(0);
   const lock = useRef(false);
+  const detailRef = useRef<FacilityIntakeDetails | null>(null);
+  detailRef.current = detail;
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError('');
-    try {
-      const result = await getFacilityIntake(accessToken, orderId);
-      setDetail(result);
-      if (result.orderStatus === 'received_at_facility')
-        setEntries(initialEntries(result.items));
-    } catch (cause) {
-      setDetail(null);
-      setError(
-        cause instanceof Error
-          ? cause.message
-          : 'Garment verification unavailable.',
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, [accessToken, orderId]);
+  const load = useCallback(
+    async (isSilent = false) => {
+      if (!isSilent && !detailRef.current) {
+        setLoading(true);
+      }
+      setError('');
+      try {
+        const result = await getFacilityIntake(accessToken, orderId);
+        setDetail(result);
+        if (result.orderStatus === 'received_at_facility' && !detailRef.current) {
+          setEntries(initialEntries(result.items));
+        }
+      } catch (cause) {
+        if (!isSilent && !detailRef.current) {
+          setDetail(null);
+        }
+        setError(
+          cause instanceof Error
+            ? cause.message
+            : 'Garment verification unavailable.',
+        );
+      } finally {
+        setLoading(false);
+      }
+    },
+    [accessToken, orderId],
+  );
 
   useOrderRealtime(
     orderId,
@@ -108,9 +120,8 @@ export default function FacilityVerificationScreen({
               : prev,
           );
         }
-        load();
+        load(true);
       },
-
       [load],
     ),
     accessToken,
@@ -231,6 +242,7 @@ export default function FacilityVerificationScreen({
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <ScrollView
+          ref={scrollViewRef}
           contentContainerStyle={[
             styles.content,
             isVerificationMode && { paddingBottom: 110 + (insets?.bottom ?? 0) },
@@ -242,7 +254,10 @@ export default function FacilityVerificationScreen({
             <TouchableOpacity
               accessibilityRole="button"
               style={styles.backButton}
-              onPress={onBack}
+              onPress={() => {
+                onChanged();
+                onBack();
+              }}
             >
               <AppIcon name="arrow-left" size={16} color={colors.primary} />
               <Text style={styles.link}>← Back</Text>
@@ -253,7 +268,7 @@ export default function FacilityVerificationScreen({
             </View>
           </View>
 
-          {loading ? (
+          {loading && !detail ? (
             <ActivityIndicator
               accessibilityLabel="Loading garment verification"
               color={colors.primary}
@@ -514,28 +529,41 @@ export default function FacilityVerificationScreen({
                 'quality_check',
               ].includes(detail.orderStatus) ? (
                 <>
-                  <FacilityPackingPanel
-                    key={`pack-${workflowRefresh}`}
-                    accessToken={accessToken}
-                    orderId={orderId}
-                    onReadiness={setPackingReady}
-                    onChanged={() => {
-                      onChanged();
-                      load();
-                      setWorkflowRefresh(value => value + 1);
+                  <View
+                    onLayout={(event) => {
+                      packingLayoutY.current = event.nativeEvent.layout.y;
                     }}
-                  />
+                  >
+                    <FacilityPackingPanel
+                      key="facility-packing-panel"
+                      accessToken={accessToken}
+                      orderId={orderId}
+                      refreshTrigger={packingRefreshTrigger}
+                      onReadiness={setPackingReady}
+                      onChanged={() => {
+                        onChanged();
+                        load(true);
+                      }}
+                    />
+                  </View>
                   <FacilityProcessingPanel
-                    key={`process-${workflowRefresh}`}
+                    key="facility-processing-panel"
                     accessToken={accessToken}
                     orderId={orderId}
                     items={detail.items}
                     packingReady={packingReady}
-                    onChanged={() => {
-                      onChanged();
-                      load();
-                      setPackingReady(false);
-                      setWorkflowRefresh(value => value + 1);
+                    onConfirmPackingPress={() => {
+                      scrollViewRef.current?.scrollTo({
+                        y: Math.max(0, packingLayoutY.current - 16),
+                        animated: true,
+                      });
+                    }}
+                    onChanged={(isStatusChange?: boolean) => {
+                      if (isStatusChange) {
+                        onChanged();
+                      }
+                      load(true);
+                      setPackingRefreshTrigger(t => t + 1);
                     }}
                   />
                 </>

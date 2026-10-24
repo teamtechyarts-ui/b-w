@@ -3,6 +3,7 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  OnModuleInit,
 } from '@nestjs/common';
 import { SupabaseService } from '../supabase/supabase.service';
 import {
@@ -99,11 +100,15 @@ function failedProviderResult(): PushSendResult {
 }
 
 @Injectable()
-export class NotificationDispatcher {
+export class NotificationDispatcher implements OnModuleInit {
   constructor(
     private readonly supabase: SupabaseService,
     @Inject(PUSH_PROVIDER) private readonly pushProvider: PushProvider,
   ) {}
+
+  onModuleInit() {
+    this.supabase.setNotificationDispatcher((id) => this.dispatchPersisted(id));
+  }
 
   private db() {
     return this.supabase.admin;

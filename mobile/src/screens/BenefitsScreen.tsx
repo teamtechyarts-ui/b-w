@@ -1,25 +1,41 @@
-import React, {useCallback, useEffect, useState} from 'react';
-import {ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
+import React, {useCallback, useEffect, useRef, useState} from 'react';
+import {ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
 import {getActiveOffers} from '../services/growthApi';
 import type {Offer} from '../services/growthApi';
+import {useSafeFocusEffect} from '../hooks/useSafeFocusEffect';
 
 type Props = {accessToken: string; onBack: () => void};
 
 export default function BenefitsScreen({accessToken, onBack}: Props) {
   const [offers, setOffers] = useState<Offer[]>([]);
   const [offersLoading, setOffersLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [offersError, setOffersError] = useState('');
 
-  const refreshOffers = useCallback(async () => {
-    setOffersLoading(true);
+  const requestSeqRef = useRef(0);
+  const offersRef = useRef<Offer[]>([]);
+  offersRef.current = offers;
+
+  const refreshOffers = useCallback(async (isRefresh = false) => {
+    const seq = ++requestSeqRef.current;
+    if (isRefresh) setRefreshing(true);
+    else if (offersRef.current.length === 0) setOffersLoading(true);
     setOffersError('');
     try {
-      setOffers(await getActiveOffers(accessToken));
+      const nextOffers = await getActiveOffers(accessToken);
+      if (seq === requestSeqRef.current) {
+        setOffers(nextOffers);
+      }
     } catch (cause) {
-      setOffersError(cause instanceof Error ? cause.message : 'Offers are unavailable.');
+      if (seq === requestSeqRef.current) {
+        setOffersError(cause instanceof Error ? cause.message : 'Offers are unavailable.');
+      }
     } finally {
-      setOffersLoading(false);
+      if (seq === requestSeqRef.current) {
+        setOffersLoading(false);
+        setRefreshing(false);
+      }
     }
   }, [accessToken]);
 
@@ -27,9 +43,19 @@ export default function BenefitsScreen({accessToken, onBack}: Props) {
     refreshOffers();
   }, [refreshOffers]);
 
+  useSafeFocusEffect(
+    useCallback(() => {
+      refreshOffers(true);
+    }, [refreshOffers]),
+  );
+
   return (
     <SafeAreaView style={styles.screen}>
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={() => refreshOffers(true)} />
+        }>
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={onBack}>
           <Text style={styles.link}>← Back</Text>
         </TouchableOpacity>
@@ -42,14 +68,14 @@ export default function BenefitsScreen({accessToken, onBack}: Props) {
             Apply a promotional coupon during checkout to save on your laundry orders.
           </Text>
 
-          {offersLoading ? (
+          {offersLoading && !offers.length ? (
             <ActivityIndicator accessibilityLabel="Loading offers" />
           ) : null}
 
           {offersError ? (
             <View>
               <Text style={styles.error}>{offersError}</Text>
-              <TouchableOpacity accessibilityRole="button" onPress={refreshOffers}>
+              <TouchableOpacity accessibilityRole="button" onPress={() => refreshOffers()}>
                 <Text style={styles.link}>Retry offers</Text>
               </TouchableOpacity>
             </View>

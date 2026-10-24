@@ -35,23 +35,35 @@ function isStoredSession(
 export async function saveSecureSession(
   session: StoredSession,
 ) {
-  await Keychain.setGenericPassword(
-    'bright-white-session',
-    JSON.stringify(session),
-    {
-      service: SESSION_SERVICE,
-      accessible:
-        Keychain.ACCESSIBLE
-          .WHEN_UNLOCKED_THIS_DEVICE_ONLY,
-    },
-  );
+  try {
+    await Keychain.setGenericPassword(
+      'bright-white-session',
+      JSON.stringify(session),
+      {
+        service: SESSION_SERVICE,
+        accessible:
+          Keychain.ACCESSIBLE
+            .WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+      },
+    );
+  } catch (error) {
+    console.warn('[secureSessionStorage] Failed to save secure session:', error);
+  }
 }
 
 export async function loadSecureSession(): Promise<StoredSession | null> {
-  const credentials =
-    await Keychain.getGenericPassword({
-      service: SESSION_SERVICE,
-    });
+  let credentials: Keychain.UserCredentials | false | null = null;
+  try {
+    credentials =
+      await Keychain.getGenericPassword({
+        service: SESSION_SERVICE,
+      });
+  } catch (error) {
+    // If keychain access fails (e.g. Android Keystore initialization, corrupted data, or permission error),
+    // safely treat as unauthenticated rather than crashing the app on cold start.
+    console.warn('[secureSessionStorage] Failed to read secure session:', error);
+    return null;
+  }
 
   if (!credentials) {
     return null;
@@ -75,7 +87,11 @@ export async function loadSecureSession(): Promise<StoredSession | null> {
 }
 
 export async function clearSecureSession() {
-  await Keychain.resetGenericPassword({
-    service: SESSION_SERVICE,
-  });
+  try {
+    await Keychain.resetGenericPassword({
+      service: SESSION_SERVICE,
+    });
+  } catch (error) {
+    console.warn('[secureSessionStorage] Failed to reset secure session:', error);
+  }
 }

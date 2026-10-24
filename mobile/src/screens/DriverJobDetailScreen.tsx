@@ -3,6 +3,9 @@ import {
   ActivityIndicator,
   Animated,
   AppState,
+  BackHandler,
+  Keyboard,
+  KeyboardAvoidingView,
   Linking,
   Platform,
   ScrollView,
@@ -16,8 +19,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import AppIcon from '../components/AppIcon';
 import { ActionError, FieldError } from '../components/FormError';
 import {
+  checkLocationPermissionStatus,
   getCurrentDeviceLocation,
   requestAndroidLocationPermission,
+  requestLocationPermissionDetailed,
 } from '../services/deviceLocationService';
 import {
   startDriverTripBackground,
@@ -76,6 +81,23 @@ export default function DriverJobDetailScreen({
   const [locationStatus, setLocationStatus] = useState<LocationStatus>('idle');
   const [lastDriverLocation, setLastDriverLocation] =
     useState<LocationCoordinates | null>(null);
+  const [facilityArrivalReported, setFacilityArrivalReported] = useState(false);
+  useEffect(() => {
+    const showSub = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
+      () => {
+        if (
+          pickupOtpInputRef.current?.isFocused?.() ||
+          deliveryOtpInputRef.current?.isFocused?.()
+        ) {
+          scrollViewRef.current?.scrollToEnd({ animated: true });
+        }
+      },
+    );
+    return () => {
+      showSub.remove();
+    };
+  }, []);
 
   // Animated OTP success modal state
   const [otpSuccessData, setOtpSuccessData] = useState<{
@@ -98,11 +120,45 @@ export default function DriverJobDetailScreen({
   const [deliveryActionError, setDeliveryActionError] = useState('');
   const [navigationError, setNavigationError] = useState('');
 
+  const [startingTrip, setTripStarting] = useState(false);
+  const isTripStartingRef = useRef(false);
+  const lastTripTapTimeRef = useRef(0);
+
   const actionLock = useRef(false);
+  const requestSeqRef = useRef(0);
   const scrollViewRef = useRef<any>(null);
   const pickupOtpInputRef = useRef<any>(null);
   const deliveryOtpInputRef = useRef<any>(null);
   const rejectionInputRef = useRef<any>(null);
+
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+
+  useEffect(() => {
+    const showEvent = Platform.OS === 'android' ? 'keyboardDidShow' : 'keyboardWillShow';
+    const hideEvent = Platform.OS === 'android' ? 'keyboardDidHide' : 'keyboardWillHide';
+
+    const showSub = Keyboard.addListener(showEvent, e => {
+      const h = e.endCoordinates.height;
+      setKeyboardHeight(h);
+      if (
+        pickupOtpInputRef.current?.isFocused() ||
+        deliveryOtpInputRef.current?.isFocused()
+      ) {
+        setTimeout(() => {
+          scrollViewRef.current?.scrollToEnd({ animated: true });
+        }, 50);
+      }
+    });
+
+    const hideSub = Keyboard.addListener(hideEvent, () => {
+      setKeyboardHeight(0);
+    });
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   const clearAllErrors = () => {
     setError('');
@@ -167,16 +223,64 @@ export default function DriverJobDetailScreen({
     return raw;
   };
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (options?: boolean | unknown) => {
+    const silent = options === true;
+    const seq = ++requestSeqRef.current;
+    if (!silent) setLoading(true);
     setError('');
     try {
-      setJob(await getDriverJob(accessToken, assignmentId));
+      const result = await getDriverJob(accessToken, assignmentId);
+      if (seq === requestSeqRef.current) {
+        setJob(prev => {
+          if (!prev || !result) return result;
+          // Protect confirmed active trip state from being overwritten by a stale background fetch
+          // But do NOT preserve phase 1 facility arrival once clean garments are collected
+          const isPhase1FacilityArrival =
+            result?.type === 'delivery' &&
+            result?.facilityCollected &&
+            prev?.assignmentStatus === 'arrived' &&
+            result?.orderStatus === 'delivery_accepted';
+
+          if (
+            !isPhase1FacilityArrival &&
+            (prev.assignmentStatus === 'en_route' ||
+              (prev.assignmentStatus === 'arrived' &&
+                (prev.orderStatus === 'delivery_otp_pending' || prev.orderStatus === 'pickup_otp_pending'))) &&
+            result?.assignmentStatus === 'accepted'
+          ) {
+            return {
+              ...result,
+              assignmentStatus: prev.assignmentStatus,
+              orderStatus: prev.orderStatus,
+            };
+          }
+          if (
+            prev.orderStatus === 'en_route_delivery' &&
+            result.orderStatus === 'delivery_accepted'
+          ) {
+            return {
+              ...result,
+              orderStatus: prev.orderStatus,
+              assignmentStatus: prev.assignmentStatus,
+            };
+          }
+          return result;
+        });
+        if (result.driverArrivedAtFacility) {
+          setFacilityArrivalReported(true);
+        } else if (result.orderStatus !== 'in_transit_to_facility') {
+          setFacilityArrivalReported(false);
+        }
+      }
     } catch (cause) {
-      setJob(null);
-      setError(cause instanceof Error ? cause.message : 'Job unavailable.');
+      if (seq === requestSeqRef.current) {
+        if (!silent) setJob(null);
+        setError(cause instanceof Error ? cause.message : 'Job unavailable.');
+      }
     } finally {
-      setLoading(false);
+      if (seq === requestSeqRef.current && !silent) {
+        setLoading(false);
+      }
     }
   }, [accessToken, assignmentId]);
 
@@ -184,19 +288,51 @@ export default function DriverJobDetailScreen({
     load();
   }, [load]);
 
+  // Handle hardware back navigation predictably
+  useEffect(() => {
+    const onBackPress = () => {
+      onBack();
+      return true;
+    };
+    const sub = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+    return () => sub.remove();
+  }, [onBack]);
+
+  // Polling fallback when actively arrived at customer or navigating
+  useEffect(() => {
+    if (!job?.assignmentStatus || !['arrived', 'en_route'].includes(job.assignmentStatus)) {
+      return;
+    }
+    const timer = setInterval(() => {
+      load(true);
+    }, 8000);
+    return () => clearInterval(timer);
+  }, [job?.assignmentStatus, load]);
+
+  const handleOrderRealtimeEvent = useCallback(
+    (event: RealtimeEventPayload) => {
+      const nextStatus =
+        event.status ||
+        (event as any).data?.current_status ||
+        (event as any).data?.status;
+      if (nextStatus) {
+        setJob(prev => {
+          if (!prev) return prev;
+          // Stale event guard: do not regress confirmed forward delivery status
+          if (prev.orderStatus === 'en_route_delivery' && nextStatus === 'delivery_accepted') {
+            return prev;
+          }
+          return {...prev, orderStatus: nextStatus};
+        });
+      }
+      load(true);
+    },
+    [load],
+  );
+
   useOrderRealtime(
     job?.orderId,
-    useCallback(
-      (event: RealtimeEventPayload) => {
-        const nextStatus = event.status;
-        if (nextStatus && job) {
-          setJob(prev => (prev ? {...prev, orderStatus: nextStatus} : prev));
-        }
-        load();
-      },
-
-      [load, job],
-    ),
+    handleOrderRealtimeEvent,
     accessToken,
   );
 
@@ -230,13 +366,18 @@ export default function DriverJobDetailScreen({
     const unsubscribe = subscribeDriverTripStatus(status => {
       if (!cancelled) setGpsState(status);
     });
+    let permissionAttempted = false;
     const start = async () => {
-      if (cancelled) return;
+      if (cancelled || permissionAttempted) return;
+      permissionAttempted = true;
       try {
-        if (!(await requestAndroidLocationPermission()))
-          throw new Error(
-            'Location permission denied. Enable location in Settings.',
-          );
+        const granted = await requestAndroidLocationPermission();
+        if (!granted) {
+          if (!cancelled) {
+            setGpsState('Location permission denied. Enable location in Settings.');
+          }
+          return;
+        }
         if (cancelled) return;
         if (Platform.OS === 'android') {
           await startDriverTripBackground(assignmentId, accessToken);
@@ -253,8 +394,7 @@ export default function DriverJobDetailScreen({
     };
     const appState = AppState.addEventListener('change', state => {
       if (state === 'active') {
-        load();
-        start();
+        load(true);
       } else setGpsState('Location sharing continues for this active trip.');
     });
     start();
@@ -278,38 +418,76 @@ export default function DriverJobDetailScreen({
   }, [accessToken, assignmentId, load, tripActive]);
 
   const beginTrip = async () => {
-    if (actionLock.current || busy) return;
+    const now = Date.now();
+    // Prevent rapid repeated taps within 1000ms
+    if (now - lastTripTapTimeRef.current < 1000) return;
+    if (isTripStartingRef.current || actionLock.current || busy || startingTrip) return;
+
+    lastTripTapTimeRef.current = now;
+    isTripStartingRef.current = true;
+    requestSeqRef.current += 1;
     actionLock.current = true;
+    setTripStarting(true);
     setBusy(true);
     setTripError('');
     setError('');
     try {
-      await startDriverNavigation(accessToken, assignmentId);
-      await load();
-      setMessage(
-        isDeliveryPhase1
-          ? 'Trip to facility started. Live GPS is active during navigation.'
-          : 'Trip started. Live GPS is active during navigation.',
-      );
+      const navResult = await startDriverNavigation(accessToken, assignmentId);
+      // Immediately and authoritatively update local state from response
+      if (isDeliveryPhase1 || navResult?.destination === 'facility' || navResult?.status === 'en_route_facility') {
+        setJob(prev => (prev ? {
+          ...prev,
+          assignmentStatus: 'en_route',
+          inTransitToFacility: true,
+        } : prev));
+        setMessage('Trip to facility started. Live GPS is active during navigation.');
+      } else {
+        const nextOrderStatus = navResult?.orderStatus || (job?.type === 'pickup' ? 'en_route_pickup' : 'en_route_delivery');
+        setJob(prev => (prev ? {
+          ...prev,
+          assignmentStatus: 'en_route',
+          orderStatus: nextOrderStatus,
+        } : prev));
+        setMessage('Trip started. Live GPS is active during navigation.');
+      }
+      await load(true);
     } catch (cause) {
       const msg = cause instanceof Error ? cause.message : 'Unable to start trip.';
       setTripError(msg);
     } finally {
+      isTripStartingRef.current = false;
       actionLock.current = false;
+      setTripStarting(false);
       setBusy(false);
     }
   };
 
   const arrive = async () => {
-    if (actionLock.current) return;
+    if (actionLock.current || busy) return;
+    requestSeqRef.current += 1;
     actionLock.current = true;
     setBusy(true);
     setArriveError('');
     setError('');
     setMessage('');
     try {
-      await markDriverArrived(accessToken, assignmentId);
-      await load();
+      const res = await markDriverArrived(accessToken, assignmentId);
+      // Immediately reflect confirmed arrival state in UI
+      setJob(prev => {
+        if (!prev) return prev;
+        const nextAssignmentStatus = (res as any)?.assignmentStatus || 'arrived';
+        const nextOrderStatus =
+          (res as any)?.orderStatus ||
+          (prev.type === 'delivery' && !isDeliveryPhase1
+            ? 'delivery_otp_pending'
+            : prev.orderStatus);
+        return {
+          ...prev,
+          assignmentStatus: nextAssignmentStatus,
+          orderStatus: nextOrderStatus,
+        };
+      });
+      await load(true);
       if (job?.type === 'delivery') {
         if (isDeliveryPhase1) {
           setMessage(
@@ -317,7 +495,7 @@ export default function DriverJobDetailScreen({
           );
         } else {
           setMessage(
-            'Arrived at delivery. Ask the customer for their delivery OTP and take a proof photo.',
+            'Arrived at delivery. Ask the customer for their delivery OTP to complete this order.',
           );
         }
       } else {
@@ -326,7 +504,6 @@ export default function DriverJobDetailScreen({
     } catch (cause) {
       const msg = cause instanceof Error ? cause.message : 'Unable to mark arrival.';
       setArriveError(msg);
-      setError(msg);
     } finally {
       actionLock.current = false;
       setBusy(false);
@@ -335,6 +512,7 @@ export default function DriverJobDetailScreen({
 
   const confirmFacilityHandoverAction = async () => {
     if (actionLock.current) return;
+    requestSeqRef.current += 1;
     actionLock.current = true;
     setBusy(true);
     setFacilityHandoverError('');
@@ -342,7 +520,7 @@ export default function DriverJobDetailScreen({
     setMessage('');
     try {
       await confirmDriverFacilityHandover(accessToken, assignmentId);
-      await load();
+      await load(true);
       setMessage(
         'Clean order collection confirmed! You can now start the trip to the customer delivery address.',
       );
@@ -360,6 +538,7 @@ export default function DriverJobDetailScreen({
   };
 
   const completePickup = async () => {
+    Keyboard.dismiss();
     if (actionLock.current) return;
     setHandoverError('');
     setPickupOtpError('');
@@ -378,6 +557,7 @@ export default function DriverJobDetailScreen({
     }
 
     actionLock.current = true;
+    requestSeqRef.current += 1;
     setBusy(true);
     setMessage('');
     try {
@@ -394,6 +574,7 @@ export default function DriverJobDetailScreen({
       setHandoverChecked(false);
       setJob(prev => (prev ? {...prev, orderStatus: 'picked_up'} : prev));
       setMessage('Pickup OTP Verified Successfully. The customer can see the updated order.');
+      Keyboard.dismiss();
       setOtpSuccessData({
         title: 'Pickup OTP Verified Successfully',
         subtitle: 'The customer can see the updated order. Returning to dashboard...',
@@ -425,6 +606,7 @@ export default function DriverJobDetailScreen({
   };
 
   const completeDelivery = async () => {
+    Keyboard.dismiss();
     if (actionLock.current || busy) return;
     setDeliveryOtpError('');
     setDeliveryActionError('');
@@ -438,6 +620,7 @@ export default function DriverJobDetailScreen({
     }
 
     actionLock.current = true;
+    requestSeqRef.current += 1;
     setBusy(true);
     setMessage('');
     try {
@@ -462,6 +645,7 @@ export default function DriverJobDetailScreen({
           : prev,
       );
       setMessage('Delivery OTP Verified Successfully.');
+      Keyboard.dismiss();
       setOtpSuccessData({
         title: 'Delivery OTP Verified Successfully',
         subtitle: 'Order completed. Returning to dashboard...',
@@ -567,7 +751,7 @@ export default function DriverJobDetailScreen({
       // 4. Start facility transit
       setLocationStatus('starting_transit');
       await beginFacilityTransit(accessToken, assignmentId);
-      await load();
+      await load(true);
       setMessage(
         'Transit started. Take this order to the assigned facility for staff receipt.',
       );
@@ -616,6 +800,76 @@ export default function DriverJobDetailScreen({
     }
   };
 
+  const acquireNavigationCoords = async (): Promise<LocationCoordinates | null> => {
+    // 1. Check current permission status
+    const status = await checkLocationPermissionStatus();
+    if (status !== 'granted') {
+      // 2 & 3. Explain why location is needed and request permission
+      const requested = await requestLocationPermissionDetailed(
+        'Location permission is required to calculate turn-by-turn route and distance to the destination.',
+      );
+      if (requested === 'blocked') {
+        // 4. Android reported permission cannot be requested again
+        setError(
+          'Location permission is blocked. Please enable location permissions in device Settings to use navigation.',
+        );
+        setLocationStatus('permission_denied');
+        return null;
+      }
+      if (requested !== 'granted') {
+        // 6. Permission remains denied: non-blocking message
+        setError(
+          'Location permission was denied. Current location is required to calculate directions.',
+        );
+        setLocationStatus('permission_denied');
+        return null;
+      }
+    }
+
+    // 5. Permission is granted: acquire fresh location with bounded timeout
+    try {
+      const coords = await getCurrentDeviceLocation();
+      setLastDriverLocation(coords);
+      setLocationStatus('ready');
+      return coords;
+    } catch (locErr) {
+      const raw = locErr instanceof Error ? locErr.message : String(locErr);
+      if (raw.toLowerCase().includes('accuracy is low')) {
+        setLocationStatus('low_accuracy');
+        setError(raw);
+      } else {
+        setLocationStatus('gps_unavailable');
+        setError(
+          'Your current location is required to open directions. Please update your location and try again.',
+        );
+      }
+      return null;
+    }
+  };
+
+  const handleArriveAtFacility = async () => {
+    if (actionLock.current || busy) return;
+    actionLock.current = true;
+    setBusy(true);
+    setError('');
+    setMessage('');
+    try {
+      await markDriverArrived(accessToken, assignmentId);
+      setFacilityArrivalReported(true);
+      setMessage('Arrival at facility confirmed. Show the handoff QR to staff.');
+      await load(true);
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : 'Unable to confirm arrival at facility.',
+      );
+    } finally {
+      actionLock.current = false;
+      setBusy(false);
+    }
+  };
+
   const openFacilityDirections = async (
     driverCoords?: LocationCoordinates | null,
   ) => {
@@ -633,38 +887,9 @@ export default function DriverJobDetailScreen({
       return;
     }
 
-    let activeCoords = driverCoords || lastDriverLocation;
-    if (
-      !activeCoords ||
-      !Number.isFinite(activeCoords.latitude) ||
-      !Number.isFinite(activeCoords.longitude)
-    ) {
-      try {
-        activeCoords = await getCurrentDeviceLocation();
-        setLastDriverLocation(activeCoords);
-      } catch (locErr) {
-        const raw = locErr instanceof Error ? locErr.message : String(locErr);
-        setError(
-          'Your current location is required to open directions. Please update your location and try again.',
-        );
-        if (raw.toLowerCase().includes('accuracy is low')) {
-          setLocationStatus('low_accuracy');
-        } else {
-          setLocationStatus('required');
-        }
-        return;
-      }
-    }
-
-    if (
-      !activeCoords ||
-      !Number.isFinite(activeCoords.latitude) ||
-      !Number.isFinite(activeCoords.longitude)
-    ) {
-      setError(
-        'Your current location is required to open directions. Please update your location and try again.',
-      );
-      setLocationStatus('required');
+    const activeCoords =
+      driverCoords || (await acquireNavigationCoords());
+    if (!activeCoords) {
       return;
     }
 
@@ -716,38 +941,9 @@ export default function DriverJobDetailScreen({
       return;
     }
 
-    let activeCoords = driverCoords || lastDriverLocation;
-    if (
-      !activeCoords ||
-      !Number.isFinite(activeCoords.latitude) ||
-      !Number.isFinite(activeCoords.longitude)
-    ) {
-      try {
-        activeCoords = await getCurrentDeviceLocation();
-        setLastDriverLocation(activeCoords);
-      } catch (locErr) {
-        const raw = locErr instanceof Error ? locErr.message : String(locErr);
-        setError(
-          'Your current location is required to open directions. Please update your location and try again.',
-        );
-        if (raw.toLowerCase().includes('accuracy is low')) {
-          setLocationStatus('low_accuracy');
-        } else {
-          setLocationStatus('required');
-        }
-        return;
-      }
-    }
-
-    if (
-      !activeCoords ||
-      !Number.isFinite(activeCoords.latitude) ||
-      !Number.isFinite(activeCoords.longitude)
-    ) {
-      setError(
-        'Your current location is required to open directions. Please update your location and try again.',
-      );
-      setLocationStatus('required');
+    const activeCoords =
+      driverCoords || (await acquireNavigationCoords());
+    if (!activeCoords) {
       return;
     }
 
@@ -795,17 +991,18 @@ export default function DriverJobDetailScreen({
       return;
     }
     actionLock.current = true;
+    requestSeqRef.current += 1;
     setBusy(true);
     try {
       if (accept) await acceptDriverJob(accessToken, assignmentId);
       else await rejectDriverJob(accessToken, assignmentId, reason);
       setReason('');
-      await load();
+      await load(true);
       setMessage(
         accept ? 'Job accepted.' : 'Job rejected. Admin can reassign it.',
       );
     } catch (cause) {
-      await load();
+      await load(true);
       const msg =
         cause instanceof Error
           ? cause.message
@@ -843,8 +1040,18 @@ export default function DriverJobDetailScreen({
         </View>
       </View>
 
-      <ScrollView ref={scrollViewRef} contentContainerStyle={styles.content}>
-        {loading ? (
+      <KeyboardAvoidingView
+        style={styles.keyboardAvoidingView}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <ScrollView
+          ref={scrollViewRef}
+          contentContainerStyle={[
+            styles.content,
+            { paddingBottom: keyboardHeight > 0 ? keyboardHeight + 80 : 160 },
+          ]}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag">
+        {loading && !job ? (
           <ActivityIndicator
             style={styles.spinner}
             color="#145C3A"
@@ -892,6 +1099,10 @@ export default function DriverJobDetailScreen({
                       ? 'In Transit to Facility'
                       : job.orderStatus === 'received_at_facility'
                       ? 'Received At Facility'
+                      : job.orderStatus === 'en_route_delivery'
+                      ? 'Out for Delivery'
+                      : job.orderStatus === 'delivery_otp_pending'
+                      ? 'Arrived at Delivery'
                       : job.assignmentStatus.replace(/_/g, ' ')}
                   </Text>
                 </View>
@@ -1089,11 +1300,11 @@ export default function DriverJobDetailScreen({
                 </Text>
                 <TouchableOpacity
                   accessibilityRole="button"
-                  style={[styles.primaryButton, busy && styles.btnDisabled]}
-                  disabled={busy}
+                  style={[styles.primaryButton, (busy || startingTrip) && styles.btnDisabled]}
+                  disabled={busy || startingTrip}
                   onPress={beginTrip}>
                   <Text style={styles.primaryBtnText}>
-                    {busy
+                    {startingTrip || (busy && !tripError)
                       ? 'Starting trip...'
                       : isDeliveryPhase1
                       ? 'Start trip to facility'
@@ -1118,14 +1329,25 @@ export default function DriverJobDetailScreen({
                 </Text>
                 <TouchableOpacity
                   accessibilityRole="button"
-                  style={[styles.primaryButton, busy && styles.btnDisabled]}
-                  disabled={busy}
+                  style={[styles.primaryButton, (busy || startingTrip) && styles.btnDisabled]}
+                  disabled={busy || startingTrip}
                   onPress={beginTrip}>
                   <Text style={styles.primaryBtnText}>
-                    {busy ? 'Starting trip...' : 'Start trip to customer'}
+                    {startingTrip || (busy && !tripError) ? 'Starting trip...' : 'Start trip to customer'}
                   </Text>
                 </TouchableOpacity>
-                <ActionError error={tripError} />
+
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  accessibilityLabel="I've Arrived"
+                  style={[styles.arrivalButton, (busy || startingTrip) && styles.btnDisabled]}
+                  disabled={busy || startingTrip}
+                  onPress={arrive}>
+                  <Text style={styles.arrivalButtonText}>
+                    {busy ? 'Marking arrival...' : "I've Arrived"}
+                  </Text>
+                </TouchableOpacity>
+                <ActionError error={tripError || arriveError} />
               </View>
             ) : null}
 
@@ -1156,6 +1378,7 @@ export default function DriverJobDetailScreen({
 
                 <TouchableOpacity
                   accessibilityRole="button"
+                  accessibilityLabel="I've Arrived"
                   style={[styles.arrivalButton, busy && styles.btnDisabled]}
                   disabled={busy}
                   onPress={arrive}>
@@ -1293,6 +1516,12 @@ export default function DriverJobDetailScreen({
                     placeholder="Six-digit pickup OTP"
                     placeholderTextColor="#9E9E9E"
                     value={pickupOtp}
+                    onFocus={() => {
+                      scrollViewRef.current?.scrollToEnd({ animated: true });
+                      setTimeout(() => {
+                        scrollViewRef.current?.scrollToEnd({ animated: true });
+                      }, 350);
+                    }}
                     onChangeText={text => {
                       const numeric = text.replace(/[^0-9]/g, '');
                       setPickupOtp(numeric);
@@ -1345,6 +1574,12 @@ export default function DriverJobDetailScreen({
                   placeholder="Six-digit delivery OTP"
                   placeholderTextColor="#9E9E9E"
                   value={deliveryOtp}
+                  onFocus={() => {
+                    scrollViewRef.current?.scrollToEnd({ animated: true });
+                    setTimeout(() => {
+                      scrollViewRef.current?.scrollToEnd({ animated: true });
+                    }, 350);
+                  }}
                   onChangeText={text => {
                     const numeric = text.replace(/[^0-9]/g, '');
                     setDeliveryOtp(numeric);
@@ -1548,9 +1783,13 @@ export default function DriverJobDetailScreen({
             job.assignmentStatus === 'arrived' &&
             job.orderStatus === 'in_transit_to_facility' ? (
               <View style={styles.actionsCard}>
-                <Text style={styles.cardHeaderLabel}>FACILITY TRANSIT</Text>
+                <Text style={styles.cardHeaderLabel}>
+                  {facilityArrivalReported ? 'FACILITY ARRIVED' : 'FACILITY TRANSIT'}
+                </Text>
                 <Text accessibilityLiveRegion="polite" style={styles.bodyText}>
-                  Facility handoff pending. Facility staff must verify this order and confirm receipt.
+                  {facilityArrivalReported
+                    ? 'Arrived at facility. Please show the QR code or order number to facility staff for intake verification.'
+                    : 'Facility handoff pending. Travel to the assigned facility and confirm arrival once you reach the facility.'}
                 </Text>
                 <Text style={styles.bodyText}>
                   Assigned facility: {job.facility?.name || 'Unavailable'}
@@ -1562,31 +1801,49 @@ export default function DriverJobDetailScreen({
                   style={styles.navigateActionBtn}
                   onPress={() => openFacilityDirections()}>
                   <AppIcon name="location" size={16} color="#FFFFFF" strokeWidth={2.5} />
-
                   <Text style={styles.primaryBtnText}>Navigate to facility</Text>
                 </TouchableOpacity>
 
-                <TouchableOpacity
-                  accessibilityRole="button"
-                  style={styles.secondaryButton}
-                  disabled={busy}
-                  onPress={showHandoffCode}>
-                  <Text style={styles.secondaryBtnText}>Show facility handoff QR</Text>
-                </TouchableOpacity>
+                {!facilityArrivalReported ? (
+                  <TouchableOpacity
+                    accessibilityRole="button"
+                    style={styles.primaryButton}
+                    disabled={busy}
+                    onPress={handleArriveAtFacility}>
+                    {busy ? (
+                      <View style={styles.btnLoadingRow}>
+                        <ActivityIndicator size="small" color="#FFFFFF" />
+                        <Text style={styles.primaryBtnText}>Confirming Arrival...</Text>
+                      </View>
+                    ) : (
+                      <Text style={styles.primaryBtnText}>Arrived at Facility</Text>
+                    )}
+                  </TouchableOpacity>
+                ) : (
+                  <>
+                    <TouchableOpacity
+                      accessibilityRole="button"
+                      style={styles.secondaryButton}
+                      disabled={busy}
+                      onPress={showHandoffCode}>
+                      <Text style={styles.secondaryBtnText}>Show facility handoff QR</Text>
+                    </TouchableOpacity>
 
-                {handoffCode ? (
-                  <View style={styles.qrCard}>
-                    <Text style={styles.qrCardTitle}>Facility handoff</Text>
-                    <Text style={styles.orderReference}>Order {job.orderNumber}</Text>
-                    <Text style={styles.qrHelpText}>
-                      Facility staff can scan this QR or enter the order number above before accepting the garments.
-                    </Text>
-                    <QrGraphic
-                      payload={handoffCode}
-                      accessibilityLabel="Facility handoff QR code"
-                    />
-                  </View>
-                ) : null}
+                    {handoffCode ? (
+                      <View style={styles.qrCard}>
+                        <Text style={styles.qrCardTitle}>Facility handoff</Text>
+                        <Text style={styles.orderReference}>Order {job.orderNumber}</Text>
+                        <Text style={styles.qrHelpText}>
+                          Facility staff can scan this QR or enter the order number above before accepting the garments.
+                        </Text>
+                        <QrGraphic
+                          payload={handoffCode}
+                          accessibilityLabel="Facility handoff QR code"
+                        />
+                      </View>
+                    ) : null}
+                  </>
+                )}
 
                 <TouchableOpacity
                   accessibilityRole="button"
@@ -1613,6 +1870,7 @@ export default function DriverJobDetailScreen({
           <Text style={styles.bodyTextMuted}>Job not found.</Text>
         ) : null}
       </ScrollView>
+      </KeyboardAvoidingView>
 
       {/* Animated OTP Success Modal */}
       {otpSuccessData ? (
@@ -1680,10 +1938,13 @@ const styles = StyleSheet.create({
     height: 1,
     opacity: 0,
   },
+  keyboardAvoidingView: {
+    flex: 1,
+  },
   content: {
     padding: 16,
     gap: 12,
-    paddingBottom: 48,
+    paddingBottom: 120,
   },
   spinner: {
     marginVertical: 24,

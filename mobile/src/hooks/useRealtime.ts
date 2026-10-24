@@ -4,6 +4,7 @@ import {
   RealtimeEventListener,
   RealtimeEventPayload,
 } from '../services/realtimeService';
+import {invalidateOrdersCache} from '../services/ordersApi';
 
 /**
  * Low-level hook to subscribe to any Supabase Realtime channel.
@@ -79,6 +80,40 @@ function extractSubFromJwt(token?: string): string | null {
   return null;
 }
 
+// Cross-channel deduplication for multiplexed event broadcasts
+const recentEventTimestamps = new Map<string, number>();
+
+export function isDuplicateRealtimeEvent(
+  event: RealtimeEventPayload,
+  windowMs = 2500,
+): boolean {
+  if (!event || !event.eventType) return false;
+  const eventId =
+    (event as any).id ||
+    event.entityId ||
+    (event as any).notification?.id ||
+    (event.orderId ? `${event.eventType}:${event.orderId}` : null);
+
+  if (!eventId) return false;
+  const key = `${event.eventType}:${eventId}`;
+  const now = Date.now();
+
+  if (recentEventTimestamps.size > 200) {
+    for (const [k, timestamp] of recentEventTimestamps.entries()) {
+      if (now - timestamp > 10000) {
+        recentEventTimestamps.delete(k);
+      }
+    }
+  }
+
+  const lastSeen = recentEventTimestamps.get(key);
+  if (lastSeen && now - lastSeen < windowMs) {
+    return true;
+  }
+  recentEventTimestamps.set(key, now);
+  return false;
+}
+
 /**
  * Customer hook: Subscribes to customer order status changes, delivery updates, and claims.
  */
@@ -88,11 +123,22 @@ export function useCustomerRealtime(
   accessToken?: string,
   enabled: boolean = true,
 ) {
-  useRealtimeSubscription('orders:all', onEvent, accessToken, enabled);
+  const onEventRef = useRef(onEvent);
+  onEventRef.current = onEvent;
+
+  const handleCustomerEvent = useCallback((event: RealtimeEventPayload) => {
+    if (isDuplicateRealtimeEvent(event)) {
+      return;
+    }
+    invalidateOrdersCache();
+    onEventRef.current(event);
+  }, []);
+
+  useRealtimeSubscription('orders:all', handleCustomerEvent, accessToken, enabled);
   const channelName = customerIdOrProfileId
     ? `customer:${customerIdOrProfileId}`
     : null;
-  useRealtimeSubscription(channelName, onEvent, accessToken, enabled && !!customerIdOrProfileId);
+  useRealtimeSubscription(channelName, handleCustomerEvent, accessToken, enabled && !!customerIdOrProfileId);
 
   const derivedId = extractSubFromJwt(accessToken);
   const derivedChannel =
@@ -101,7 +147,7 @@ export function useCustomerRealtime(
       : null;
   useRealtimeSubscription(
     derivedChannel,
-    onEvent,
+    handleCustomerEvent,
     accessToken,
     enabled && !!derivedChannel,
   );
@@ -117,12 +163,33 @@ export function useDriverRealtime(
   accessToken?: string,
   enabled: boolean = true,
 ) {
-  useRealtimeSubscription('driver:available', onEvent, accessToken, enabled);
-  useRealtimeSubscription('jobs:drivers', onEvent, accessToken, enabled);
+  const onEventRef = useRef(onEvent);
+  onEventRef.current = onEvent;
 
-  // If driverId is known, also listen to private driver-specific assignment channel
+  const handleDriverEvent = useCallback((event: RealtimeEventPayload) => {
+    if (isDuplicateRealtimeEvent(event)) {
+      return;
+    }
+    onEventRef.current(event);
+  }, []);
+
+  useRealtimeSubscription('driver:available', handleDriverEvent, accessToken, enabled);
+  useRealtimeSubscription('jobs:drivers', handleDriverEvent, accessToken, enabled);
+
+  // If driverId is known, listen to private driver-specific assignment channel
   const privateChannel = driverId ? `driver:${driverId}` : null;
-  useRealtimeSubscription(privateChannel, onEvent, accessToken, enabled && !!driverId);
+  useRealtimeSubscription(privateChannel, handleDriverEvent, accessToken, enabled && !!driverId);
+
+  // Also derive driver profile sub from JWT to immediately listen to driver:${sub} before profile load
+  const derivedSub = extractSubFromJwt(accessToken);
+  const derivedChannel =
+    derivedSub && derivedSub !== driverId ? `driver:${derivedSub}` : null;
+  useRealtimeSubscription(
+    derivedChannel,
+    handleDriverEvent,
+    accessToken,
+    enabled && !!derivedChannel,
+  );
 }
 
 /**
@@ -135,9 +202,38 @@ export function useFacilityRealtime(
   accessToken?: string,
   enabled: boolean = true,
 ) {
-  useRealtimeSubscription('facility:all', onEvent, accessToken, enabled);
+  const onEventRef = useRef(onEvent);
+  onEventRef.current = onEvent;
+
+  const handleFacilityEvent = useCallback((event: RealtimeEventPayload) => {
+    onEventRef.current(event);
+  }, []);
+
+  useRealtimeSubscription('facility:all', handleFacilityEvent, accessToken, enabled);
   const channelName = facilityId ? `facility:${facilityId}` : null;
-  useRealtimeSubscription(channelName, onEvent, accessToken, enabled && !!facilityId);
+  useRealtimeSubscription(channelName, handleFacilityEvent, accessToken, enabled && !!facilityId);
+
+  const handleOrdersAll = useCallback(
+    (event: RealtimeEventPayload) => {
+      const payload = (event as any).payload || event;
+      const eventFacilityId =
+        payload?.facilityId ||
+        payload?.facility_id ||
+        (event as any).facilityId ||
+        (event as any).facility_id ||
+        (event as any).record?.facility_id;
+
+      // If event explicitly targets another facility, ignore it
+      if (facilityId && eventFacilityId && eventFacilityId !== facilityId) {
+        return;
+      }
+
+      onEventRef.current(event);
+    },
+    [facilityId],
+  );
+
+  useRealtimeSubscription('orders:all', handleOrdersAll, accessToken, enabled);
 }
 
 /**
@@ -161,16 +257,25 @@ export function useOrderRealtime(
   accessToken?: string,
   enabled: boolean = true,
 ) {
-  const channelName = orderId ? `order:${orderId}` : null;
-  useRealtimeSubscription(channelName, onEvent, accessToken, enabled && !!orderId);
-
   const onEventRef = useRef(onEvent);
   onEventRef.current = onEvent;
+
+  const handleOrderEvent = useCallback(
+    (event: RealtimeEventPayload) => {
+      invalidateOrdersCache();
+      onEventRef.current(event);
+    },
+    [],
+  );
+
+  const channelName = orderId ? `order:${orderId}` : null;
+  useRealtimeSubscription(channelName, handleOrderEvent, accessToken, enabled && !!orderId);
 
   const handleAllOrders = useCallback(
     (event: RealtimeEventPayload) => {
       const payloadOrderId = event.orderId || event.entityId || (event as any).record?.id;
       if (orderId && payloadOrderId === orderId) {
+        invalidateOrdersCache();
         onEventRef.current(event);
       }
     },

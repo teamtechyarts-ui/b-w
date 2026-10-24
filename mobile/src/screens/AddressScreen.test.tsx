@@ -242,4 +242,16 @@ describe('AddressScreen UX & In-App Deletion / Error Modals', () => {
     expect(view.queryByText('Select pickup address')).toBeNull();
     expect(view.queryByText('Continue to Pickup Slot')).toBeNull();
   });
+
+  it('9. retains populated address list and avoids full-page spinner during background refresh', async () => {
+    const view = await render(
+      <AddressScreen {...defaultProps} loading={true} />,
+    );
+
+    // Full-page spinner message should NOT appear because addresses exist
+    expect(view.queryByText('Loading addresses...')).toBeNull();
+    // Existing addresses should remain rendered
+    expect(view.getAllByText('Home').length).toBeGreaterThan(0);
+    expect(view.getByText('Office')).toBeTruthy();
+  });
 });

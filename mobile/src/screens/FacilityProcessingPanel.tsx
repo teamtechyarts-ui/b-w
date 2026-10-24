@@ -32,9 +32,10 @@ const workflow = ['Wash', 'Dry', 'Iron', 'Fold', 'Pack', 'QC'] as const;
 type Props = {
   accessToken: string;
   orderId: string;
-  onChanged: () => void;
+  onChanged: (orderStatusChanged?: boolean) => void;
   items?: Array<{ id: string; item_name: string }>;
   packingReady?: boolean;
+  onConfirmPackingPress?: () => void;
 };
 
 export default function FacilityProcessingPanel({
@@ -43,6 +44,7 @@ export default function FacilityProcessingPanel({
   onChanged,
   items = [],
   packingReady = false,
+  onConfirmPackingPress,
 }: Props) {
   const [history, setHistory] = useState<ProcessingHistory | null>(null);
   const [loading, setLoading] = useState(true);
@@ -52,31 +54,41 @@ export default function FacilityProcessingPanel({
   const [reason, setReason] = useState('');
   const [defectCode, setDefectCode] = useState('');
   const [affectedItemIds, setAffectedItemIds] = useState<string[]>([]);
+  const [submittingActionId, setSubmittingActionId] = useState<string | null>(null);
   const lock = useRef(false);
+  const historyRef = useRef<ProcessingHistory | null>(null);
+  historyRef.current = history;
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    setError('');
-    try {
-      setHistory(await getFacilityProcessing(accessToken, orderId));
-    } catch (cause) {
-      setHistory(null);
-      setError(
-        cause instanceof Error
-          ? cause.message
-          : 'Facility processing history unavailable.',
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, [accessToken, orderId]);
+  const refresh = useCallback(
+    async (isSilent = false) => {
+      if (!isSilent && !historyRef.current) {
+        setLoading(true);
+      }
+      setError('');
+      try {
+        const result = await getFacilityProcessing(accessToken, orderId);
+        setHistory(result);
+      } catch (cause) {
+        if (!isSilent && !historyRef.current) {
+          setHistory(null);
+        }
+        setError(
+          cause instanceof Error
+            ? cause.message
+            : 'Facility processing history unavailable.',
+        );
+      } finally {
+        setLoading(false);
+      }
+    },
+    [accessToken, orderId],
+  );
 
   useOrderRealtime(
     orderId,
     useCallback(() => {
-      refresh();
-      onChanged();
-    }, [refresh, onChanged]),
+      refresh(true);
+    }, [refresh]),
     accessToken,
     !!accessToken && !!orderId,
   );
@@ -85,17 +97,23 @@ export default function FacilityProcessingPanel({
     refresh();
   }, [refresh]);
 
-  const act = async (action: () => Promise<unknown>, success: string) => {
+  const act = async (
+    actionId: string,
+    action: () => Promise<unknown>,
+    success: string,
+    isStatusChange = false,
+  ) => {
     if (lock.current) return;
     lock.current = true;
     setBusy(true);
+    setSubmittingActionId(actionId);
     setError('');
     setMessage('');
     try {
       await action();
       setMessage(success);
-      await refresh();
-      onChanged();
+      await refresh(true);
+      onChanged(isStatusChange);
     } catch (cause) {
       setError(
         cause instanceof Error ? cause.message : 'Processing action failed.',
@@ -103,6 +121,7 @@ export default function FacilityProcessingPanel({
     } finally {
       lock.current = false;
       setBusy(false);
+      setSubmittingActionId(null);
     }
   };
 
@@ -120,6 +139,7 @@ export default function FacilityProcessingPanel({
       return;
     }
     act(
+      approved ? 'qc-pass' : 'qc-fail',
       () =>
         recordFacilityQualityDecision(accessToken, orderId, {
           approved,
@@ -130,6 +150,7 @@ export default function FacilityProcessingPanel({
       approved
         ? 'QC passed. Order is ready for delivery.'
         : 'QC failed. Rewash is required.',
+      true,
     );
   };
 
@@ -243,7 +264,7 @@ export default function FacilityProcessingPanel({
         })}
       </View>
 
-      {loading ? (
+      {loading && !history ? (
         <ActivityIndicator
           accessibilityLabel="Loading processing history"
           color={colors.primary}
@@ -302,13 +323,14 @@ export default function FacilityProcessingPanel({
           disabled={busy}
           onPress={() => {
             act(
+              `start-${history.nextStage}`,
               () =>
                 startFacilityStage(accessToken, orderId, history.nextStage!),
               `${labels[history.nextStage!]} started.`,
             );
           }}
         >
-          {busy ? (
+          {submittingActionId === `start-${history.nextStage}` ? (
             <ActivityIndicator color="#FFFFFF" size="small" />
           ) : (
             <Text style={styles.actionButtonText}>
@@ -323,7 +345,7 @@ export default function FacilityProcessingPanel({
         <View key={stage.id} style={styles.stageCard}>
           <View style={styles.stageHeaderRow}>
             <Text style={styles.stageTitle}>
-              Cycle {stage.rewash_cycle ?? 0} · {labels[stage.operation_type]} ·{' '}
+              Cycle {(stage.rewash_cycle ?? 0) + 1} · {labels[stage.operation_type]} ·{' '}
               {stage.completed_at ? 'Completed' : 'In progress'}
             </Text>
           </View>
@@ -344,12 +366,13 @@ export default function FacilityProcessingPanel({
               disabled={busy}
               onPress={() => {
                 act(
+                  `complete-${stage.id}`,
                   () => completeFacilityStage(accessToken, stage.id),
                   `${labels[stage.operation_type]} completed.`,
                 );
               }}
             >
-              {busy ? (
+              {submittingActionId === `complete-${stage.id}` ? (
                 <ActivityIndicator color={colors.primary} size="small" />
               ) : (
                 <Text style={styles.completeButtonText}>
@@ -368,7 +391,7 @@ export default function FacilityProcessingPanel({
         <View key={decision.id} style={styles.stageCard}>
           <View style={styles.stageHeaderRow}>
             <Text style={styles.stageTitle}>
-              Cycle {decision.cycle_number} ·{' '}
+              Cycle {decision.cycle_number + 1} ·{' '}
               {decision.approved ? 'Passed' : 'Failed — rewash required'}
             </Text>
           </View>
@@ -392,7 +415,7 @@ export default function FacilityProcessingPanel({
           <View style={styles.qcHeader}>
             <Text style={styles.heading}>Quality inspection</Text>
             <View style={styles.cycleBadge}>
-              <Text style={styles.cycle}>Cycle {history.rewashCycle ?? 0}</Text>
+              <Text style={styles.cycle}>Cycle {(history.rewashCycle ?? 0) + 1}</Text>
             </View>
           </View>
           <TextInput
@@ -454,33 +477,74 @@ export default function FacilityProcessingPanel({
             </TouchableOpacity>
           ))}
 
-          {!packingReady ? (
-            <Text style={styles.warningHint}>
-              Confirm final packing before QC can make this order ready.
-            </Text>
-          ) : null}
+          {(() => {
+            const effectivePackingReady =
+              history?.packingReady !== undefined
+                ? history.packingReady
+                : history?.packingRequired === false
+                  ? true
+                  : packingReady;
 
-          <View style={styles.qcActionGroup}>
-            <TouchableOpacity
-              accessibilityRole="button"
-              style={[styles.passButton, (!packingReady || busy) && styles.buttonDisabled]}
-              disabled={busy || !packingReady}
-              onPress={() => decide(true)}
-            >
-              <Text style={styles.passText}>Pass QC</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              accessibilityRole="button"
-              style={[
-                styles.failButton,
-                (busy || (history.rewashCycle ?? 0) >= 2) && styles.buttonDisabled,
-              ]}
-              disabled={busy || (history.rewashCycle ?? 0) >= 2}
-              onPress={() => decide(false)}
-            >
-              <Text style={styles.failText}>Fail QC — require rewash</Text>
-            </TouchableOpacity>
-          </View>
+            return (
+              <>
+                {!effectivePackingReady ? (
+                  <View style={styles.packingWarningBox}>
+                    <View style={styles.warningRow}>
+                      <AppIcon name="alert" size={15} color={colors.warningText} />
+                      <Text style={styles.warningHint}>
+                        Confirm final packing before QC can make this order ready.
+                      </Text>
+                    </View>
+                    {onConfirmPackingPress ? (
+                      <TouchableOpacity
+                        accessibilityRole="button"
+                        accessibilityLabel="Confirm final packing"
+                        style={styles.actionPackingButton}
+                        onPress={onConfirmPackingPress}
+                      >
+                        <AppIcon name="package" size={14} color="#FFFFFF" />
+                        <Text style={styles.actionPackingButtonText}>
+                          Confirm Final Packing
+                        </Text>
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
+                ) : null}
+
+                <View style={styles.qcActionGroup}>
+                  <TouchableOpacity
+                    accessibilityRole="button"
+                    accessibilityLabel="Pass QC"
+                    style={[styles.passButton, (!effectivePackingReady || busy) && styles.buttonDisabled]}
+                    disabled={busy || !effectivePackingReady}
+                    onPress={() => decide(true)}
+                  >
+                    {submittingActionId === 'qc-pass' ? (
+                      <ActivityIndicator color="#FFFFFF" size="small" />
+                    ) : (
+                      <Text style={styles.passText}>Pass QC</Text>
+                    )}
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    accessibilityRole="button"
+                    accessibilityLabel="Fail QC — require rewash"
+                    style={[
+                      styles.failButton,
+                      (busy || (history.rewashCycle ?? 0) >= 2) && styles.buttonDisabled,
+                    ]}
+                    disabled={busy || (history.rewashCycle ?? 0) >= 2}
+                    onPress={() => decide(false)}
+                  >
+                    {submittingActionId === 'qc-fail' ? (
+                      <ActivityIndicator color="#FFFFFF" size="small" />
+                    ) : (
+                      <Text style={styles.failText}>Fail QC — require rewash</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </>
+            );
+          })()}
 
           {(history.rewashCycle ?? 0) >= 2 ? (
             <Text style={styles.warningHint}>
@@ -816,5 +880,35 @@ const styles = StyleSheet.create({
     borderColor: colors.warningBorder,
   },
   reworkText: { color: colors.warningText, fontSize: 13, fontWeight: '600' },
+  packingWarningBox: {
+    backgroundColor: '#FFFBEB',
+    borderColor: '#FCD34D',
+    borderWidth: 1,
+    borderRadius: borderRadius.md,
+    padding: spacing.sm,
+    gap: spacing.xs,
+  },
+  warningRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  actionPackingButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.primary,
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.md,
+    borderRadius: borderRadius.md,
+    gap: spacing.xs,
+    alignSelf: 'flex-start',
+    marginTop: spacing.xs,
+  },
+  actionPackingButtonText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+    fontSize: 12,
+  },
 });
 

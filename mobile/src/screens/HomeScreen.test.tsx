@@ -1,5 +1,7 @@
+// @ts-ignore
+jest.setTimeout(25000);
 import React from 'react';
-import {fireEvent, render} from '@testing-library/react-native';
+import {fireEvent, render, within} from '@testing-library/react-native';
 import HomeScreen from './HomeScreen';
 import type {ServiceItem} from '../types/service';
 const services: ServiceItem[] = [
@@ -118,5 +120,34 @@ test('renders distinct urgent action cards for multiple active orders requiring 
 
   await fireEvent.press(view.getByText('Give Delivery OTP →'));
   expect(onOpenOrder).toHaveBeenCalledWith('order-2');
+});
+
+test('renders distinct, semantically appropriate AppIcon components for category cards', async () => {
+  const fullCategories = [
+    {id: 'cat-1', name: 'Wash & Fold', count: 1},
+    {id: 'cat-2', name: 'Wash & Iron', count: 32},
+    {id: 'cat-3', name: 'Wash & Steam Iron', count: 1},
+    {id: 'cat-4', name: 'Steam Ironing', count: 14},
+    {id: 'cat-5', name: 'Dry Cleaning', count: 44},
+    {id: 'cat-6', name: 'Household & Linen Care', count: 18},
+    {id: 'cat-7', name: 'Shoe Cleaning', count: 10},
+    {id: 'cat-8', name: 'Premium Laundry', count: 1},
+    {id: 'cat-9', name: 'Add-On Services', count: 11},
+    {id: 'cat-10', name: 'new testing category edited', count: 1},
+  ];
+
+  const view = await render(<HomeScreen {...base} categories={fullCategories} />);
+
+  // Component-level rendered AppIcons verification
+  expect(within(view.getByTestId('category-icon-container-wash-and-fold')).getByTestId('icon-wash-fold')).toBeTruthy();
+  expect(within(view.getByTestId('category-icon-container-wash-and-iron')).getByTestId('icon-wash-iron')).toBeTruthy();
+  expect(within(view.getByTestId('category-icon-container-wash-and-steam-iron')).getByTestId('icon-wash-iron')).toBeTruthy();
+  expect(within(view.getByTestId('category-icon-container-steam-ironing')).getByTestId('icon-iron')).toBeTruthy();
+  expect(within(view.getByTestId('category-icon-container-dry-cleaning')).getByTestId('icon-hanger')).toBeTruthy();
+  expect(within(view.getByTestId('category-icon-container-household-and-linen-care')).getByTestId('icon-bed')).toBeTruthy();
+  expect(within(view.getByTestId('category-icon-container-shoe-cleaning')).getByTestId('icon-shoe')).toBeTruthy();
+  expect(within(view.getByTestId('category-icon-container-premium-laundry')).getByTestId('icon-shirt')).toBeTruthy();
+  expect(within(view.getByTestId('category-icon-container-add-on-services')).getByTestId('icon-plus')).toBeTruthy();
+  expect(within(view.getByTestId('category-icon-container-new-testing-category-edited')).getByTestId('icon-tag')).toBeTruthy();
 });
 

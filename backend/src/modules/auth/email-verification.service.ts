@@ -186,11 +186,7 @@ export class EmailVerificationService {
 
     // Lookup through user metadata
     try {
-      const { data: linkRes } = await this.supabase.admin.auth.admin.generateLink({
-        type: 'recovery',
-        email,
-      });
-      const user = linkRes?.user;
+      const user = await this.findUserByEmail(email);
       if (user?.app_metadata?.email_verification_challenge) {
         const c = user.app_metadata.email_verification_challenge as StoredEmailChallenge;
         if (c.email === email && c.purpose === 'email_verification') {
@@ -200,6 +196,53 @@ export class EmailVerificationService {
     } catch {
       // Suppress lookup errors
     }
+
+    return null;
+  }
+
+  private async findUserByEmail(email: string): Promise<any | null> {
+    const normalizedEmail = email.trim().toLowerCase();
+
+    // 1. Try magiclink
+    try {
+      const { data: linkData, error: linkErr } = await this.supabase.admin.auth.admin.generateLink({
+        type: 'magiclink',
+        email: normalizedEmail,
+      });
+      if (!linkErr && linkData?.user) {
+        return linkData.user;
+      }
+    } catch {}
+
+    // 2. Try recovery
+    try {
+      const { data: linkData, error: linkErr } = await this.supabase.admin.auth.admin.generateLink({
+        type: 'recovery',
+        email: normalizedEmail,
+      });
+      if (!linkErr && linkData?.user) {
+        return linkData.user;
+      }
+    } catch {}
+
+    // 3. Fallback to admin user listing
+    try {
+      let page = 1;
+      const perPage = 100;
+      while (true) {
+        const { data: listData, error: listErr } = await this.supabase.admin.auth.admin.listUsers({
+          page,
+          perPage,
+        });
+        if (listErr || !listData?.users || listData.users.length === 0) break;
+        const match = listData.users.find(
+          (u: any) => u.email?.trim().toLowerCase() === normalizedEmail,
+        );
+        if (match) return match;
+        if (listData.users.length < perPage) break;
+        page++;
+      }
+    } catch {}
 
     return null;
   }
@@ -266,11 +309,14 @@ export class EmailVerificationService {
 
     try {
       await this.mailService.sendEmailVerificationOtp(normalizedEmail, otp);
-    } catch (err: any) {
-      await this.invalidateActiveChallenges(userId, normalizedEmail);
-      this.logger.error(
-        `Failed to send verification OTP to ${this.maskEmail(normalizedEmail)}: ${err.message}`,
+      this.logger.log(
+        `[AUTH_SIGNUP] Verification email successfully dispatched to ${this.maskEmail(normalizedEmail)} via Nodemailer`,
       );
+    } catch (err: any) {
+      this.logger.error(
+        `Failed to send verification OTP via Nodemailer to ${this.maskEmail(normalizedEmail)}: ${err.message}`,
+      );
+      await this.invalidateActiveChallenges(userId, normalizedEmail);
       throw new ServiceUnavailableException(
         'Unable to deliver email verification code right now. Please try again later.',
       );
@@ -299,17 +345,8 @@ export class EmailVerificationService {
       }
     }
 
-    // Look up user
-    let userRecord: any = null;
-    try {
-      const { data: linkData } = await this.supabase.admin.auth.admin.generateLink({
-        type: 'recovery',
-        email: normalizedEmail,
-      });
-      userRecord = linkData?.user;
-    } catch {
-      // Suppress lookup errors
-    }
+    // Look up user via authoritative helper
+    const userRecord = await this.findUserByEmail(normalizedEmail);
 
     if (!userRecord) {
       await new Promise((r) => setTimeout(r, 120));

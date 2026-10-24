@@ -132,6 +132,78 @@ describe('MailService', () => {
     });
   });
 
+  describe('when Zoho SMTP credentials are configured', () => {
+    beforeEach(async () => {
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          MailService,
+          {
+            provide: ConfigService,
+            useValue: {
+              get: jest.fn((key: string) => {
+                if (key === 'SMTP_HOST') return 'smtp.zoho.in';
+                if (key === 'SMTP_PORT') return '465';
+                if (key === 'SMTP_SECURE') return 'true';
+                if (key === 'SMTP_USER') return 'info@brightandwhite.in';
+                if (key === 'SMTP_PASS') return 'zoho secret pass';
+                if (key === 'MAIL_FROM') return 'Brightandwhite <info@brightandwhite.in>';
+                return undefined;
+              }),
+            },
+          },
+        ],
+      }).compile();
+
+      service = module.get<MailService>(MailService);
+    });
+
+    it('initializes pooled transport with host, port, secure, and sanitized credentials', () => {
+      expect(nodemailer.createTransport).toHaveBeenCalledWith(
+        expect.objectContaining({
+          pool: true,
+          host: 'smtp.zoho.in',
+          port: 465,
+          secure: true,
+          auth: {
+            user: 'info@brightandwhite.in',
+            pass: 'zohosecretpass',
+          },
+        }),
+      );
+      expect(service.isConfigured()).toBe(true);
+    });
+
+    it('uses MAIL_FROM header for outgoing messages', async () => {
+      await service.sendMail({
+        to: 'customer@example.com',
+        subject: 'Zoho Test',
+        text: 'Zoho Text',
+        html: '<p>Zoho HTML</p>',
+      });
+
+      expect(mockTransporter.sendMail).toHaveBeenCalledWith(
+        expect.objectContaining({
+          from: 'Brightandwhite <info@brightandwhite.in>',
+          to: 'customer@example.com',
+          subject: 'Zoho Test',
+        }),
+      );
+    });
+
+    it('sends email verification OTP via Zoho SMTP successfully', async () => {
+      await service.sendEmailVerificationOtp('verify@example.com', '789012', 10);
+
+      expect(mockTransporter.sendMail).toHaveBeenCalledTimes(1);
+      const callArgs = mockTransporter.sendMail.mock.calls[0][0];
+
+      expect(callArgs.from).toBe('Brightandwhite <info@brightandwhite.in>');
+      expect(callArgs.to).toBe('verify@example.com');
+      expect(callArgs.subject).toContain('Verify Your Email Address');
+      expect(callArgs.text).toContain('789012');
+      expect(callArgs.html).toContain('789012');
+    });
+  });
+
   describe('when SMTP credentials are not configured', () => {
     beforeEach(async () => {
       const module: TestingModule = await Test.createTestingModule({
@@ -168,6 +240,13 @@ describe('MailService', () => {
           html: '<p>HTML</p>',
         }),
       ).rejects.toThrow(ServiceUnavailableException);
+    });
+
+    it('returns diagnostic status showing unconfigured without throwing', async () => {
+      const diag = await service.getDiagnosticStatus();
+      expect(diag.configured).toBe(false);
+      expect(diag.connectionVerified).toBe(false);
+      expect(diag.senderAddress).toBe('not_configured');
     });
   });
 });

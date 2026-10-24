@@ -1,6 +1,7 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  AppState,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -14,6 +15,7 @@ import { colors, spacing, borderRadius, typography, shadows } from '../theme/des
 import {
   AvailableDeliveryDriver,
   FacilityDashboard,
+  FacilityDashboardOrder,
   getAvailableDeliveryDrivers,
   getFacilityDashboard,
   handoverFacilityOrderToDriver,
@@ -21,7 +23,7 @@ import {
 } from '../services/facilityDashboardApi';
 import { confirmFacilityReceiptByOrderId } from '../services/facilityIntakeApi';
 import { useFacilityRealtime } from '../hooks/useRealtime';
-import { RealtimeEventPayload } from '../services/realtimeService';
+import { RealtimeEventPayload, realtimeService } from '../services/realtimeService';
 
 const READY_STATUSES = [
   'ready_for_delivery',
@@ -36,6 +38,34 @@ const PROCESSING_STATUSES = [
   'quality_check',
   'rework_required',
 ];
+
+const DEPARTING_STATUSES = [
+  'en_route_delivery',
+  'delivered',
+  'completed',
+  'cancelled',
+];
+
+function computeFacilitySummary(orders: FacilityDashboardOrder[]): FacilityDashboard['summary'] {
+  let incoming = 0;
+  let received = 0;
+  let processing = 0;
+  let ready = 0;
+
+  for (const order of orders) {
+    if (order.current_status === 'in_transit_to_facility') {
+      incoming++;
+    } else if (order.current_status === 'received_at_facility') {
+      received++;
+    } else if (PROCESSING_STATUSES.includes(order.current_status)) {
+      processing++;
+    } else if (READY_STATUSES.includes(order.current_status)) {
+      ready++;
+    }
+  }
+
+  return { incoming, received, processing, ready };
+}
 
 type Props = {
   accessToken: string;
@@ -54,6 +84,8 @@ export default function FacilityDashboardScreen({
     'incoming',
   );
   const [dashboard, setDashboard] = useState<FacilityDashboard | null>(null);
+  const dashboardRef = useRef<FacilityDashboard | null>(null);
+  dashboardRef.current = dashboard;
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
@@ -66,24 +98,76 @@ export default function FacilityDashboardScreen({
   const [handingOverId, setHandingOverId] = useState<string | null>(null);
   const [receivingOrderId, setReceivingOrderId] = useState<string | null>(null);
 
+  const requestIdRef = useRef(0);
+  const latestEventTimeByOrderRef = useRef<Map<string, number>>(new Map());
+  const processedEventsRef = useRef<Set<string>>(new Set());
+  const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const load = useCallback(
-    async (refresh = false) => {
-      if (refresh) setRefreshing(true);
-      else setLoading(true);
+    async (isManualRefresh = false, isBackground = false) => {
+      const currentRequestId = ++requestIdRef.current;
+      if (isManualRefresh) setRefreshing(true);
+      else if (!dashboardRef.current && !isBackground) setLoading(true);
       setError('');
       try {
         const result = await getFacilityDashboard(accessToken);
-        setDashboard(result);
+        if (currentRequestId !== requestIdRef.current) {
+          // Newer load request was started or completed, discard stale response
+          return;
+        }
+
+        // Reconcile with latest local event timestamps to prevent stale server responses from overwriting newer event-driven state
+        const reconciledOrders = result.orders.map(serverOrder => {
+          const localEventTime = latestEventTimeByOrderRef.current.get(serverOrder.id);
+          if (localEventTime) {
+            const serverTime = serverOrder.updated_at ? new Date(serverOrder.updated_at).getTime() : 0;
+            if (!serverOrder.updated_at || serverTime < localEventTime) {
+              const existingLocal = dashboardRef.current?.orders.find(o => o.id === serverOrder.id);
+              if (existingLocal) {
+                return {
+                  ...serverOrder,
+                  current_status: existingLocal.current_status,
+                  processingStage: existingLocal.processingStage,
+                  driverArrivedAtFacility: existingLocal.driverArrivedAtFacility,
+                  deliveryAssignment: existingLocal.deliveryAssignment,
+                  pickupAssignment: existingLocal.pickupAssignment,
+                };
+              }
+            }
+          }
+          return serverOrder;
+        });
+
+        const reconciledDashboard: FacilityDashboard = {
+          ...result,
+          orders: reconciledOrders,
+          summary: computeFacilitySummary(reconciledOrders),
+        };
+
+        setDashboard(reconciledDashboard);
+        dashboardRef.current = reconciledDashboard;
+        setActionError(prev => {
+          if (prev.includes('Driver has not yet confirmed arrival')) {
+            return '';
+          }
+          return prev;
+        });
       } catch (cause) {
-        setDashboard(null);
-        setError(
-          cause instanceof Error
-            ? cause.message
-            : 'Facility dashboard unavailable.',
-        );
+        if (currentRequestId !== requestIdRef.current) return;
+        if (!isBackground) {
+          setDashboard(null);
+          dashboardRef.current = null;
+          setError(
+            cause instanceof Error
+              ? cause.message
+              : 'Facility dashboard unavailable.',
+          );
+        }
       } finally {
-        setLoading(false);
-        setRefreshing(false);
+        if (currentRequestId === requestIdRef.current) {
+          setLoading(false);
+          setRefreshing(false);
+        }
       }
     },
     [accessToken],
@@ -93,11 +177,278 @@ export default function FacilityDashboardScreen({
     load();
   }, [load]);
 
+  // Reconnection and foreground listeners to reconcile missed changes
+  useEffect(() => {
+    const unsubReconnect = realtimeService.onReconnect(() => {
+      load(false, true);
+    });
+    const subscription = AppState.addEventListener('change', nextState => {
+      if (nextState === 'active') {
+        load(false, true);
+      }
+    });
+    return () => {
+      unsubReconnect();
+      subscription.remove();
+      if (syncTimerRef.current) {
+        clearTimeout(syncTimerRef.current);
+      }
+    };
+  }, [load]);
+
   useFacilityRealtime(
     dashboard?.facility?.id ?? null,
     useCallback(
       (event: RealtimeEventPayload) => {
-        load(true);
+        if (event.eventType === 'RECONNECT_RECONCILE') {
+          load(false, true);
+          return;
+        }
+
+        const payload = (event as any).payload || event;
+        const targetOrderId = payload?.orderId || event.orderId || event.entityId;
+        const targetOrderNumber = payload?.orderNumber || (event as any).orderNumber;
+
+        if (!targetOrderId && !targetOrderNumber) return;
+
+        // Duplicate event deduplication
+        const eventFingerprint = `${event.eventType}_${targetOrderId || ''}_${targetOrderNumber || ''}_${payload?.status || ''}_${payload?.stage || ''}_${payload?.action || ''}_${payload?.timestamp || ''}`;
+        if (processedEventsRef.current.has(eventFingerprint)) {
+          return;
+        }
+        processedEventsRef.current.add(eventFingerprint);
+        if (processedEventsRef.current.size > 200) {
+          const first = processedEventsRef.current.values().next().value;
+          if (first) processedEventsRef.current.delete(first);
+        }
+
+        // Track local event timestamp for target order to protect against stale in-flight responses
+        const now = Date.now();
+        if (targetOrderId) {
+          latestEventTimeByOrderRef.current.set(targetOrderId, now);
+        }
+
+        const eventType = event.eventType;
+
+        setDashboard(prev => {
+          if (!prev) return prev;
+
+          const existingIndex = prev.orders.findIndex(
+            o => (targetOrderId && o.id === targetOrderId) || (targetOrderNumber && o.order_number === targetOrderNumber),
+          );
+          const existingOrder = existingIndex >= 0 ? prev.orders[existingIndex] : null;
+
+          let updatedOrders = [...prev.orders];
+
+          if (eventType === 'DRIVER_ARRIVED_AT_FACILITY' || (eventType === 'DRIVER_ARRIVED' && payload?.assignmentType === 'facility')) {
+            if (existingOrder) {
+              const isDelivery = payload.assignmentType === 'delivery' || READY_STATUSES.includes(existingOrder.current_status);
+              const updatedOrder: FacilityDashboardOrder = {
+                ...existingOrder,
+                driverArrivedAtFacility: true,
+                deliveryAssignment: isDelivery
+                  ? {
+                      id: payload.assignmentId || existingOrder.deliveryAssignment?.id || '',
+                      driverId: payload.driverId || existingOrder.deliveryAssignment?.driverId || '',
+                      driverName: payload.driverName || existingOrder.deliveryAssignment?.driverName || 'Assigned Driver',
+                      status: 'arrived',
+                      rejectionReason: existingOrder.deliveryAssignment?.rejectionReason || null,
+                      handedOver: existingOrder.deliveryAssignment?.handedOver || false,
+                      handedOverAt: existingOrder.deliveryAssignment?.handedOverAt || null,
+                      collected: existingOrder.deliveryAssignment?.collected || false,
+                      collectedAt: existingOrder.deliveryAssignment?.collectedAt || null,
+                    }
+                  : existingOrder.deliveryAssignment,
+                pickupAssignment: !isDelivery && existingOrder.pickupAssignment
+                  ? {
+                      ...existingOrder.pickupAssignment,
+                      status: 'arrived',
+                      driverName: payload.driverName || existingOrder.pickupAssignment.driverName,
+                      driverId: payload.driverId || existingOrder.pickupAssignment.driverId,
+                    }
+                  : existingOrder.pickupAssignment,
+                pickupDriverName: !isDelivery ? (payload.driverName || existingOrder.pickupDriverName) : existingOrder.pickupDriverName,
+              };
+              updatedOrders[existingIndex] = updatedOrder;
+            }
+            setActionError(err =>
+              err.includes('Driver has not yet confirmed arrival') ? '' : err,
+            );
+          } else if (eventType === 'FACILITY_INTAKE') {
+            const newStatus = payload.status || 'received_at_facility';
+            if (existingOrder) {
+              updatedOrders[existingIndex] = {
+                ...existingOrder,
+                current_status: newStatus,
+                driverArrivedAtFacility: true,
+              };
+            } else if (targetOrderId) {
+              updatedOrders.unshift({
+                id: targetOrderId,
+                order_number: targetOrderNumber || `BW-${targetOrderId.slice(0, 8).toUpperCase()}`,
+                current_status: newStatus,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+                driverArrivedAtFacility: true,
+                deliveryAssignment: null,
+                pickupAssignment: null,
+                processingStage: null,
+              });
+            }
+          } else if (eventType === 'FACILITY_VERIFICATION') {
+            const newStatus = payload.status || 'verification';
+            if (existingOrder) {
+              updatedOrders[existingIndex] = {
+                ...existingOrder,
+                current_status: newStatus,
+                processingStage: 'verification',
+              };
+            }
+          } else if (eventType === 'PROCESSING_STAGE_STARTED') {
+            const newStage = payload.stage || payload.processType || 'processing';
+            const newStatus = payload.status || 'processing';
+            if (existingOrder) {
+              updatedOrders[existingIndex] = {
+                ...existingOrder,
+                current_status: newStatus,
+                processingStage: newStage,
+              };
+            }
+          } else if (eventType === 'PROCESSING_STAGE_COMPLETED') {
+            const newStage = payload.stage || null;
+            const newStatus = payload.status || existingOrder?.current_status || 'processing';
+            if (existingOrder) {
+              updatedOrders[existingIndex] = {
+                ...existingOrder,
+                current_status: newStatus,
+                processingStage: newStage,
+              };
+            }
+          } else if (eventType === 'FACILITY_PACKING_CONFIRMED') {
+            const newStatus = payload.status || existingOrder?.current_status || 'processing';
+            if (existingOrder) {
+              updatedOrders[existingIndex] = {
+                ...existingOrder,
+                current_status: newStatus,
+              };
+            }
+          } else if (eventType === 'QC_DECIDED') {
+            const approved = payload.approved ?? true;
+            const newStatus = payload.status || (approved ? 'ready_for_delivery' : 'rework_required');
+            if (existingOrder) {
+              updatedOrders[existingIndex] = {
+                ...existingOrder,
+                current_status: newStatus,
+                processingStage: approved ? null : 'rework_required',
+              };
+            }
+          } else if (eventType === 'FACILITY_HANDOVER') {
+            if (existingOrder) {
+              updatedOrders[existingIndex] = {
+                ...existingOrder,
+                deliveryAssignment: existingOrder.deliveryAssignment
+                  ? {
+                      ...existingOrder.deliveryAssignment,
+                      handedOver: true,
+                      handedOverAt: payload.timestamp || new Date().toISOString(),
+                    }
+                  : null,
+              };
+            }
+          } else if (eventType === 'FACILITY_COLLECTED') {
+            if (existingOrder) {
+              updatedOrders[existingIndex] = {
+                ...existingOrder,
+                deliveryAssignment: existingOrder.deliveryAssignment
+                  ? {
+                      ...existingOrder.deliveryAssignment,
+                      status: 'collected',
+                      handedOver: true,
+                      collected: true,
+                      collectedAt: payload.timestamp || new Date().toISOString(),
+                    }
+                  : null,
+              };
+            }
+          } else if (eventType === 'JOB_CLAIMED' || eventType === 'ASSIGNMENT_UPDATED' || eventType === 'DELIVERY_REASSIGNED') {
+            if (existingOrder) {
+              updatedOrders[existingIndex] = {
+                ...existingOrder,
+                deliveryAssignment: existingOrder.deliveryAssignment
+                  ? {
+                      ...existingOrder.deliveryAssignment,
+                      status: payload.action === 'reassign' || eventType === 'DELIVERY_REASSIGNED' ? 'assigned' : 'accepted',
+                      driverId: payload.driverId || payload.newDriverId || existingOrder.deliveryAssignment.driverId,
+                      driverName: payload.driverName || existingOrder.deliveryAssignment.driverName || 'Assigned Driver',
+                    }
+                  : {
+                      id: payload.assignmentId || '',
+                      driverId: payload.driverId || payload.newDriverId || '',
+                      driverName: payload.driverName || 'Assigned Driver',
+                      status: 'accepted',
+                      rejectionReason: null,
+                      handedOver: false,
+                      handedOverAt: null,
+                      collected: false,
+                      collectedAt: null,
+                    },
+              };
+            }
+          } else if (eventType === 'ORDER_STATUS_CHANGED') {
+            const newStatus = payload.status || event.status;
+            if (newStatus) {
+              if (DEPARTING_STATUSES.includes(newStatus)) {
+                // Order has left the facility queue (e.g. en_route_delivery, delivered, completed, cancelled)
+                updatedOrders = updatedOrders.filter(
+                  o => o.id !== targetOrderId && o.order_number !== targetOrderNumber,
+                );
+              } else if (existingOrder) {
+                updatedOrders[existingIndex] = {
+                  ...existingOrder,
+                  current_status: newStatus,
+                  processingStage: READY_STATUSES.includes(newStatus) ? null : existingOrder.processingStage,
+                  driverArrivedAtFacility: newStatus === 'in_transit_to_facility' ? false : existingOrder.driverArrivedAtFacility,
+                };
+              } else if (targetOrderId && (newStatus === 'in_transit_to_facility' || newStatus === 'received_at_facility')) {
+                // New incoming order assigned to this facility
+                updatedOrders.unshift({
+                  id: targetOrderId,
+                  order_number: targetOrderNumber || `BW-${targetOrderId.slice(0, 8).toUpperCase()}`,
+                  current_status: newStatus,
+                  created_at: new Date().toISOString(),
+                  updated_at: new Date().toISOString(),
+                  driverArrivedAtFacility: false,
+                  deliveryAssignment: null,
+                  pickupAssignment: null,
+                  processingStage: null,
+                });
+              }
+            }
+          } else if (eventType === 'ORDER_CREATED') {
+            const newStatus = payload.status || 'in_transit_to_facility';
+            if (!existingOrder && targetOrderId && (newStatus === 'in_transit_to_facility' || newStatus === 'confirmed')) {
+              updatedOrders.unshift({
+                id: targetOrderId,
+                order_number: targetOrderNumber || `BW-${targetOrderId.slice(0, 8).toUpperCase()}`,
+                current_status: newStatus === 'confirmed' ? 'in_transit_to_facility' : newStatus,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+                driverArrivedAtFacility: false,
+                deliveryAssignment: null,
+                pickupAssignment: null,
+                processingStage: null,
+              });
+            }
+          }
+
+          const nextDashboard: FacilityDashboard = {
+            ...prev,
+            orders: updatedOrders,
+            summary: computeFacilitySummary(updatedOrders),
+          };
+          dashboardRef.current = nextDashboard;
+          return nextDashboard;
+        });
       },
       [load],
     ),
@@ -106,6 +457,11 @@ export default function FacilityDashboardScreen({
 
   const receiveOrderDirectly = async (orderNumber: string) => {
     if (receivingOrderId) return;
+    const targetOrder = dashboard?.orders.find(o => o.order_number === orderNumber);
+    if (targetOrder && !targetOrder.driverArrivedAtFacility) {
+      setActionError(`Driver has not yet confirmed arrival at the facility for order ${orderNumber}.`);
+      return;
+    }
     setReceivingOrderId(orderNumber);
     setActionError('');
     setMessage('');
@@ -131,7 +487,25 @@ export default function FacilityDashboardScreen({
     try {
       await handoverFacilityOrderToDriver(accessToken, orderId, driverId);
       setMessage('Order handed over to delivery driver.');
-      await load(true);
+      setDashboard(prev => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          orders: prev.orders.map(o =>
+            o.id === orderId && o.deliveryAssignment
+              ? {
+                  ...o,
+                  deliveryAssignment: {
+                    ...o.deliveryAssignment,
+                    handedOver: true,
+                    handedOverAt: new Date().toISOString(),
+                  },
+                }
+              : o,
+          ),
+        };
+      });
+      await load(false, true);
       setTab('ready');
     } catch (cause) {
       setActionError(
@@ -238,7 +612,7 @@ export default function FacilityDashboardScreen({
           </View>
         </TouchableOpacity>
 
-        {loading ? (
+        {loading && !dashboard ? (
           <ActivityIndicator accessibilityLabel="Loading facility dashboard" color={colors.primary} />
         ) : null}
         {error ? (
@@ -262,6 +636,14 @@ export default function FacilityDashboardScreen({
             <Text accessibilityRole="alert" style={styles.error}>
               {actionError}
             </Text>
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="Dismiss error"
+              style={styles.errorDismissButton}
+              onPress={() => setActionError('')}
+            >
+              <Text style={styles.errorDismissText}>Dismiss</Text>
+            </TouchableOpacity>
           </View>
         ) : null}
         {message ? (
@@ -363,24 +745,43 @@ export default function FacilityDashboardScreen({
                   <View style={styles.orderTop}>
                     <View style={styles.orderRowBetween}>
                       <Text style={styles.orderNumber}>{order.order_number}</Text>
-                      <View style={styles.incomingTag}>
-                        <Text style={styles.incomingTagText}>Driver arriving</Text>
-                      </View>
+                      {order.driverArrivedAtFacility ? (
+                        <View style={styles.driverArrivedBadge}>
+                          <Text style={styles.driverArrivedBadgeText}>DRIVER ARRIVED</Text>
+                        </View>
+                      ) : (
+                        <View style={styles.incomingTag}>
+                          <Text style={styles.incomingTagText}>In Transit</Text>
+                        </View>
+                      )}
                     </View>
                     <Text style={styles.driverInfoText}>
                       Driver: {order.pickupDriverName || order.pickupAssignment?.driverName || 'Pickup Driver'}
                     </Text>
+                    <Text style={styles.driverSubtext}>
+                      {order.driverArrivedAtFacility ? 'Driver arrived at facility' : 'Driver en route to facility'}
+                    </Text>
                     <View style={styles.incomingActionRow}>
                       <TouchableOpacity
                         accessibilityRole="button"
-                        style={styles.receiveButton}
-                        disabled={receivingOrderId === order.order_number}
+                        style={[
+                          styles.receiveButton,
+                          !order.driverArrivedAtFacility && styles.receiveButtonDisabled,
+                        ]}
+                        disabled={receivingOrderId === order.order_number || !order.driverArrivedAtFacility}
                         onPress={() => receiveOrderDirectly(order.order_number)}
                       >
                         {receivingOrderId === order.order_number ? (
                           <ActivityIndicator color="#fff" size="small" />
                         ) : (
-                          <Text style={styles.receiveButtonText}>Receive Order</Text>
+                          <Text
+                            style={[
+                              styles.receiveButtonText,
+                              !order.driverArrivedAtFacility && styles.receiveButtonDisabledText,
+                            ]}
+                          >
+                            {order.driverArrivedAtFacility ? 'Receive Order' : 'Awaiting Arrival'}
+                          </Text>
                         )}
                       </TouchableOpacity>
                       <TouchableOpacity
@@ -752,6 +1153,11 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     marginTop: 2,
   },
+  driverSubtext: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginTop: 2,
+  },
   incomingActionRow: {
     flexDirection: 'row',
     gap: spacing.sm,
@@ -767,10 +1173,19 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: spacing.md,
   },
+  receiveButtonDisabled: {
+    backgroundColor: colors.surfaceSubtle,
+    borderWidth: 1,
+    borderColor: colors.border,
+    opacity: 0.7,
+  },
   receiveButtonText: {
     color: '#FFFFFF',
     fontWeight: '800',
     fontSize: 13,
+  },
+  receiveButtonDisabledText: {
+    color: colors.textMuted,
   },
   scanSecondaryButton: {
     flex: 1,
@@ -832,6 +1247,19 @@ const styles = StyleSheet.create({
     marginTop: spacing.xs,
   },
   retryText: { color: '#FFFFFF', fontWeight: '700', fontSize: 12 },
+  errorDismissButton: {
+    alignSelf: 'flex-start',
+    paddingVertical: 3,
+    paddingHorizontal: spacing.sm,
+    borderRadius: borderRadius.xs,
+    backgroundColor: 'rgba(239, 68, 68, 0.12)',
+    marginTop: 2,
+  },
+  errorDismissText: {
+    color: colors.dangerText,
+    fontSize: 11,
+    fontWeight: '700',
+  },
   successBanner: {
     backgroundColor: colors.successSurface,
     borderWidth: 1,

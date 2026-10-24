@@ -62,6 +62,12 @@ function serviceWithLatestOperation(
     if (table === "facility_machines") {
       return readable(machine ?? null);
     }
+    if (table === "facility_packing_policy_orders") {
+      return readable(null);
+    }
+    if (table === "facility_packings" || table === "facility_qc_decisions") {
+      return readable([]);
+    }
     throw new Error(`Unexpected table ${table}`);
   });
 
@@ -114,6 +120,9 @@ function serviceForReceipt() {
         name: "Local Facility",
         is_active: true,
       });
+    if (table === "driver_navigation_events") {
+      return readable([{ id: "nav-1", event_type: "arrived_at_facility" }]);
+    }
     throw new Error(`Unexpected direct write to ${table}`);
   });
 
@@ -191,7 +200,7 @@ describe("FacilityService sequence", () => {
       p_latitude: 17.4,
       p_longitude: 78.5,
     });
-    expect(fixture.from).toHaveBeenCalledTimes(4);
+    expect(fixture.from).toHaveBeenCalledTimes(5);
   });
 
   it("previews and receives an assigned order by its visible order ID", async () => {
@@ -714,4 +723,256 @@ describe("FacilityService sequence", () => {
       },
     );
   });
+
+  it("loads processingHistory without querying rewash_cycle on facility_order_operations", async () => {
+    let operationSelectFields = "";
+    const from = jest.fn((table: string) => {
+      const chain: any = {};
+      for (const method of ["select", "eq", "order", "limit"]) {
+        chain[method] = jest.fn((...args: any[]) => {
+          if (table === "facility_order_operations" && method === "select") {
+            operationSelectFields = args[0] || "";
+          }
+          return chain;
+        });
+      }
+      chain.maybeSingle = jest.fn().mockResolvedValue({
+        data:
+          table === "facility_employees"
+            ? { id: "emp-1", facility_id: "facility-1", profile_id: "profile-1", employee_role: "manager", is_active: true }
+            : table === "facilities"
+              ? { id: "facility-1", name: "Local Facility", is_active: true }
+              : table === "orders"
+                ? { id: "order-1", facility_id: "facility-1", current_status: "processing" }
+                : null,
+        error: null,
+      });
+      chain.then = (resolve: (value: unknown) => unknown) => {
+        let data: any = [];
+        if (table === "facility_employees") {
+          data = { id: "emp-1", facility_id: "facility-1", profile_id: "profile-1", employee_role: "manager", is_active: true };
+        } else if (table === "facilities") {
+          data = { id: "facility-1", name: "Local Facility", is_active: true };
+        } else if (table === "orders") {
+          data = { id: "order-1", facility_id: "facility-1", current_status: "processing" };
+        } else if (table === "facility_order_operations") {
+          data = [
+            {
+              id: "op-1",
+              operation_type: "washing",
+              current_status: "washing",
+              started_at: "2026-10-10T10:00:00Z",
+              completed_at: "2026-10-10T10:30:00Z",
+              performed_by: "staff-1",
+              notes: null,
+            },
+            {
+              id: "op-2",
+              operation_type: "drying",
+              current_status: "drying",
+              started_at: "2026-10-10T10:35:00Z",
+              completed_at: null,
+              performed_by: "staff-1",
+              notes: null,
+            },
+          ];
+        } else if (table === "facility_intake_discrepancies") {
+          return Promise.resolve({ data: [], count: 0, error: null }).then(resolve);
+        } else if (table === "facility_qc_decisions") {
+          data = [];
+        }
+        return Promise.resolve({ data, error: null }).then(resolve);
+      };
+      return chain;
+    });
+
+    const service = new FacilityService({ admin: { from, rpc: jest.fn() } } as any);
+    const history = await service.processingHistory("profile-1", "order-1");
+
+    expect(operationSelectFields).not.toContain("rewash_cycle");
+    expect(history.orderId).toBe("order-1");
+    expect(history.rewashCycle).toBe(0);
+    expect(history.stages).toHaveLength(2);
+    expect(history.stages[0].rewash_cycle).toBe(0);
+    expect(history.stages[1].rewash_cycle).toBe(0);
+  });
+
+  it("dynamically increments rewash_cycle for stages following QC rejection", async () => {
+    const from = jest.fn((table: string) => {
+      const chain: any = {};
+      for (const method of ["select", "eq", "order", "limit"]) {
+        chain[method] = jest.fn(() => chain);
+      }
+      chain.maybeSingle = jest.fn().mockResolvedValue({
+        data:
+          table === "facility_employees"
+            ? { id: "emp-1", facility_id: "facility-1", profile_id: "profile-1", employee_role: "manager", is_active: true }
+            : table === "facilities"
+              ? { id: "facility-1", name: "Local Facility", is_active: true }
+              : table === "orders"
+                ? { id: "order-1", facility_id: "facility-1", current_status: "processing" }
+                : null,
+        error: null,
+      });
+      chain.then = (resolve: (value: unknown) => unknown) => {
+        let data: any = [];
+        if (table === "facility_employees") {
+          data = { id: "emp-1", facility_id: "facility-1", profile_id: "profile-1", employee_role: "manager", is_active: true };
+        } else if (table === "facilities") {
+          data = { id: "facility-1", name: "Local Facility", is_active: true };
+        } else if (table === "orders") {
+          data = { id: "order-1", facility_id: "facility-1", current_status: "processing" };
+        } else if (table === "facility_order_operations") {
+          data = [
+            {
+              id: "op-1",
+              operation_type: "washing",
+              current_status: "washing",
+              started_at: "2026-10-10T10:00:00Z",
+              completed_at: "2026-10-10T10:30:00Z",
+              performed_by: "staff-1",
+              notes: null,
+            },
+            {
+              id: "op-2",
+              operation_type: "washing",
+              current_status: "washing",
+              started_at: "2026-10-10T12:00:00Z",
+              completed_at: null,
+              performed_by: "staff-1",
+              notes: null,
+            },
+          ];
+        } else if (table === "facility_intake_discrepancies") {
+          return Promise.resolve({ data: [], count: 0, error: null }).then(resolve);
+        } else if (table === "facility_qc_decisions") {
+          data = [
+            {
+              id: "qc-1",
+              operation_id: "op-qc",
+              cycle_number: 0,
+              approved: false,
+              rewash_required: true,
+              defect_code: "stain",
+              reason: "stain remaining",
+              affected_item_ids: [],
+              decided_by: "qc-staff",
+              created_at: "2026-10-10T11:00:00Z",
+            },
+          ];
+        }
+        return Promise.resolve({ data, error: null }).then(resolve);
+      };
+      return chain;
+    });
+
+    const service = new FacilityService({ admin: { from, rpc: jest.fn() } } as any);
+    const history = await service.processingHistory("profile-1", "order-1");
+
+    expect(history.rewashCycle).toBe(1);
+    expect(history.stages[0].rewash_cycle).toBe(0); // Cycle 1 (initial) before QC fail
+    expect(history.stages[1].rewash_cycle).toBe(1); // Cycle 2 (rewash) after QC fail
+  });
+
+  it("returns packingReady true when packing policy is not required", async () => {
+    const from = jest.fn((table: string) => {
+      const chain: any = {};
+      for (const method of ["select", "eq", "order", "limit"]) {
+        chain[method] = jest.fn(() => chain);
+      }
+      chain.maybeSingle = jest.fn().mockResolvedValue({
+        data:
+          table === "facility_employees"
+            ? { id: "emp-1", facility_id: "facility-1", profile_id: "profile-1", employee_role: "manager", is_active: true }
+            : table === "facilities"
+              ? { id: "facility-1", name: "Local Facility", is_active: true }
+              : table === "orders"
+                ? { id: "order-1", facility_id: "facility-1", current_status: "processing" }
+                : null,
+        error: null,
+      });
+      chain.then = (resolve: (value: unknown) => unknown) => {
+        let data: any = [];
+        if (table === "facility_employees") {
+          data = { id: "emp-1", facility_id: "facility-1", profile_id: "profile-1", employee_role: "manager", is_active: true };
+        } else if (table === "facilities") {
+          data = { id: "facility-1", name: "Local Facility", is_active: true };
+        } else if (table === "orders") {
+          data = { id: "order-1", facility_id: "facility-1", current_status: "processing" };
+        } else if (table === "facility_order_operations") {
+          data = [
+            {
+              id: "op-1",
+              operation_type: "packaging",
+              current_status: "packaging",
+              started_at: "2026-10-10T10:00:00Z",
+              completed_at: "2026-10-10T10:30:00Z",
+              performed_by: "staff-1",
+              notes: null,
+            },
+          ];
+        } else if (table === "facility_intake_discrepancies") {
+          return Promise.resolve({ data: [], count: 0, error: null }).then(resolve);
+        } else if (table === "facility_qc_decisions" || table === "facility_packings") {
+          data = [];
+        } else if (table === "facility_packing_policy_orders") {
+          data = null;
+        }
+        return Promise.resolve({ data, error: null }).then(resolve);
+      };
+      return chain;
+    });
+
+    const service = new FacilityService({ admin: { from, rpc: jest.fn() } } as any);
+    const history = await service.processingHistory("profile-1", "order-1");
+
+    expect(history.canQualityCheck).toBe(true);
+    expect(history.packingRequired).toBe(false);
+    expect(history.packingReady).toBe(true);
+  });
+
+  it("blocks quality check approval when packing policy is active and final packing is missing", async () => {
+    const packaged = {
+      id: "op-packaging",
+      current_status: "packaging",
+      operation_type: "packaging",
+      completed_at: new Date().toISOString(),
+    };
+    const rpc = jest.fn();
+    const from = jest.fn((table: string) => {
+      const chain: any = {};
+      for (const method of ["select", "eq", "order", "limit"]) {
+        chain[method] = jest.fn(() => chain);
+      }
+      chain.maybeSingle = jest.fn().mockResolvedValue({
+        data:
+          table === "facility_employees"
+            ? { id: "emp-1", facility_id: "facility-1", profile_id: "profile-1", employee_role: "manager", is_active: true }
+            : table === "facilities"
+              ? { id: "facility-1", name: "Local Facility", is_active: true }
+              : table === "orders"
+                ? { id: "order-1", facility_id: "facility-1", current_status: "processing" }
+                : table === "facility_order_operations"
+                  ? packaged
+                  : table === "facility_packing_policy_orders"
+                    ? { order_id: "order-1" }
+                    : null,
+        error: null,
+      });
+      chain.then = (resolve: (value: unknown) => unknown) => {
+        let data: any = [];
+        if (table === "facility_packings" || table === "facility_qc_decisions") {
+          data = [];
+        }
+        return Promise.resolve({ data, error: null }).then(resolve);
+      };
+      return chain;
+    });
+
+    const service = new FacilityService({ admin: { from, rpc } } as any);
+    await expect(
+      service.qualityCheck("profile-1", "order-1", true, "All good"),
+    ).rejects.toThrow("Confirm current-cycle final packing before quality check approval");
+  });
 });
+

@@ -172,7 +172,7 @@ export default function AdminIssuesScreen({accessToken, onBack, onOrder}: Props)
                   activeOpacity={0.7}
                   accessibilityRole="button"
                   accessibilityLabel={`Refund ₹${Number(refund.amount).toFixed(2)}, status ${refund.status}`}
-                  onPress={() => refund.payment_orders?.order_id && onOrder(refund.payment_orders.order_id)}>
+                  onPress={() => (refund.order_id || refund.payment_orders?.order_id) && onOrder((refund.order_id || refund.payment_orders?.order_id)!)}>
                   <View style={styles.cardTopRow}>
                     <Text style={styles.cardAmount}>₹{Number(refund.amount).toFixed(2)}</Text>
                     <View style={styles.statusBadge}>

@@ -32,10 +32,12 @@ export function resolveDevelopmentApiUrl(): string {
   return Config.BW_API_URL?.trim() || `http://${developmentHost}:3000/v1`;
 }
 
+const PRODUCTION_FALLBACK_API_URL = 'https://api.brightandwhite.in/v1';
+
 export const API_BASE_URL = __DEV__
   ? resolveDevelopmentApiUrl()
-  : (releaseChannel === 'uat' ? Config.BW_UAT_API_URL : Config.BW_PRODUCTION_API_URL)?.trim() ||
-    (Platform.OS === 'web' ? Config.BW_API_URL?.trim() || '' : '');
+  : (releaseChannel === 'uat' ? Config.BW_UAT_API_URL : Config.BW_PRODUCTION_API_URL)?.trim().replace(/\/$/, '') ||
+    (Platform.OS === 'web' ? Config.BW_API_URL?.trim().replace(/\/$/, '') || '' : PRODUCTION_FALLBACK_API_URL);
 
 export const DEV_IOS_STORAGE_ORIGIN =
   __DEV__ && Platform.OS === 'ios'

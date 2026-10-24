@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#000000">
+<meta name="description" content="Bright & White laundry services, privacy policy and terms and conditions.">
+<title>Bright & White | Laundry & Care</title>
+<style>
+:root{--black:#000;--dark:#171717;--white:#fff;--off:#fafafa;--muted:#666;--border:#e5e5e5;--shadow:0 18px 50px rgba(0,0,0,.08)}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:95px}
+body{font-family:Arial,Helvetica,sans-serif;color:var(--dark);background:#fff;line-height:1.7}
+a{color:inherit;text-decoration:none}button{font:inherit}
+.container{width:min(1160px,90%);margin:auto}
+header{position:sticky;top:0;z-index:100;background:rgba(255,255,255,.97);backdrop-filter:blur(12px);border-bottom:1px solid var(--border)}
+.navbar{min-height:82px;display:flex;align-items:center;justify-content:space-between;gap:25px}
+.brand{display:flex;align-items:center;flex-shrink:0}
+.brand-logo{display:block;width:190px;max-width:100%;height:55px;object-fit:contain;object-position:left center}
+.nav-links{display:flex;align-items:center;gap:30px}
+.nav-links a{font-size:14px;font-weight:600;transition:color .2s}
+.nav-links a:hover{color:#666}
+.nav-cta,.button{display:inline-flex;justify-content:center;align-items:center;gap:9px;border:1px solid transparent;border-radius:8px;padding:13px 22px;font-weight:700;cursor:pointer;transition:transform .2s,background .2s}
+.nav-cta{color:#fff;background:#000}.nav-cta:hover{background:#292929;transform:translateY(-2px)}
+.menu-toggle{display:none;border:1px solid var(--border);background:#fff;color:#000;border-radius:8px;width:44px;height:44px;font-size:24px;cursor:pointer}
+.hero{position:relative;overflow:hidden;background:#000;color:#fff}
+.hero:after{content:"";position:absolute;width:500px;height:500px;border:1px solid #222;border-radius:50%;right:-170px;bottom:-280px;box-shadow:0 0 0 45px rgba(255,255,255,.025),0 0 0 90px rgba(255,255,255,.025);pointer-events:none}
+.hero-grid{min-height:600px;padding:80px 0;display:grid;grid-template-columns:1.15fr .85fr;align-items:center;gap:65px}
+.eyebrow{display:inline-flex;align-items:center;gap:10px;text-transform:uppercase;letter-spacing:2.5px;font-size:11px;font-weight:700;margin-bottom:24px}
+.eyebrow:before{content:"";width:28px;height:2px;background:#fff}
+.hero h1{font-size:clamp(43px,5.5vw,72px);line-height:1.08;letter-spacing:-2.7px;margin-bottom:25px;max-width:680px}
+.hero h1 span{color:#fff}
+.hero-description{color:#d0d0d0;font-size:17px;max-width:510px;margin-bottom:34px}
+.hero-buttons{display:flex;flex-wrap:wrap;gap:14px}
+.button-primary{color:#000;background:#fff}.button-primary:hover{background:#eaeaea;transform:translateY(-2px)}
+.button-outline{border-color:#777;color:#fff;background:transparent}.button-outline:hover{background:#222}
+.hero-art{position:relative;display:grid;place-items:center;min-height:380px}
+.laundry-circle{width:min(340px,100%);aspect-ratio:1;border-radius:50%;background:#f2f2f2;display:grid;place-items:center;box-shadow:0 30px 80px rgba(0,0,0,.3);position:relative}
+.laundry-circle:before{content:"";position:absolute;inset:20px;border:1px solid rgba(0,0,0,.18);border-radius:50%}
+.laundry-illustration{font-size:clamp(100px,13vw,160px);filter:grayscale(1);position:relative}
+.floating-note{position:absolute;right:-5px;bottom:24px;padding:16px 21px;background:#fff;color:#000;border-radius:12px;box-shadow:var(--shadow);font-weight:700;font-size:13px}
+.floating-note span{display:block;font-size:11px;font-weight:400;color:var(--muted)}
+.hero-bottom{border-top:1px solid #333;display:flex;flex-wrap:wrap;gap:18px 45px;padding:20px 0;color:#d0d0d0;font-size:13px}
+.hero-bottom span:before{content:"✓";color:#fff;margin-right:9px;font-weight:800}
+.services{padding:100px 0;background:var(--off)}
+.section-heading{text-align:center;max-width:690px;margin:0 auto 48px}
+.section-label{color:#555;font-size:11px;font-weight:800;letter-spacing:2.8px;text-transform:uppercase;margin-bottom:13px}
+.section-heading h2{color:#000;font-size:clamp(31px,4vw,45px);letter-spacing:-1.3px;line-height:1.2;margin-bottom:17px}
+.section-heading p{color:var(--muted);font-size:15px}
+.service-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:20px}
+.service-card{background:#fff;padding:29px 24px;border:1px solid var(--border);border-radius:14px;transition:transform .25s,box-shadow .25s}
+.service-card:hover{transform:translateY(-6px);box-shadow:var(--shadow)}
+.service-icon{display:grid;place-items:center;width:58px;height:58px;background:#f0f0f0;border-radius:14px;font-size:28px;margin-bottom:24px;filter:grayscale(1)}
+.service-card h3{font-size:18px;color:#000;margin-bottom:12px}
+.service-card p{color:var(--muted);font-size:13px;line-height:1.8}
+.service-note{margin-top:30px;background:#f0f0f0;padding:19px 23px;border-radius:10px;text-align:center;color:#555;font-size:13px}
+.legal{padding:100px 0;background:#fff}
+.legal-layout{display:grid;grid-template-columns:.7fr 1.3fr;align-items:start;gap:55px}
+.legal-intro{position:sticky;top:115px}
+.legal-intro h2{color:#000;font-size:clamp(32px,4vw,44px);letter-spacing:-1.3px;line-height:1.2;margin-bottom:18px}
+.legal-intro>p{color:var(--muted);font-size:14px;margin-bottom:23px}
+.legal-contact{border-top:1px solid var(--border);padding-top:22px;margin-top:26px}
+.legal-contact h3{color:#000;font-size:15px;margin-bottom:10px}
+.legal-contact p{margin-bottom:8px;overflow-wrap:anywhere;font-size:13px}
+.legal-contact a,.legal-document a{color:#111;text-decoration:underline;text-underline-offset:3px}
+.legal-documents{display:grid;gap:18px}
+.legal-document{border:1px solid var(--border);border-radius:12px;overflow:hidden;background:#fff}
+.legal-document summary{cursor:pointer;list-style:none;padding:22px 25px;display:flex;align-items:center;justify-content:space-between;gap:15px;color:#000;font-weight:800;font-size:17px}
+.legal-document summary::-webkit-details-marker{display:none}
+.legal-document summary:after{content:"+";flex-shrink:0;display:grid;place-items:center;width:30px;height:30px;border-radius:50%;background:#f0f0f0;color:#000;font-size:21px}
+.legal-document[open] summary:after{content:"−"}
+.legal-content{border-top:1px solid var(--border);padding:25px}
+.legal-content h3{color:#000;font-size:16px;margin:22px 0 8px}
+.legal-content h3:first-child{margin-top:0}
+.legal-content p,.legal-content li{color:#58605b;font-size:13px;line-height:1.9}
+.legal-content p{margin-bottom:12px}.legal-content ul{padding-left:22px;margin-bottom:15px}.legal-content li{margin-bottom:6px}
+.last-updated{color:var(--muted);font-size:12px;margin-bottom:22px}
+.important-notice{border-left:3px solid #000;background:#f5f5f5;padding:14px 16px;font-size:12px;color:#555;margin-bottom:20px}
+footer{background:#000;color:#d0d0d0;padding:28px 0}
+.footer-inner{display:flex;justify-content:space-between;align-items:center;gap:20px;flex-wrap:wrap}
+.footer-inner p{font-size:12px}.footer-links{display:flex;gap:22px;flex-wrap:wrap}.footer-links a{font-size:12px}.footer-links a:hover{color:#fff}
+@media(max-width:900px){.hero-grid{grid-template-columns:1fr .8fr;gap:25px}.service-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.legal-layout{grid-template-columns:1fr;gap:35px}.legal-intro{position:static}}
+@media(max-width:650px){
+.container{width:91%}.navbar{min-height:72px}.brand-logo{width:155px;height:46px}.menu-toggle{display:block}
+.nav-links{display:none;position:absolute;top:71px;left:0;right:0;background:#fff;border-bottom:1px solid var(--border);padding:20px 5%;flex-direction:column;align-items:stretch;gap:0}
+.nav-links.open{display:flex}.nav-links a{padding:12px 0}.nav-links .nav-cta{margin-top:10px;text-align:center}
+.hero-grid{grid-template-columns:1fr;padding:65px 0 35px;gap:20px;min-height:auto}
+.hero h1{font-size:46px;letter-spacing:-1.8px}.hero-description{font-size:15px}.hero-art{min-height:300px}.laundry-circle{width:265px}.laundry-illustration{font-size:115px}.floating-note{right:0;bottom:5px}
+.hero-bottom{gap:10px 22px}.services,.legal{padding:68px 0}.section-heading{margin-bottom:32px}
+.service-grid{gap:12px}.service-card{padding:20px 16px}.service-icon{width:48px;height:48px;font-size:24px;margin-bottom:16px}
+.service-card h3{font-size:16px}.service-card p{font-size:12px}.legal-document summary{padding:18px;font-size:15px}.legal-content{padding:19px}
+.footer-inner{flex-direction:column;align-items:flex-start}
+}
+@media(prefers-reduced-motion:reduce){*,*:before,*:after{scroll-behavior:auto!important;transition-duration:.01ms!important}}
+</style>
+</head>
+<body>
+<header>
+  <div class="container navbar">
+    <a href="#home" class="brand" aria-label="Bright and White home">
+      <img src="./bw_logo.png" alt="Bright & White" class="brand-logo">
+    </a>
+    <button class="menu-toggle" id="menuToggle" aria-label="Open navigation menu" aria-expanded="false" aria-controls="navLinks">☰</button>
+    <nav class="nav-links" id="navLinks">
+      <a href="#home">Home</a>
+      <a href="#services">Our Services</a>
+      <a href="#privacy">Privacy Policy</a>
+      <a href="#terms">Terms &amp; Conditions</a>
+      <a class="nav-cta" href="#services">Explore Services ↗</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <!-- SECTION 1: HERO -->
+  <section class="hero" id="home">
+    <div class="container">
+      <div class="hero-grid">
+        <div>
+          <div class="eyebrow">Laundry care made convenient</div>
+          <h1>Fresh clothes.<br><span>Fresh beginnings.</span></h1>
+          <p class="hero-description">Bright &amp; White makes laundry care simpler with convenient washing, drying, ironing and garment care services. Spend less time on laundry and more time on what matters.</p>
+          <div class="hero-buttons">
+            <a class="button button-primary" href="#services">Discover Our Services →</a>
+            <a class="button button-outline" href="#legal">Our Policies</a>
+          </div>
+        </div>
+        <div class="hero-art" aria-label="Laundry care illustration">
+          <div class="laundry-circle"><span class="laundry-illustration" aria-hidden="true">🧺</span></div>
+          <div class="floating-note">Care in every wash<span>Your laundry, our priority</span></div>
+        </div>
+      </div>
+      <div class="hero-bottom">
+        <span>Convenient laundry care</span><span>Garment-conscious service</span><span>Clear service information</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- SECTION 2: SERVICES -->
+  <section class="services" id="services">
+    <div class="container">
+      <div class="section-heading">
+        <div class="section-label">What we offer</div>
+        <h2>Care for every kind of laundry</h2>
+        <p>Explore our laundry services designed to make everyday garment care more convenient. Service availability and pricing may vary by location and selected service.</p>
+      </div>
+      <div class="service-grid">
+        <article class="service-card"><div class="service-icon" aria-hidden="true">🫧</div><h3>Wash &amp; Care</h3><p>Laundry washing services for everyday garments, with care appropriate to the selected service and garment requirements.</p></article>
+        <article class="service-card"><div class="service-icon" aria-hidden="true">🌬️</div><h3>Drying</h3><p>Drying services intended to help make your laundry ready for the next step in your garment care routine.</p></article>
+        <article class="service-card"><div class="service-icon" aria-hidden="true">👔</div><h3>Ironing</h3><p>Ironing and finishing services to help your clothes look neat and ready to wear.</p></article>
+        <article class="service-card"><div class="service-icon" aria-hidden="true">🧥</div><h3>Garment Care</h3><p>Garment-care options based on the service selected, fabric type and care instructions where applicable.</p></article>
+      </div>
+      <div class="service-note">Actual services, serviceable locations, applicable charges and estimated completion times are confirmed during booking.</div>
+    </div>
+  </section>
+
+  <!-- SECTION 3: LEGAL INFORMATION -->
+  <section class="legal" id="legal">
+    <div class="container">
+      <div class="legal-layout">
+        <div class="legal-intro">
+          <div class="section-label">Transparency &amp; trust</div>
+          <h2>Your trust matters to us.</h2>
+          <p>Please read our policies to understand how Bright &amp; White handles personal information, provides services and manages payments, cancellations and customer requests.</p>
+          <div class="legal-contact">
+            <h3>Contact &amp; business information</h3>
+            <p><strong>Business:</strong> Bright &amp; White</p>
+            <p><strong>Website:</strong> <a href="https://brightandwhite.in/">brightandwhite.in</a></p>
+            <p><strong>Email:</strong> <a href="mailto:brightandwhiteofficial@gmail.com">brightandwhiteofficial@gmail.com</a></p>
+            <p><strong>Phone:</strong> 7680829790</p>
+            <p><strong>Business address:</strong> Plot28, Sai Colony phase-2, Hayathnagar, Hyderabad, Ranga Reddy Telangana
+501505</p>
+          </div>
+        </div>
+
+        <div class="legal-documents">
+          <details class="legal-document" id="privacy" open>
+            <summary>Privacy Policy</summary>
+            <div class="legal-content">
+              <p class="last-updated">Last updated: 13 October 2026</p>
+              <div class="important-notice">Before publishing, replace all contact placeholders and confirm this policy accurately reflects the information your actual mobile application and backend collect.</div>
+              <h3>1. Introduction</h3>
+              <p>Bright &amp; White ("we", "our" or "us") provides laundry and garment-care services. This Privacy Policy explains how we collect, use, store, disclose and protect personal information when you visit our website, use our mobile application or interact with our services.</p>
+              <h3>2. Information We May Collect</h3>
+              <p>Depending on the features you use, information may include:</p>
+              <ul>
+                <li>Contact information, such as your name, phone number and email address.</li>
+                <li>Delivery or pickup addresses and service-location information.</li>
+                <li>Order details, selected services, order status and service history.</li>
+                <li>Payment status, transaction references and payment-related records.</li>
+                <li>Account identifiers, authentication records and support communications.</li>
+                <li>Device, diagnostic and technical information necessary to operate, secure and troubleshoot our services.</li>
+                <li>Location information if you enable and use a location-dependent feature.</li>
+              </ul>
+              <p>We aim to collect only information needed for the relevant service, legal obligations, security or customer support. The information actually collected depends on your use of the application and your device permissions.</p>
+              <h3>3. How We Use Information</h3>
+              <p>We may use relevant information to:</p>
+              <ul>
+                <li>Create and manage customer accounts.</li><li>Accept and process service bookings and orders.</li>
+                <li>Arrange pickup, delivery and order-status updates.</li><li>Process payments and verify transaction status.</li>
+                <li>Provide customer support and respond to complaints.</li><li>Maintain security, prevent fraud and investigate misuse.</li>
+                <li>Improve reliability and performance of our services.</li><li>Meet applicable legal, tax, accounting and regulatory requirements.</li>
+              </ul>
+              <h3>4. Payments</h3>
+              <p>Payments may be processed through third-party payment service providers, including Razorpay where enabled. Payment processing is subject to the relevant provider's terms and privacy practices. We may receive transaction references, payment status and other information required to reconcile your order. We do not intend to store your full payment-card credentials on our own systems.</p>
+              <h3>5. Sharing of Information</h3>
+              <p>We may share relevant information with service providers that help us operate our application, host data, process payments, communicate with customers, or fulfill pickup and delivery requests. Information may also be disclosed when required by law, to protect rights and safety, or with your consent.</p>
+              <p>We do not sell personal information to third parties for their independent marketing purposes. Any sharing practices must reflect the services and integrations actually used by Bright &amp; White.</p>
+              <h3>6. Storage and Security</h3>
+              <p>We use appropriate technical and organizational measures intended to protect information from unauthorized access, alteration, disclosure or destruction. Information may be processed using secure hosting and database providers. No internet transmission or storage system can be guaranteed completely secure.</p>
+              <h3>7. Data Retention</h3>
+              <p>We retain personal information for as long as reasonably necessary to provide services, maintain business records, resolve disputes, enforce agreements and comply with applicable law. Retention periods depend on the type of information and the relevant legal or operational need.</p>
+              <h3>8. Your Choices and Rights</h3>
+              <p>Subject to applicable law, you may request access to, correction of, or deletion of eligible personal information. You may also withdraw permissions granted through your device settings. Some information may need to be retained where required by law or for legitimate recordkeeping purposes.</p>
+              <p>To submit a privacy request, contact us using the support details listed on this page. For account deletion, use the deletion feature in the application where available or contact our support team.</p>
+              <h3>9. Children's Privacy</h3>
+              <p>Our services are not intended to knowingly collect children's personal information without appropriate authorization where required by law. If you believe a child has provided personal information improperly, please contact us so that we can review the request.</p>
+              <h3>10. Third-Party Services and Links</h3>
+              <p>Our services may use or link to third-party platforms. Their privacy practices are governed by their own policies. We encourage you to review those policies before providing information to those providers.</p>
+              <h3>11. Changes to This Policy</h3>
+              <p>We may update this Privacy Policy as our services, practices or legal requirements change. The revised policy will be published on this page with an updated revision date.</p>
+              <h3>12. Contact Us</h3>
+              <p>For privacy-related questions or requests, contact Bright &amp; White at <a href="mailto:brightandwhiteofficial@gmail.com">brightandwhiteofficial@gmail.com</a> or use the business contact details provided on this page.</p>
+              <h3>Backend </h3>
+              <p>Backend runs on <a href="https://api.brightandwhite.in/">api.brightandwhite.in</a></p>
+            </div>
+          </details>
+
+          <details class="legal-document" id="terms">
+            <summary>Terms &amp; Conditions</summary>
+            <div class="legal-content">
+              <p class="last-updated">Last updated: 13 October 2026</p>
+              <div class="important-notice">Review these terms against your actual booking, delivery, cancellation, refund and complaint-handling procedures before making the website public.</div>
+              <h3>1. Acceptance of Terms</h3>
+              <p>These Terms &amp; Conditions govern your access to the Bright &amp; White website, mobile application and laundry services. By using our services or placing an order, you agree to these terms and applicable law. If you do not agree, please do not use the services.</p>
+              <h3>2. Services and Availability</h3>
+              <p>Bright &amp; White provides laundry and garment-care services according to the options displayed at the time of booking. Service availability may depend on your location, operational capacity, garment requirements and other applicable restrictions. A service request is subject to confirmation through our booking system.</p>
+              <h3>3. Customer Responsibilities</h3>
+              <p>You agree to:</p>
+              <ul>
+                <li>Provide accurate contact, address and booking information.</li><li>Ensure that pickup and delivery details are correct.</li>
+                <li>Provide accurate garment-care instructions and disclose relevant garment conditions.</li><li>Keep account credentials and verification codes secure.</li>
+                <li>Use the application lawfully and not interfere with its operation.</li>
+              </ul>
+              <h3>4. Pricing and Charges</h3>
+              <p>Applicable service prices, taxes, delivery charges and other fees will be shown or communicated through the relevant booking process. The price applicable to an order is the price confirmed for that booking, subject to disclosed adjustments, customer-approved changes and applicable law.</p>
+              <h3>5. Orders and Payment</h3>
+              <p>Orders must be submitted through the available booking process. Payment methods depend on what is enabled at checkout. Online payments may be processed by authorized third-party providers such as Razorpay. An order or payment is considered confirmed according to the status communicated by the booking system and payment provider.</p>
+              <p>Do not share your passwords, payment authentication credentials or OTPs with unauthorized persons. Payment confirmation should be based on the official transaction status, not merely a screenshot or message from a user.</p>
+              <h3>6. Pickup, Delivery and Completion</h3>
+              <p>Pickup, delivery and completion estimates are provided for convenience and may change due to operational, weather, access, garment-care or other circumstances. Customers should provide reasonable access to the specified location and cooperate with the authorized service personnel.</p>
+              <h3>7. Cancellations and Refunds</h3>
+              <p>Cancellation eligibility, applicable charges and refund eligibility depend on the order's processing stage and the terms communicated during booking. If a cancellation or refund request is eligible, it will be reviewed and processed according to the applicable payment-provider procedures and legal requirements.</p>
+              <p>For cancellation, refund, failed-payment or duplicate-payment assistance, contact our support team with your order reference and transaction details. Do not send full card numbers, passwords or payment authentication credentials.</p>
+              <p>Before publishing, ensure this section matches your actual cancellation rules, refund timelines and customer support procedures. Do not advertise a refund timeline that your business cannot honor.</p>
+              <h3>8. Garment Care and Service Limitations</h3>
+              <p>Customers should provide accurate care instructions and disclose known stains, damage or special handling requirements. Outcomes may vary depending on fabric, garment condition, stain type and manufacturer care instructions. Any specific damage, loss or compensation policy must comply with applicable law and any commitments made during booking.</p>
+              <p>Nothing in these terms excludes or restricts rights or remedies that cannot lawfully be excluded or restricted.</p>
+              <h3>9. Acceptable Use</h3>
+              <p>You must not misuse our website or application, attempt unauthorized access, interfere with security controls, submit fraudulent bookings or payments, or use the services for unlawful purposes.</p>
+              <h3>10. Third-Party Providers</h3>
+              <p>Certain features may rely on third-party providers for payment processing, hosting, communications, maps or other services. Their separate terms may apply to your use of those features.</p>
+              <h3>11. Suspension and Service Changes</h3>
+              <p>We may suspend access where reasonably necessary for security, suspected fraud, unlawful activity, maintenance or operational reasons, subject to applicable law. We may modify or discontinue features where reasonably necessary and will honor applicable legal obligations and confirmed customer commitments.</p>
+              <h3>12. Complaints and Support</h3>
+              <p>For service concerns, order disputes, payment issues or complaints, contact us using the support details displayed on this website. Please include your order reference and a description of the issue. We will review the request in accordance with our applicable procedures and legal obligations.</p>
+              <h3>13. Governing Law</h3>
+              <p>These terms are subject to the laws of India. Any jurisdiction or dispute-resolution provision will operate subject to applicable law and the jurisdiction of the competent courts.</p>
+              <h3>14. Changes to These Terms</h3>
+              <p>We may update these terms as our services or legal requirements change. The current version and its revision date will be displayed on this page.</p>
+              <h3>15. Contact Information</h3>
+              <p>For questions regarding these terms, contact Bright &amp; White at <a href="mailto:brightandwhiteofficial@gmail.com">brightandwhiteofficial@gmail.com</a> or use the business contact details listed on this page.</p>
+            </div>
+          </details>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="container footer-inner">
+    <p>© <span id="currentYear"></span> Bright &amp; White. All rights reserved.</p>
+    <div class="footer-links">
+      <a href="#home">Home</a><a href="#services">Services</a><a href="#privacy">Privacy Policy</a><a href="#terms">Terms &amp; Conditions</a><a href="https://api.brightandwhite.in/">API</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+const menuToggle = document.getElementById("menuToggle");
+const navLinks = document.getElementById("navLinks");
+
+menuToggle.addEventListener("click", function () {
+  const isOpen = navLinks.classList.toggle("open");
+  menuToggle.setAttribute("aria-expanded", String(isOpen));
+  menuToggle.setAttribute("aria-label", isOpen ? "Close navigation menu" : "Open navigation menu");
+  menuToggle.textContent = isOpen ? "×" : "☰";
+});
+
+navLinks.querySelectorAll("a").forEach(function (link) {
+  link.addEventListener("click", function () {
+    navLinks.classList.remove("open");
+    menuToggle.setAttribute("aria-expanded", "false");
+    menuToggle.setAttribute("aria-label", "Open navigation menu");
+    menuToggle.textContent = "☰";
+  });
+});
+
+document.getElementById("currentYear").textContent = new Date().getFullYear();
+</script>
+</body>
+</html>

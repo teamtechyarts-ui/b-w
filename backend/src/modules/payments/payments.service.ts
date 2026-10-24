@@ -70,7 +70,7 @@ export class PaymentsService {
     try {
       const { data: order } = await this.db()
         .from("orders")
-        .select("id,order_number,current_status,facility_id,customer_id")
+        .select("id,order_number,current_status,facility_id,customer_id,customers(profile_id)")
         .eq("id", orderId)
         .maybeSingle();
 
@@ -86,16 +86,47 @@ export class PaymentsService {
       };
 
       if (typeof this.supabase?.broadcastEvent === "function") {
-        await Promise.allSettled([
+        const broadcasts: Promise<any>[] = [
           this.supabase.broadcastEvent("orders:all", "ORDER_STATUS_CHANGED", payload),
           this.supabase.broadcastEvent("driver:available", "JOB_AVAILABLE", payload),
           this.supabase.broadcastEvent("jobs:drivers", "JOB_AVAILABLE", payload),
           this.supabase.broadcastEvent("admin:operations", "ORDER_STATUS_CHANGED", payload),
           this.supabase.broadcastEvent(`order:${orderId}`, "ORDER_STATUS_CHANGED", payload),
-          order?.customer_id
-            ? this.supabase.broadcastEvent(`customer:${order.customer_id}`, "ORDER_STATUS_CHANGED", payload)
-            : Promise.resolve(),
-        ]);
+          this.supabase.broadcastEvent("facility:all", "ORDER_STATUS_CHANGED", payload),
+        ];
+
+        if (order?.facility_id) {
+          broadcasts.push(
+            this.supabase.broadcastEvent(`facility:${order.facility_id}`, "ORDER_STATUS_CHANGED", payload),
+          );
+        }
+
+        if (order?.customer_id) {
+          broadcasts.push(
+            this.supabase.broadcastEvent(`customer:${order.customer_id}`, "ORDER_STATUS_CHANGED", payload),
+          );
+        }
+        const profileId = (order as any)?.customers?.profile_id;
+        if (profileId && profileId !== order?.customer_id) {
+          broadcasts.push(
+            this.supabase.broadcastEvent(`customer:${profileId}`, "ORDER_STATUS_CHANGED", payload),
+          );
+        }
+
+        await Promise.allSettled(broadcasts);
+
+        const targetProfileId = profileId || order?.customer_id;
+        if (targetProfileId && typeof (this.supabase as any)?.createAndBroadcastNotification === 'function') {
+          await (this.supabase as any).createAndBroadcastNotification({
+            profileId: targetProfileId,
+            orderId,
+            notificationType: 'payment_successful',
+            title: 'Payment Confirmed',
+            body: `Payment for order #${order?.order_number || ''} has been confirmed.`,
+            data: { orderId, orderNumber: order?.order_number, status: 'confirmed' },
+            channels: [`customer:${targetProfileId}`, `order:${orderId}`],
+          });
+        }
       }
     } catch {
       // Safe catch
@@ -303,13 +334,33 @@ export class PaymentsService {
     }
 
     if (!payment) {
+      let codRefunds: any[] = [];
+      try {
+        const { data: txList } = await this.db()
+          .from("payment_transactions")
+          .select("id")
+          .eq("order_id", orderId);
+        const txIds = (txList ?? []).map((t: any) => t.id);
+        if (txIds.length > 0) {
+          const { data: refunds } = await this.db()
+            .from("refund_requests")
+            .select(
+              "id,amount,reason,status,is_cancellation_refund,approved_at,processed_at,created_at",
+            )
+            .in("payment_transaction_id", txIds)
+            .order("created_at", { ascending: false });
+          codRefunds = refunds ?? [];
+        }
+      } catch {}
+
       return {
         orderId,
         payment: null,
-        refunds: [],
+        refunds: codRefunds,
         refundEligibility: { eligible: false, remainingAmount: 0 },
       };
     }
+
 
     const { data: refunds, error: refundsError } = await this.db()
       .from("refund_requests")

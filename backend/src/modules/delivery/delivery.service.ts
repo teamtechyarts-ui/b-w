@@ -592,7 +592,7 @@ export class DeliveryService {
       if (typeof this.supabase?.broadcastEvent === 'function') {
         const { data: orderData } = await this.db()
           .from('orders')
-          .select('id,order_number,facility_id,customer_id')
+          .select('id,order_number,facility_id,customer_id,customers(profile_id)')
           .eq('id', orderId)
           .maybeSingle();
 
@@ -623,8 +623,27 @@ export class DeliveryService {
             this.supabase.broadcastEvent(`customer:${orderData.customer_id}`, 'ORDER_STATUS_CHANGED', payload),
           );
         }
+        const customerProfileId = (orderData as any)?.customers?.profile_id;
+        if (customerProfileId && customerProfileId !== orderData?.customer_id) {
+          broadcasts.push(
+            this.supabase.broadcastEvent(`customer:${customerProfileId}`, 'ORDER_STATUS_CHANGED', payload),
+          );
+        }
 
         await Promise.allSettled(broadcasts);
+
+        const targetProfileId = customerProfileId || orderData?.customer_id;
+        if (targetProfileId && typeof (this.supabase as any)?.createAndBroadcastNotification === 'function') {
+          await (this.supabase as any).createAndBroadcastNotification({
+            profileId: targetProfileId,
+            orderId,
+            notificationType: 'order_delivered',
+            title: 'Order Delivered',
+            body: `Your order #${orderData?.order_number || ''} has been delivered. Thank you for choosing Bright & White!`,
+            data: { orderId, orderNumber: orderData?.order_number, status: 'delivered' },
+            channels: [`customer:${targetProfileId}`, `order:${orderId}`],
+          });
+        }
       }
     } catch {
       // Safe catch

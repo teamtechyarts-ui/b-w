@@ -163,7 +163,7 @@ export default function SignUpScreen({
       if (response.requiresEmailConfirmation || !response.session) {
         const msg =
           response.message ||
-          'Account created successfully. Please check your email to verify your account.';
+          'Account created successfully. A verification code has been sent to your email.';
         setInfoBanner(msg);
         setResendCooldown(60);
         setStep('VERIFY_OTP');
@@ -172,10 +172,29 @@ export default function SignUpScreen({
       }
     } catch (err: any) {
       const msg = err?.message || '';
-      if (msg.includes('already exists') || msg.includes('already registered')) {
-        setActionError('An account with this email already exists.');
-      } else if (msg.includes('connection') || msg.includes('network')) {
+      const status = err?.status;
+      if (status === 409 || msg.includes('already exists') || msg.includes('already registered')) {
+        if (msg.includes('phone')) {
+          setPhoneError('An account with this phone number already exists.');
+        } else {
+          setActionError('An account with this email already exists.');
+        }
+      } else if (msg.includes('phone') && msg.includes('already exists')) {
+        setPhoneError('An account with this phone number already exists.');
+      } else if (status === 429 || msg.includes('rate limit') || msg.includes('too many requests')) {
+        setActionError('Too many attempts. Please wait a minute and try again.');
+      } else if (
+        err?.isNetworkError ||
+        msg.includes('connection') ||
+        msg.includes('network') ||
+        msg.includes('Failed to fetch') ||
+        msg.includes('Network request failed')
+      ) {
         setActionError('Unable to connect. Please check your internet connection.');
+      } else if (msg.includes('valid email')) {
+        setEmailError(msg);
+      } else if (msg.includes('Password') || msg.includes('password')) {
+        setPasswordError(msg);
       } else if (msg) {
         setActionError(msg);
       } else {
@@ -298,6 +317,7 @@ export default function SignUpScreen({
                   if (actionError) setActionError('');
                 }}
                 autoCapitalize="words"
+                onBlur={() => setFullName((prev) => prev.trim())}
               />
               <FieldError error={fullNameError} />
 
@@ -310,6 +330,7 @@ export default function SignUpScreen({
                 autoCapitalize="none"
                 autoCorrect={false}
                 value={email}
+                onBlur={() => setEmail((prev) => prev.trim())}
                 onChangeText={(text) => {
                   setEmail(text);
                   if (emailError) setEmailError('');

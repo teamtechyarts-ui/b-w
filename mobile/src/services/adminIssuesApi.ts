@@ -2,8 +2,10 @@ import {apiRequest} from './api';
 
 export type IssueClaim = {id: string; order_id: string; claim_type: string; description: string; status: string; created_at: string;
   resolution_notes?: string | null; customer_claim_photos?: Array<{id: string; storage_path: string; signedUrl: string}>};
-export type IssueRefund = {id: string; payment_order_id: string; amount: number | string; reason: string; status: string;
-  is_cancellation_refund: boolean; decision_notes?: string | null; created_at: string; payment_orders?: {order_id: string} | null};
+export type IssueRefund = {id: string; payment_order_id?: string | null; payment_transaction_id?: string | null;
+  amount: number | string; reason: string; status: string;
+  is_cancellation_refund: boolean; decision_notes?: string | null; created_at: string;
+  order_id?: string | null; payment_orders?: {order_id: string} | null};
 export type IssuePayment = {id: string; order_id: string; provider: string; amount: number | string; status: string;
   refundableAmount: number; refund_requests: IssueRefund[]};
 export type AdminIssueQueue = {claims: IssueClaim[]; refunds: IssueRefund[];
@@ -22,10 +24,32 @@ function validNotes(notes: string) {
   if (trimmed.length < 3 || trimmed.length > 1000) throw new Error('Enter decision notes between 3 and 1000 characters.');
   return trimmed;
 }
-export const decideAdminClaim = (token: string, orderId: string, claimId: string,
-  status: 'under_review' | 'approved' | 'rejected' | 'resolved', notes: string) =>
-  apiRequest(`${base}/orders/${encodeURIComponent(orderId)}/claims/${encodeURIComponent(claimId)}/decision`,
-    {accessToken: token, method: 'POST', body: {status, notes: validNotes(notes)}});
+export const decideAdminClaim = (
+  token: string,
+  orderId: string,
+  claimId: string,
+  status: 'under_review' | 'approved' | 'rejected' | 'resolved',
+  notes: string,
+  refundOptions?: {
+    refundAmount?: number;
+    approveRefund?: boolean;
+    refundReason?: string;
+  },
+) =>
+  apiRequest(
+    `${base}/orders/${encodeURIComponent(orderId)}/claims/${encodeURIComponent(claimId)}/decision`,
+    {
+      accessToken: token,
+      method: 'POST',
+      body: {
+        status,
+        notes: validNotes(notes),
+        ...(refundOptions?.refundAmount ? {refundAmount: refundOptions.refundAmount} : {}),
+        ...(refundOptions?.approveRefund !== undefined ? {approveRefund: refundOptions.approveRefund} : {}),
+        ...(refundOptions?.refundReason ? {refundReason: refundOptions.refundReason} : {}),
+      },
+    },
+  );
 export function requestAdminRefund(token: string, orderId: string, paymentId: string, amount: number, reason: string) {
   if (!Number.isFinite(amount) || amount <= 0 || Math.abs(Math.round(amount * 100) - amount * 100) > 0.000001)
     throw new Error('Enter a positive refund amount in rupees.');
@@ -35,6 +59,9 @@ export function requestAdminRefund(token: string, orderId: string, paymentId: st
 export const approveAdminRefund = (token: string, orderId: string, refundId: string, notes: string) =>
   apiRequest(`${base}/orders/${encodeURIComponent(orderId)}/refunds/${encodeURIComponent(refundId)}/approve`,
     {accessToken: token, method: 'POST', body: {notes: validNotes(notes)}});
+export const executeAdminRefund = (token: string, orderId: string, refundId: string, notes?: string) =>
+  apiRequest(`${base}/orders/${encodeURIComponent(orderId)}/refunds/${encodeURIComponent(refundId)}/execute`,
+    {accessToken: token, method: 'POST', body: {notes: notes ? validNotes(notes) : 'Executing approved refund'}});
 export const rejectAdminRefund = (token: string, orderId: string, refundId: string, notes: string) =>
   apiRequest(`${base}/orders/${encodeURIComponent(orderId)}/refunds/${encodeURIComponent(refundId)}/reject`,
     {accessToken: token, method: 'POST', body: {notes: validNotes(notes)}});
@@ -44,5 +71,7 @@ export async function executeAdminClaimRefund(token: string, orderId: string, pa
   if (!refundId) {
     throw new Error('Refund request was created but refund ID was not returned.');
   }
-  return approveAdminRefund(token, orderId, refundId, notes);
+  await approveAdminRefund(token, orderId, refundId, notes);
+  return executeAdminRefund(token, orderId, refundId, notes);
 }
+

@@ -14,6 +14,7 @@ import {SafeAreaView} from 'react-native-safe-area-context';
 import AppIcon, {IconName} from '../components/AppIcon';
 import StateView from '../components/StateView';
 import {borderRadius, colors, shadows, spacing, typography} from '../theme/designSystem';
+import {getCategoryIconName} from '../utils/categoryIconMapping';
 
 type ServiceItem = {
   id: string;
@@ -45,19 +46,6 @@ type CategoryScreenProps = {
 
 function formatMoney(value: number) {
   return Number.isInteger(value) ? value.toFixed(0) : value.toFixed(2);
-}
-
-function categoryIconName(name: string): IconName {
-  const lower = name.toLowerCase();
-  if (lower.includes('fold')) return 'fold';
-  if (lower.includes('iron') || lower.includes('steam')) return 'iron';
-  if (lower.includes('dry')) return 'hanger';
-  if (lower.includes('linen') || lower.includes('bed') || lower.includes('house') || lower.includes('curtain') || lower.includes('carpet')) return 'bed';
-  if (lower.includes('shoe')) return 'shoe';
-  if (lower.includes('premium')) return 'sparkles';
-  if (lower.includes('add')) return 'plus';
-  if (lower.includes('wash')) return 'wash';
-  return 'sparkles';
 }
 
 function categoryDescription(name: string) {
@@ -230,9 +218,10 @@ export default function CategoryScreen({
         <View style={styles.categoryHero}>
           <View style={styles.heroIconBox}>
             <AppIcon
-              name={categoryIconName(categoryName)}
-              size={22}
+              name={getCategoryIconName(categoryName)}
+              size={24}
               color={colors.primary}
+              accessibilityLabel={getCategoryIconName(categoryName)}
             />
           </View>
           <View style={styles.heroTextCol}>

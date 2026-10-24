@@ -83,8 +83,30 @@ export class ClaimsService {
       this.throwDatabaseError(error ?? {}, 'Unable to submit claim');
     }
 
+    try {
+      if (typeof (this.supabase as any)?.createAndBroadcastNotification === 'function') {
+        await (this.supabase as any).createAndBroadcastNotification({
+          profileId,
+          orderId,
+          notificationType: 'claim.submitted',
+          title: 'Claim Submitted',
+          body: `Claim submitted for order: ${dto.description.slice(0, 50)}`,
+          data: { orderId, claimId: (data as any)?.id },
+          channels: [`customer:${profileId}`, `order:${orderId}`, 'admin:operations'],
+        });
+      }
+      await this.supabase.broadcastEvent('admin:operations', 'CLAIM_SUBMITTED', {
+        orderId,
+        claimId: (data as any)?.id,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (broadcastErr) {
+      console.warn('[CLAIM_CREATE_BROADCAST_WARNING]', broadcastErr);
+    }
+
     return data;
   }
+
 
   private async attachSignedUrlsToPhotos(photos: any[]) {
     return Promise.all(

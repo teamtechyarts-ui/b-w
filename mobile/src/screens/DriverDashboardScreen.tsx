@@ -1,6 +1,8 @@
-import React, {useCallback, useEffect, useState} from 'react';
+import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {
   ActivityIndicator,
+  AppState,
+  AppStateStatus,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -10,6 +12,7 @@ import {
   View,
 } from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
+import {useSafeFocusEffect} from '../hooks/useSafeFocusEffect';
 import NativeQrScannerButton from '../components/NativeQrScannerButton';
 import AppIcon from '../components/AppIcon';
 import {
@@ -32,6 +35,7 @@ type Props = {
   accessToken: string;
   onJob: (id: string) => void;
   onNotifications: () => void;
+  unreadNotificationCount?: number;
   onProfile: () => void;
   onLogout: () => Promise<void>;
 };
@@ -192,6 +196,7 @@ export default function DriverDashboardScreen({
   accessToken,
   onJob,
   onNotifications,
+  unreadNotificationCount,
   onProfile,
   onLogout,
 }: Props) {
@@ -208,10 +213,26 @@ export default function DriverDashboardScreen({
   const [claimingId, setClaimingId] = useState<string | null>(null);
   const [claimError, setClaimError] = useState('');
 
+  const requestSeqRef = useRef(0);
+  const lastFetchRef = useRef(0);
+  const dashboardRef = useRef<DriverDashboard | null>(null);
+  dashboardRef.current = dashboard;
+
+  const lastRealtimeEventRef = useRef<string>('');
+
   const load = useCallback(
-    async (refresh = false) => {
-      if (refresh) setRefreshing(true);
-      else setLoading(true);
+    async (isUserAction = false, isSilent = false) => {
+      const now = Date.now();
+      if (!isUserAction && isSilent && now - lastFetchRef.current < 2000) {
+        return;
+      }
+      lastFetchRef.current = now;
+      const seq = ++requestSeqRef.current;
+      if (isUserAction) {
+        setRefreshing(true);
+      } else if (!dashboardRef.current && !isSilent) {
+        setLoading(true);
+      }
       setError('');
       setAvailabilityError('');
       setClaimError('');
@@ -220,13 +241,22 @@ export default function DriverDashboardScreen({
           getDriverDashboard(accessToken),
           getDriverProfile(accessToken).catch(() => null),
         ]);
-        setDashboard(nextDashboard);
-        if (nextProfile) setProfile(nextProfile);
+        if (seq === requestSeqRef.current) {
+          setDashboard(nextDashboard);
+          if (nextProfile) setProfile(nextProfile);
+        }
       } catch (cause) {
-        setError(cause instanceof Error ? cause.message : 'Assignments unavailable.');
+        if (seq === requestSeqRef.current) {
+          // If dashboard data is already displayed, preserve it and only show inline banner if needed
+          if (!dashboardRef.current) {
+            setError(cause instanceof Error ? cause.message : 'Assignments unavailable.');
+          }
+        }
       } finally {
-        setLoading(false);
-        setRefreshing(false);
+        if (seq === requestSeqRef.current) {
+          setLoading(false);
+          setRefreshing(false);
+        }
       }
     },
     [accessToken],
@@ -236,6 +266,16 @@ export default function DriverDashboardScreen({
     profile?.id,
     useCallback(
       (event: RealtimeEventPayload) => {
+        // Deduplicate rapid successive events for the same entity
+        const eventKey = `${event.eventType}-${event.orderId || event.entityId || ''}-${Math.floor(Date.now() / 1500)}`;
+        if (lastRealtimeEventRef.current === eventKey) {
+          return;
+        }
+        lastRealtimeEventRef.current = eventKey;
+
+        // Bump sequence counter so older in-flight requests cannot overwrite live job state
+        requestSeqRef.current += 1;
+
         if (event.eventType === 'JOB_CLAIMED' && event.orderId) {
           setDashboard(prev => {
             if (!prev) return prev;
@@ -244,10 +284,10 @@ export default function DriverDashboardScreen({
               availablePickups: (prev.availablePickups || []).filter(j => j.orderId !== event.orderId),
               availableDeliveries: (prev.availableDeliveries || []).filter(j => j.orderId !== event.orderId),
             };
-
           });
         }
-        load(true);
+        // Background silent revalidation without replacing populated dashboard with spinner
+        load(false, true);
       },
       [load],
     ),
@@ -256,11 +296,40 @@ export default function DriverDashboardScreen({
   );
 
   useEffect(() => {
-    load();
+    load(false, false);
+  }, [load]);
+
+  useSafeFocusEffect(
+    useCallback(() => {
+      // Returning to screen revalidates quietly without showing full-page spinner
+      load(false, true);
+    }, [load]),
+  );
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener(
+      'change',
+      (nextState: AppStateStatus) => {
+        if (nextState === 'active') {
+          // Reconnect / foreground reconciliation without jarring UI replacement
+          load(false, true);
+        }
+      },
+    );
+    return () => subscription.remove();
+  }, [load]);
+
+  // Bounded gentle fallback reconciliation (60s) for offline recovery
+  useEffect(() => {
+    const timer = setInterval(() => {
+      load(false, true);
+    }, 60000);
+    return () => clearInterval(timer);
   }, [load]);
 
   const handleClaimJob = async (orderId: string, jobType: 'pickup' | 'delivery') => {
     if (claimingId) return;
+    requestSeqRef.current += 1;
     setClaimingId(orderId);
     setClaimError('');
     try {
@@ -269,9 +338,9 @@ export default function DriverDashboardScreen({
         onJob(res.assignment.id);
         return;
       }
-      await load(true);
+      await load(true, true);
     } catch (cause) {
-      await load(true);
+      await load(true, true);
       setClaimError(
         cause instanceof Error
           ? cause.message
@@ -298,6 +367,7 @@ export default function DriverDashboardScreen({
 
   const handleToggleAvailability = async () => {
     if (!profile || togglingAvailability) return;
+    requestSeqRef.current += 1;
     const targetState = !profile.is_available;
     setTogglingAvailability(true);
     setAvailabilityError('');
@@ -321,7 +391,7 @@ export default function DriverDashboardScreen({
           <RefreshControl
             refreshing={refreshing}
             onRefresh={() => {
-              load(true);
+              load(true, true);
             }}
           />
         }
@@ -335,11 +405,22 @@ export default function DriverDashboardScreen({
           <View style={styles.headerActions}>
             <TouchableOpacity
               accessibilityRole="button"
-              accessibilityLabel="Driver notifications"
+              accessibilityLabel={
+                unreadNotificationCount && unreadNotificationCount > 0
+                  ? `Driver notifications with ${unreadNotificationCount} unread`
+                  : 'Driver notifications'
+              }
               style={styles.icon}
               onPress={onNotifications}
             >
               <AppIcon name="bell" size={18} color="#111827" />
+              {unreadNotificationCount && unreadNotificationCount > 0 ? (
+                <View style={styles.unreadBadge}>
+                  <Text style={styles.unreadBadgeText}>
+                    {unreadNotificationCount > 99 ? '99+' : unreadNotificationCount}
+                  </Text>
+                </View>
+              ) : null}
             </TouchableOpacity>
             <TouchableOpacity
               accessibilityRole="button"
@@ -593,6 +674,23 @@ const styles = StyleSheet.create({
     borderColor: '#E2DED6',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  unreadBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    backgroundColor: '#DC2626',
+    borderRadius: 99,
+    minWidth: 18,
+    height: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
+  unreadBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '800',
   },
   date: {
     fontWeight: '700',

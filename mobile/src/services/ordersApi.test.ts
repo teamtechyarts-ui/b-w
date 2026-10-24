@@ -156,4 +156,24 @@ describe('ordersApi cache & user isolation', () => {
     expect(res1).toEqual(userAOrders);
     expect(res2).toEqual(userAOrders);
   });
+
+  it('deduplicates concurrent in-flight getOrders requests even when forceRefresh is true', async () => {
+    let resolveApi: (val: any) => void;
+    const apiPromise = new Promise(resolve => {
+      resolveApi = resolve;
+    });
+    (apiRequest as jest.Mock).mockReturnValue(apiPromise);
+
+    // Two concurrent requests with forceRefresh: true (such as Focus + AppState listeners firing together)
+    const p1 = getOrders('token-user-a', { forceRefresh: true });
+    const p2 = getOrders('token-user-a', { forceRefresh: true });
+
+    // apiRequest should only have been called ONCE
+    expect(apiRequest).toHaveBeenCalledTimes(1);
+
+    resolveApi!(userAOrders);
+    const [res1, res2] = await Promise.all([p1, p2]);
+    expect(res1).toEqual(userAOrders);
+    expect(res2).toEqual(userAOrders);
+  });
 });

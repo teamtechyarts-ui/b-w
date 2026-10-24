@@ -487,7 +487,7 @@ export class LogisticsService {
       if (typeof this.supabase?.broadcastEvent === "function" && data?.orderId) {
         const { data: ord } = await this.db()
           .from("orders")
-          .select("customer_id,facility_id")
+          .select("customer_id,facility_id,customers(profile_id)")
           .eq("id", data.orderId)
           .maybeSingle();
 
@@ -504,10 +504,17 @@ export class LogisticsService {
           this.supabase.broadcastEvent("orders:all", "ORDER_STATUS_CHANGED", payload),
           this.supabase.broadcastEvent(`order:${data.orderId}`, "ORDER_STATUS_CHANGED", payload),
           this.supabase.broadcastEvent("admin:operations", "ORDER_STATUS_CHANGED", payload),
+          this.supabase.broadcastEvent(`driver:${driverId}`, "ASSIGNMENT_UPDATED", payload),
         ];
         if (ord?.customer_id) {
           broadcasts.push(
             this.supabase.broadcastEvent(`customer:${ord.customer_id}`, "ORDER_STATUS_CHANGED", payload),
+          );
+        }
+        const profileId = (ord as any)?.customers?.profile_id;
+        if (profileId && profileId !== ord?.customer_id) {
+          broadcasts.push(
+            this.supabase.broadcastEvent(`customer:${profileId}`, "ORDER_STATUS_CHANGED", payload),
           );
         }
         await Promise.allSettled(broadcasts);
@@ -562,12 +569,14 @@ export class LogisticsService {
     }
 
     if (assignment.assignment_type === "delivery") {
-      const { data: collectionOp } = await this.db()
+      const { data: collectionOps } = await this.db()
         .from("driver_navigation_events")
         .select("id")
         .eq("order_id", assignment.order_id)
         .eq("event_type", "driver_collection_confirmed")
-        .maybeSingle();
+        .limit(1);
+
+      const collectionOp = collectionOps?.[0];
 
       if (!collectionOp) {
         await this.db()
@@ -584,6 +593,8 @@ export class LogisticsService {
           provider: this.maps.providerName,
           status: "en_route_facility",
           destination: "facility",
+          assignmentStatus: "en_route",
+          orderStatus: "en_route_facility",
         };
       }
     }
@@ -612,7 +623,7 @@ export class LogisticsService {
       if (typeof this.supabase?.broadcastEvent === "function" && data?.orderId) {
         const { data: ord } = await this.db()
           .from("orders")
-          .select("customer_id,facility_id")
+          .select("customer_id,facility_id,customers(profile_id)")
           .eq("id", data.orderId)
           .maybeSingle();
 
@@ -629,10 +640,23 @@ export class LogisticsService {
           this.supabase.broadcastEvent("orders:all", "ORDER_STATUS_CHANGED", payload),
           this.supabase.broadcastEvent(`order:${data.orderId}`, "ORDER_STATUS_CHANGED", payload),
           this.supabase.broadcastEvent("admin:operations", "ORDER_STATUS_CHANGED", payload),
+          this.supabase.broadcastEvent(`driver:${driverId}`, "ASSIGNMENT_UPDATED", payload),
+          this.supabase.broadcastEvent("facility:all", "ORDER_STATUS_CHANGED", payload),
         ];
+        if (ord?.facility_id) {
+          broadcasts.push(
+            this.supabase.broadcastEvent(`facility:${ord.facility_id}`, "ORDER_STATUS_CHANGED", payload),
+          );
+        }
         if (ord?.customer_id) {
           broadcasts.push(
             this.supabase.broadcastEvent(`customer:${ord.customer_id}`, "ORDER_STATUS_CHANGED", payload),
+          );
+        }
+        const profileId = (ord as any)?.customers?.profile_id;
+        if (profileId && profileId !== ord?.customer_id) {
+          broadcasts.push(
+            this.supabase.broadcastEvent(`customer:${profileId}`, "ORDER_STATUS_CHANGED", payload),
           );
         }
         await Promise.allSettled(broadcasts);
@@ -646,6 +670,8 @@ export class LogisticsService {
       orderId: data.orderId,
       provider: this.maps.providerName,
       status: "en_route",
+      assignmentStatus: data.assignmentStatus ?? "en_route",
+      orderStatus: data.orderStatus ?? "en_route_delivery",
     };
   }
 
@@ -663,15 +689,55 @@ export class LogisticsService {
       throw new NotFoundException("Assignment not found");
     }
 
-    if (assignment.assignment_type === "delivery") {
-      const { data: collectionOp } = await this.db()
-        .from("driver_navigation_events")
-        .select("id")
-        .eq("order_id", assignment.order_id)
-        .eq("event_type", "driver_collection_confirmed")
+    if (assignment.status === "assigned") {
+      throw new ConflictException("Assignment must be accepted before marking arrival");
+    }
+
+    if (["completed", "cancelled", "rejected", "expired"].includes(assignment.status)) {
+      throw new ConflictException("Cannot mark arrival on an inactive assignment");
+    }
+
+    if (assignment.status === "arrived") {
+      const { data: ord } = await this.db()
+        .from("orders")
+        .select("id,current_status")
+        .eq("id", assignment.order_id)
         .maybeSingle();
 
-      if (!collectionOp) {
+      return {
+        assignmentId,
+        orderId: assignment.order_id,
+        assignmentStatus: "arrived",
+        orderStatus:
+          ord?.current_status ||
+          (assignment.assignment_type === "pickup"
+            ? "pickup_otp_pending"
+            : "delivery_otp_pending"),
+      };
+    }
+
+    if (assignment.assignment_type === "delivery") {
+      const [collectionRes, arrivalRes] = await Promise.all([
+        this.db()
+          .from("driver_navigation_events")
+          .select("id")
+          .eq("order_id", assignment.order_id)
+          .eq("event_type", "driver_collection_confirmed")
+          .limit(1),
+        this.db()
+          .from("driver_navigation_events")
+          .select("id")
+          .eq("order_id", assignment.order_id)
+          .eq("driver_id", driverId)
+          .eq("event_type", "arrived_at_facility")
+          .limit(1),
+      ]);
+
+      const collectionOp = collectionRes.data?.[0];
+      const existingArrival = arrivalRes.data?.[0];
+
+      if (!collectionOp && !existingArrival) {
+        const now = new Date().toISOString();
         await this.db()
           .from("driver_navigation_events")
           .insert({
@@ -680,12 +746,193 @@ export class LogisticsService {
             event_type: "arrived_at_facility",
           });
 
+        try {
+          const { data: order } = await this.db()
+            .from("orders")
+            .select("id,current_status,facility_id,customer_id,order_number")
+            .eq("id", assignment.order_id)
+            .maybeSingle();
+
+          const { data: driverProfile } = await this.db()
+            .from("drivers")
+            .select("id,profile_id,profiles(full_name)")
+            .eq("id", driverId)
+            .maybeSingle();
+
+          const driverName = (driverProfile as any)?.profiles?.full_name || "Assigned Driver";
+
+          if (typeof this.supabase?.broadcastEvent === "function") {
+            const payload = {
+              eventType: "DRIVER_ARRIVED_AT_FACILITY",
+              entityId: assignment.order_id,
+              orderId: assignment.order_id,
+              orderNumber: order?.order_number,
+              status: order?.current_status || "delivery_accepted",
+              driverArrivedAtFacility: true,
+              facilityId: order?.facility_id,
+              driverId,
+              driverName,
+              assignmentType: "delivery",
+              assignmentStatus: "arrived",
+              timestamp: now,
+            };
+
+            const broadcasts: Promise<any>[] = [
+              this.supabase.broadcastEvent("facility:all", "DRIVER_ARRIVED_AT_FACILITY", payload),
+              this.supabase.broadcastEvent(`driver:${driverId}`, "ASSIGNMENT_UPDATED", payload),
+              this.supabase.broadcastEvent(`order:${assignment.order_id}`, "DRIVER_ARRIVED_AT_FACILITY", payload),
+              this.supabase.broadcastEvent("admin:operations", "DRIVER_ARRIVED_AT_FACILITY", payload),
+            ];
+            if (order?.facility_id) {
+              broadcasts.push(
+                this.supabase.broadcastEvent(`facility:${order.facility_id}`, "DRIVER_ARRIVED_AT_FACILITY", payload),
+              );
+            }
+            if (profileId && profileId !== driverId) {
+              broadcasts.push(
+                this.supabase.broadcastEvent(`driver:${profileId}`, "ASSIGNMENT_UPDATED", payload),
+              );
+            }
+            await Promise.allSettled(broadcasts);
+          }
+        } catch {
+          // Safe catch
+        }
+      }
+
+      if (!collectionOp) {
         return {
           assignmentId,
           orderId: assignment.order_id,
           assignmentStatus: "arrived",
           orderStatus: "delivery_accepted",
           facilityArrival: true,
+        };
+      }
+
+      // Customer delivery leg after collection confirmed
+      if (assignment.status === "accepted") {
+        const { error: navError } = await this.db().rpc(
+          "transition_driver_assignment_atomic",
+          {
+            p_assignment_id: assignmentId,
+            p_driver_id: driverId,
+            p_action: "start_navigation",
+            p_rejection_reason: null,
+          },
+        );
+        if (navError) {
+          throw new ConflictException(
+            navError.message ?? "Unable to start delivery transit",
+          );
+        }
+      }
+    }
+
+    // Auto-transition accepted pickup to en_route before arrive
+    if (assignment.assignment_type === "pickup" && assignment.status === "accepted") {
+      const { data: ord } = await this.db()
+        .from("orders")
+        .select("id,current_status")
+        .eq("id", assignment.order_id)
+        .maybeSingle();
+
+      if (ord?.current_status === "pickup_accepted") {
+        const { error: navError } = await this.db().rpc(
+          "transition_driver_assignment_atomic",
+          {
+            p_assignment_id: assignmentId,
+            p_driver_id: driverId,
+            p_action: "start_navigation",
+            p_rejection_reason: null,
+          },
+        );
+        if (navError) {
+          throw new ConflictException(
+            navError.message ?? "Unable to start pickup navigation",
+          );
+        }
+      }
+    }
+
+    // Pickup driver arrival at assigned facility
+    if (assignment.assignment_type === "pickup") {
+      const { data: order } = await this.db()
+        .from("orders")
+        .select("id,current_status,facility_id,customer_id")
+        .eq("id", assignment.order_id)
+        .maybeSingle();
+
+      if (order?.current_status === "in_transit_to_facility") {
+        const { data: existingArrivals } = await this.db()
+          .from("driver_navigation_events")
+          .select("id,created_at")
+          .eq("order_id", assignment.order_id)
+          .eq("driver_id", driverId)
+          .eq("event_type", "arrived_at_facility")
+          .order("created_at", { ascending: false })
+          .limit(1);
+
+        if (existingArrivals && existingArrivals.length > 0) {
+          return {
+            assignmentId,
+            orderId: assignment.order_id,
+            assignmentStatus: "arrived",
+            orderStatus: "in_transit_to_facility",
+            facilityArrival: true,
+            arrivedAt: existingArrivals[0].created_at,
+          };
+        }
+
+        const now = new Date().toISOString();
+        await this.db()
+          .from("driver_navigation_events")
+          .insert({
+            driver_id: driverId,
+            order_id: assignment.order_id,
+            event_type: "arrived_at_facility",
+          });
+
+        try {
+          if (typeof this.supabase?.broadcastEvent === "function") {
+            const payload = {
+              eventType: "DRIVER_ARRIVED_AT_FACILITY",
+              entityId: assignment.order_id,
+              orderId: assignment.order_id,
+              status: "in_transit_to_facility",
+              driverArrivedAtFacility: true,
+              facilityId: order.facility_id,
+              driverId,
+              timestamp: now,
+            };
+            const broadcasts: Promise<any>[] = [
+              this.supabase.broadcastEvent("facility:all", "DRIVER_ARRIVED_AT_FACILITY", payload),
+              this.supabase.broadcastEvent(`driver:${driverId}`, "ASSIGNMENT_UPDATED", payload),
+              this.supabase.broadcastEvent(`order:${assignment.order_id}`, "DRIVER_ARRIVED_AT_FACILITY", payload),
+            ];
+            if (profileId && profileId !== driverId) {
+              broadcasts.push(
+                this.supabase.broadcastEvent(`driver:${profileId}`, "ASSIGNMENT_UPDATED", payload),
+              );
+            }
+            if (order.facility_id) {
+              broadcasts.push(
+                this.supabase.broadcastEvent(`facility:${order.facility_id}`, "DRIVER_ARRIVED_AT_FACILITY", payload),
+              );
+            }
+            await Promise.allSettled(broadcasts);
+          }
+        } catch {
+          // Safe catch
+        }
+
+        return {
+          assignmentId,
+          orderId: assignment.order_id,
+          assignmentStatus: "arrived",
+          orderStatus: "in_transit_to_facility",
+          facilityArrival: true,
+          arrivedAt: now,
         };
       }
     }
@@ -714,7 +961,7 @@ export class LogisticsService {
       if (typeof this.supabase?.broadcastEvent === "function" && data?.orderId) {
         const { data: ord } = await this.db()
           .from("orders")
-          .select("customer_id,facility_id")
+          .select("customer_id,facility_id,customers(profile_id)")
           .eq("id", data.orderId)
           .maybeSingle();
 
@@ -731,10 +978,17 @@ export class LogisticsService {
           this.supabase.broadcastEvent("orders:all", "ORDER_STATUS_CHANGED", payload),
           this.supabase.broadcastEvent(`order:${data.orderId}`, "ORDER_STATUS_CHANGED", payload),
           this.supabase.broadcastEvent("admin:operations", "ORDER_STATUS_CHANGED", payload),
+          this.supabase.broadcastEvent(`driver:${driverId}`, "ASSIGNMENT_UPDATED", payload),
         ];
         if (ord?.customer_id) {
           broadcasts.push(
             this.supabase.broadcastEvent(`customer:${ord.customer_id}`, "ORDER_STATUS_CHANGED", payload),
+          );
+        }
+        const profileId = (ord as any)?.customers?.profile_id;
+        if (profileId && profileId !== ord?.customer_id) {
+          broadcasts.push(
+            this.supabase.broadcastEvent(`customer:${profileId}`, "ORDER_STATUS_CHANGED", payload),
           );
         }
         await Promise.allSettled(broadcasts);
@@ -787,12 +1041,14 @@ export class LogisticsService {
       throw new NotFoundException("Order not found");
     }
 
-    const { data: dispatchOp, error: dispatchError } = await this.db()
+    const { data: dispatchOps, error: dispatchError } = await this.db()
       .from("driver_navigation_events")
       .select("id,created_at")
       .eq("order_id", assignment.order_id)
       .eq("event_type", "facility_dispatch")
-      .maybeSingle();
+      .limit(1);
+
+    const dispatchOp = dispatchOps?.[0];
 
     if (dispatchError || !dispatchOp) {
       throw new ConflictException(
@@ -800,12 +1056,14 @@ export class LogisticsService {
       );
     }
 
-    const { data: existingCollection } = await this.db()
+    const { data: existingCollections } = await this.db()
       .from("driver_navigation_events")
       .select("id,created_at")
       .eq("order_id", assignment.order_id)
       .eq("event_type", "driver_collection_confirmed")
-      .maybeSingle();
+      .limit(1);
+
+    const existingCollection = existingCollections?.[0];
 
     if (existingCollection) {
       return {
@@ -829,6 +1087,43 @@ export class LogisticsService {
 
     if (insertError) {
       throw new BadRequestException(insertError.message);
+    }
+
+    try {
+      const { data: order } = await this.db()
+        .from("orders")
+        .select("id,facility_id,order_number,current_status")
+        .eq("id", assignment.order_id)
+        .maybeSingle();
+
+      if (typeof this.supabase?.broadcastEvent === "function") {
+        const payload = {
+          eventType: "FACILITY_COLLECTED",
+          entityId: assignment.order_id,
+          orderId: assignment.order_id,
+          orderNumber: order?.order_number,
+          status: order?.current_status,
+          facilityId: order?.facility_id,
+          driverId,
+          collected: true,
+          facilityCollected: true,
+          timestamp: now,
+        };
+        const broadcasts: Promise<any>[] = [
+          this.supabase.broadcastEvent("facility:all", "FACILITY_COLLECTED", payload),
+          this.supabase.broadcastEvent(`driver:${driverId}`, "ASSIGNMENT_UPDATED", payload),
+          this.supabase.broadcastEvent(`order:${assignment.order_id}`, "FACILITY_COLLECTED", payload),
+          this.supabase.broadcastEvent("admin:operations", "FACILITY_COLLECTED", payload),
+        ];
+        if (order?.facility_id) {
+          broadcasts.push(
+            this.supabase.broadcastEvent(`facility:${order.facility_id}`, "FACILITY_COLLECTED", payload),
+          );
+        }
+        await Promise.allSettled(broadcasts);
+      }
+    } catch {
+      // Safe catch
     }
 
     return {

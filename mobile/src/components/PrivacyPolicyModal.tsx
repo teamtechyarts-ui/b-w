@@ -117,7 +117,7 @@ export default function PrivacyPolicyModal({
             <Text style={styles.contactText}>
               For any privacy questions or external account deletion requests,
               contact our privacy desk at brightandwhiteofficial@gmail.com or call
-              +91 87124 35442.
+              +91 7680829790.
             </Text>
           </View>
 

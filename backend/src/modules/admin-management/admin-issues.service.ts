@@ -23,13 +23,23 @@ export class AdminIssuesService {
     const [claims, refunds, cancellations] = await Promise.all([
       this.db.from('customer_order_claims').select('id,order_id,claim_type,description,status,created_at')
         .order('created_at', {ascending: false}).limit(100),
-      this.db.from('refund_requests').select('id,payment_order_id,amount,reason,status,is_cancellation_refund,created_at,payment_orders(order_id)')
+      this.db.from('refund_requests').select('id,payment_order_id,payment_transaction_id,amount,reason,status,is_cancellation_refund,created_at,payment_orders(order_id),payment_transactions(order_id)')
         .order('created_at', {ascending: false}).limit(100),
       this.db.from('orders').select('id,order_number,current_status,updated_at').eq('current_status', 'cancelled')
         .order('updated_at', {ascending: false}).limit(100),
     ]);
     if (claims.error || refunds.error || cancellations.error) throw new BadRequestException('Unable to load customer issues');
-    return {claims: claims.data ?? [], refunds: refunds.data ?? [], cancellations: cancellations.data ?? []};
+    
+    const mappedRefunds = (refunds.data ?? []).map((r: any) => {
+      const orderId = r.payment_orders?.order_id || r.payment_transactions?.order_id || null;
+      return {
+        ...r,
+        order_id: orderId,
+        payment_orders: orderId ? { order_id: orderId } : null,
+      };
+    });
+
+    return {claims: claims.data ?? [], refunds: mappedRefunds, cancellations: cancellations.data ?? []};
   }
 
   async order(orderId: string) {
@@ -61,36 +71,12 @@ export class AdminIssuesService {
       customer_claim_photos: await Promise.all((claim.customer_claim_photos ?? []).map(async photo => {
         try {
           if (!this.db?.storage) {
-            console.log('[CLAIM_PHOTO_READ]', {
-              claimId: claim.id,
-              photoId: photo.id,
-              storagePath: photo.storage_path,
-              signedUrlGenerated: false,
-              expiresIn: 3600,
-              supabaseError: 'Storage client not available',
-            });
             return {...photo, signedUrl: null};
           }
           const signed = await this.db.storage.from('customer-claim-photos').createSignedUrl(photo.storage_path, 3600);
           const signedUrl = signed.data?.signedUrl ?? null;
-          console.log('[CLAIM_PHOTO_READ]', {
-            claimId: claim.id,
-            photoId: photo.id,
-            storagePath: photo.storage_path,
-            signedUrlGenerated: Boolean(signedUrl),
-            expiresIn: 3600,
-            supabaseError: signed.error?.message ?? null,
-          });
           return {...photo, signedUrl};
-        } catch (err: any) {
-          console.log('[CLAIM_PHOTO_READ]', {
-            claimId: claim.id,
-            photoId: photo.id,
-            storagePath: photo.storage_path,
-            signedUrlGenerated: false,
-            expiresIn: 3600,
-            supabaseError: err?.message ?? 'Unknown storage error',
-          });
+        } catch {
           return {...photo, signedUrl: null};
         }
       })),
@@ -102,10 +88,187 @@ export class AdminIssuesService {
       return {...payment, refundableAmount: ['paid','partially_refunded'].includes(payment.status) && payment.provider_payment_id
         ? Math.max(0, Math.round((Number(payment.amount) - committed) * 100) / 100) : 0};
     });
+
+    // If no online payment_orders rows exist (e.g. COD orders), populate payment & refunds from payment_transactions
+    if (paymentRows.length === 0) {
+      const { data: txRows } = await this.db.from('payment_transactions')
+        .select('id,order_id,amount,currency,payment_method,status,created_at')
+        .eq('order_id', resolvedOrderId);
+      const txIds = (txRows ?? []).map(t => t.id);
+
+      let codRefunds: any[] = [];
+      if (txIds.length > 0) {
+        const { data: rfs } = await this.db.from('refund_requests')
+          .select('id,amount,reason,status,is_cancellation_refund,created_at,approved_at,processed_at,payment_transaction_id')
+          .in('payment_transaction_id', txIds)
+          .order('created_at', { ascending: false });
+        codRefunds = rfs ?? [];
+      }
+
+      const totalOrderAmount = Number(order.total_amount || 0);
+      const committed = codRefunds
+        .filter(r => ['requested', 'under_review', 'approved', 'processing', 'completed'].includes(r.status))
+        .reduce((sum, r) => sum + Number(r.amount), 0);
+
+      paymentRows.push({
+        id: txIds[0] || `tx-${resolvedOrderId}`,
+        order_id: resolvedOrderId,
+        provider: order.payment_method || 'cod',
+        amount: totalOrderAmount,
+        currency: 'INR',
+        status: order.payment_method === 'cod' ? 'paid' : 'completed',
+        paid_at: null,
+        provider_payment_id: null,
+        refundableAmount: Math.max(0, Math.round((totalOrderAmount - committed) * 100) / 100),
+        refund_requests: codRefunds,
+      });
+
+    }
+
     return {order, claims: evidence, payments: paymentRows, cancellationHistory: cancellation.data ?? [], audit: audit.data ?? []};
   }
 
-  async claimDecision(actor: string, orderId: string, claimId: string, status: string, notes: string) {
+  private async ensureClaimRefund(
+    actor: string,
+    orderId: string,
+    claimId: string,
+    amount: number,
+    notes: string,
+  ) {
+    const claimTag = `[Claim ${claimId.slice(0, 8)}]`;
+    const now = new Date().toISOString();
+
+    // Check if refund already exists for this claim
+    const { data: existingRefunds } = await this.db
+      .from('refund_requests')
+      .select('id,payment_order_id,payment_transaction_id,amount,status,reason')
+      .like('reason', `%${claimTag}%`);
+
+    if (existingRefunds && existingRefunds.length > 0) {
+      const existing = existingRefunds[0];
+      if (existing.status !== 'approved' && existing.status !== 'completed') {
+        await this.db
+          .from('refund_requests')
+          .update({
+            status: 'approved',
+            amount,
+            approved_by: actor,
+            approved_at: now,
+          })
+          .eq('id', existing.id);
+      }
+      return existing;
+    }
+
+    // Check for online payment_orders row
+    const { data: paymentOrder } = await this.db
+      .from('payment_orders')
+      .select('id,status')
+      .eq('order_id', orderId)
+      .maybeSingle();
+
+    let paymentOrderId: string | null = paymentOrder?.id || null;
+    let paymentTransactionId: string | null = null;
+
+    if (!paymentOrderId) {
+      // Find or create payment_transactions row for COD / direct reimbursement
+      const { data: tx } = await this.db
+        .from('payment_transactions')
+        .select('id')
+        .eq('order_id', orderId)
+        .maybeSingle();
+
+      if (tx) {
+        paymentTransactionId = tx.id;
+      } else {
+        const { data: order } = await this.db
+          .from('orders')
+          .select('customer_id,total_amount,payment_method')
+          .eq('id', orderId)
+          .single();
+
+        const { data: newTx } = await this.db
+          .from('payment_transactions')
+          .insert({
+            order_id: orderId,
+            customer_id: order?.customer_id,
+            amount: amount,
+            currency: 'INR',
+            payment_method: order?.payment_method || 'cod',
+            status: 'completed',
+          })
+          .select()
+          .maybeSingle();
+
+        paymentTransactionId = newTx?.id || null;
+      }
+    }
+
+    const refundReason = notes.includes(claimTag) ? notes : `${notes} ${claimTag}`;
+    const { data: newRefund, error: refErr } = await this.db
+      .from('refund_requests')
+      .insert({
+        payment_order_id: paymentOrderId,
+        payment_transaction_id: paymentTransactionId,
+        amount,
+        reason: refundReason,
+        status: 'approved',
+        approved_by: actor,
+        approved_at: now,
+        is_cancellation_refund: false,
+      })
+      .select()
+      .maybeSingle();
+
+    if (refErr || !newRefund) {
+      console.warn('[ENSURE_CLAIM_REFUND_INSERT_WARNING]', refErr);
+      return null;
+    }
+
+    try {
+      await this.db.from('admin_issue_decision_audit').insert({
+        actor_profile_id: actor,
+        order_id: orderId,
+        refund_id: newRefund.id,
+        action: 'claim_refund_approve',
+        notes: refundReason,
+        after_status: 'approved',
+      });
+    } catch (auditErr) {
+      console.warn('[ENSURE_CLAIM_REFUND_AUDIT_WARNING]', auditErr);
+    }
+
+    try {
+      if (typeof (this.supabase as any)?.broadcastEvent === 'function') {
+        const payload = {
+          eventType: 'REFUND_APPROVED',
+          entityId: newRefund.id,
+          orderId,
+          refund: newRefund,
+          timestamp: now,
+        };
+        await this.supabase.broadcastEvent('admin:operations', 'REFUND_APPROVED', payload);
+        await this.supabase.broadcastEvent(`order:${orderId}`, 'REFUND_APPROVED', payload);
+      }
+    } catch (bErr) {
+      console.warn('[ENSURE_CLAIM_REFUND_BROADCAST_WARNING]', bErr);
+    }
+
+    return newRefund;
+  }
+
+  async claimDecision(
+    actor: string,
+    orderId: string,
+    claimId: string,
+    status: string,
+    notes: string,
+    refundOptions?: {
+      refundAmount?: number;
+      approveRefund?: boolean;
+      refundReason?: string;
+    },
+  ) {
     const validNotes = this.notes(notes);
     const {data: claim, error} = await this.db.from('customer_order_claims').select('*')
       .eq('id', claimId).eq('order_id', orderId).maybeSingle();
@@ -115,7 +278,25 @@ export class AdminIssuesService {
       p_claim_id: claimId, p_admin_id: actor, p_target_status: status, p_notes: validNotes,
     });
 
+    const checkAndTriggerRefund = async () => {
+      let shouldCreateRefund = Boolean(refundOptions?.approveRefund);
+      let refundAmount = refundOptions?.refundAmount;
+      const codMatch = validNotes.match(/\[COD Manual Reimbursement[^\]]*\]\s*Amount:\s*₹?([0-9]+(?:\.[0-9]+)?)/i);
+      if (codMatch && codMatch[1]) {
+        shouldCreateRefund = true;
+        refundAmount = refundAmount || Number(codMatch[1]);
+      }
+      if (shouldCreateRefund && refundAmount && refundAmount > 0) {
+        try {
+          await this.ensureClaimRefund(actor, orderId, claimId, refundAmount, refundOptions?.refundReason || validNotes);
+        } catch (refundErr) {
+          console.warn('[ADMIN_CLAIM_REFUND_CREATION_WARNING]', refundErr);
+        }
+      }
+    };
+
     if (!result.error) {
+      await checkAndTriggerRefund();
       return result.data;
     }
 
@@ -173,6 +354,8 @@ export class AdminIssuesService {
         console.warn('[ADMIN_CLAIM_AUDIT_WARNING]', auditErr);
       }
 
+      await checkAndTriggerRefund();
+
       try {
         let customerProfileId: string | null = null;
         if (claim.customer_id) {
@@ -180,15 +363,27 @@ export class AdminIssuesService {
           customerProfileId = cust?.profile_id || null;
         }
         if (customerProfileId) {
-          await this.db.from('notifications').insert({
-            profile_id: customerProfileId,
-            order_id: claim.order_id,
-            notification_type: `claim.${status}`,
-            title: 'Claim update',
-            body: `Your claim is ${status.replace(/_/g, ' ')}`,
-            data: {orderId: claim.order_id, claimId},
-            status: 'queued',
-          });
+          if (typeof (this.supabase as any)?.createAndBroadcastNotification === 'function') {
+            await (this.supabase as any).createAndBroadcastNotification({
+              profileId: customerProfileId,
+              orderId: claim.order_id,
+              notificationType: `claim.${status}`,
+              title: 'Claim update',
+              body: `Your claim is ${status.replace(/_/g, ' ')}`,
+              data: {orderId: claim.order_id, claimId},
+              channels: [`customer:${customerProfileId}`, `order:${claim.order_id}`, 'admin:operations'],
+            });
+          } else {
+            await this.db.from('notifications').insert({
+              profile_id: customerProfileId,
+              order_id: claim.order_id,
+              notification_type: `claim.${status}`,
+              title: 'Claim update',
+              body: `Your claim is ${status.replace(/_/g, ' ')}`,
+              data: {orderId: claim.order_id, claimId},
+              status: 'queued',
+            });
+          }
         }
       } catch (notifErr) {
         console.warn('[ADMIN_CLAIM_NOTIF_WARNING]', notifErr);
@@ -203,22 +398,84 @@ export class AdminIssuesService {
   private async paymentForOrder(orderId: string, paymentId: string) {
     const {data, error} = await this.db.from('payment_orders').select('id,order_id,provider,status')
       .eq('id', paymentId).eq('order_id', orderId).maybeSingle();
-    if (error || !data) throw new NotFoundException('Payment does not belong to this order');
-    if (process.env.NODE_ENV !== 'production' && data.provider !== 'mock' && data.provider !== 'razorpay')
-      throw new ConflictException('Development refunds require a mock or razorpay payment');
-    return data;
+    if (data) {
+      if (process.env.NODE_ENV !== 'production' && data.provider !== 'mock' && data.provider !== 'razorpay')
+        throw new ConflictException('Development refunds require a mock or razorpay payment');
+      return {...data, isTransaction: false};
+    }
+    const {data: tx} = await this.db.from('payment_transactions').select('id,order_id,payment_method,status')
+      .eq('id', paymentId).eq('order_id', orderId).maybeSingle();
+    if (tx) {
+      return {id: tx.id, order_id: tx.order_id, provider: tx.payment_method || 'cod', status: tx.status, isTransaction: true};
+    }
+    throw new NotFoundException('Payment does not belong to this order');
   }
 
   async requestRefund(actor: string, orderId: string, paymentId: string, amount: number, reason: string) {
-    await this.paymentForOrder(orderId, paymentId);
+    const payment = await this.paymentForOrder(orderId, paymentId);
     if (!Number.isFinite(amount) || amount <= 0 || Math.abs(Math.round(amount * 100) - amount * 100) > 0.000001)
       throw new BadRequestException('Enter a positive refund amount in rupees');
     const notes = this.notes(reason);
+
+    if (payment.isTransaction) {
+      const {data: refund, error: refundErr} = await this.db.from('refund_requests').insert({
+        payment_transaction_id: paymentId,
+        amount,
+        reason: notes,
+        status: 'requested',
+        is_cancellation_refund: false,
+      }).select().single();
+
+      if (refundErr || !refund) throw new BadRequestException(refundErr?.message ?? 'Unable to request refund');
+
+      try {
+        await this.db.from('admin_issue_decision_audit').insert({
+          actor_profile_id: actor,
+          order_id: orderId,
+          refund_id: refund.id,
+          action: 'refund_request',
+          notes,
+          after_status: 'requested',
+        });
+      } catch (auditErr) {
+        console.warn('[ADMIN_REFUND_AUDIT_WARNING]', auditErr);
+      }
+
+      try {
+        if (typeof (this.supabase as any)?.broadcastEvent === 'function') {
+          const payload = {
+            eventType: 'REFUND_REQUESTED',
+            entityId: refund.id,
+            orderId,
+            refund,
+            timestamp: new Date().toISOString(),
+          };
+          await this.supabase.broadcastEvent('admin:operations', 'REFUND_REQUESTED', payload);
+          await this.supabase.broadcastEvent(`order:${orderId}`, 'REFUND_REQUESTED', payload);
+        }
+      } catch {}
+
+      return refund;
+    }
+
     const result = await this.db.rpc('admin_request_order_refund_atomic', {
       p_order_id: orderId, p_payment_order_id: paymentId, p_admin_id: actor, p_amount: amount, p_reason: notes,
     });
 
     if (!result.error) {
+      try {
+        if (typeof (this.supabase as any)?.broadcastEvent === 'function') {
+          const payload = {
+            eventType: 'REFUND_REQUESTED',
+            entityId: (result.data as any)?.id,
+            orderId,
+            refund: result.data,
+            timestamp: new Date().toISOString(),
+          };
+          await this.supabase.broadcastEvent('admin:operations', 'REFUND_REQUESTED', payload);
+          await this.supabase.broadcastEvent(`order:${orderId}`, 'REFUND_REQUESTED', payload);
+        }
+      } catch {}
       return result.data;
     }
 
@@ -246,23 +503,200 @@ export class AdminIssuesService {
         console.warn('[ADMIN_REFUND_AUDIT_WARNING]', auditErr);
       }
 
+      try {
+        if (typeof (this.supabase as any)?.broadcastEvent === 'function') {
+          const payload = {
+            eventType: 'REFUND_REQUESTED',
+            entityId: refund.id,
+            orderId,
+            refund,
+            timestamp: new Date().toISOString(),
+          };
+          await this.supabase.broadcastEvent('admin:operations', 'REFUND_REQUESTED', payload);
+          await this.supabase.broadcastEvent(`order:${orderId}`, 'REFUND_REQUESTED', payload);
+        }
+      } catch {}
+
       return refund;
     }
 
     return this.result(result.data, result.error, 'Unable to request refund');
   }
 
+
   private async refundForOrder(orderId: string, refundId: string) {
-    const {data, error} = await this.db.from('refund_requests').select('id,payment_order_id,status')
+    const {data, error} = await this.db.from('refund_requests')
+      .select('id,payment_order_id,payment_transaction_id,amount,status,reason')
       .eq('id', refundId).maybeSingle();
     if (error || !data) throw new NotFoundException('Refund not found');
-    await this.paymentForOrder(orderId, data.payment_order_id);
+    
+    if (data.payment_order_id) {
+      await this.paymentForOrder(orderId, data.payment_order_id);
+    } else if (data.payment_transaction_id) {
+      const {data: tx} = await this.db.from('payment_transactions')
+        .select('id,order_id')
+        .eq('id', data.payment_transaction_id)
+        .maybeSingle();
+      if (!tx || tx.order_id !== orderId) {
+        throw new NotFoundException('Refund does not belong to this order');
+      }
+    }
     return data;
   }
 
   async approveRefund(actor: string, orderId: string, refundId: string, notes: string) {
-    await this.refundForOrder(orderId, refundId);
-    return this.payments.approveRefund(actor, refundId, this.notes(notes));
+    const refund = await this.refundForOrder(orderId, refundId);
+    const validNotes = this.notes(notes);
+
+    if (refund.status === 'approved') {
+      return refund;
+    }
+    if (['completed', 'processed'].includes(refund.status)) {
+      return refund;
+    }
+    if (refund.status === 'rejected') {
+      throw new ConflictException('Refund has already been rejected');
+    }
+
+    const now = new Date().toISOString();
+    const {data: updatedRefund, error} = await this.db
+      .from('refund_requests')
+      .update({
+        status: 'approved',
+        approved_by: actor,
+        approved_at: now,
+      })
+      .eq('id', refundId)
+      .select()
+      .single();
+
+    if (error || !updatedRefund) {
+      throw new BadRequestException(error?.message ?? 'Unable to approve refund');
+    }
+
+    try {
+      await this.db.from('admin_issue_decision_audit').insert({
+        actor_profile_id: actor,
+        order_id: orderId,
+        refund_id: refundId,
+        action: 'refund_approve',
+        notes: validNotes,
+        before_status: refund.status,
+        after_status: 'approved',
+      });
+    } catch (auditErr) {
+      console.warn('[ADMIN_REFUND_AUDIT_WARNING]', auditErr);
+    }
+
+    try {
+      if (typeof (this.supabase as any)?.broadcastEvent === 'function') {
+        const payload = {
+          eventType: 'REFUND_APPROVED',
+          entityId: refundId,
+          orderId,
+          refund: updatedRefund,
+          timestamp: now,
+        };
+        await this.supabase.broadcastEvent('admin:operations', 'REFUND_APPROVED', payload);
+        await this.supabase.broadcastEvent(`order:${orderId}`, 'REFUND_APPROVED', payload);
+      }
+    } catch (bErr) {
+      console.warn('[ADMIN_REFUND_BROADCAST_WARNING]', bErr);
+    }
+
+    return updatedRefund;
+  }
+
+  async executeRefund(actor: string, orderId: string, refundId: string, notes = 'Executing approved refund') {
+    const refund = await this.refundForOrder(orderId, refundId);
+    const validNotes = this.notes(notes);
+
+    if (['completed', 'processed'].includes(refund.status)) {
+      return { refundId, status: refund.status, duplicate: true };
+    }
+    if (refund.status !== 'approved' && refund.status !== 'processing' && refund.status !== 'failed') {
+      throw new ConflictException(`Refund must be approved before execution (current status: ${refund.status})`);
+    }
+
+    const now = new Date().toISOString();
+
+    if (refund.payment_order_id) {
+      try {
+        const result = await this.payments.approveRefund(actor, refundId, validNotes);
+        return result;
+      } catch (err: any) {
+        const isUnconfigured = err?.message?.includes('credentials are not configured') || err?.status === 503;
+        const targetStatus = isUnconfigured ? 'approved' : 'failed';
+
+        await this.db.from('refund_requests')
+          .update({ status: targetStatus, processed_at: now })
+          .eq('id', refundId);
+
+        try {
+          await this.db.from('admin_issue_decision_audit').insert({
+            actor_profile_id: actor,
+            order_id: orderId,
+            refund_id: refundId,
+            action: isUnconfigured ? 'refund_execution_deferred' : 'refund_execution_failed',
+            notes: `${validNotes} [Result: ${err?.message || 'Provider execution error'}]`,
+            before_status: refund.status,
+            after_status: targetStatus,
+          });
+        } catch {}
+
+        if (isUnconfigured) {
+          return {
+            refundId,
+            status: 'approved',
+            duplicate: false,
+            message: 'Refund remains approved; provider credentials not configured for direct auto-settlement.',
+          };
+        }
+        throw err;
+      }
+    }
+
+    const { data: completedRefund, error } = await this.db
+      .from('refund_requests')
+      .update({
+        status: 'completed',
+        processed_at: now,
+      })
+      .eq('id', refundId)
+      .select()
+      .single();
+
+    if (error || !completedRefund) {
+      throw new BadRequestException(error?.message ?? 'Unable to complete reimbursement');
+    }
+
+    try {
+      await this.db.from('admin_issue_decision_audit').insert({
+        actor_profile_id: actor,
+        order_id: orderId,
+        refund_id: refundId,
+        action: 'refund_execute_cod',
+        notes: validNotes,
+        before_status: refund.status,
+        after_status: 'completed',
+      });
+    } catch {}
+
+    try {
+      if (typeof (this.supabase as any)?.broadcastEvent === 'function') {
+        const payload = {
+          eventType: 'REFUND_COMPLETED',
+          entityId: refundId,
+          orderId,
+          refund: completedRefund,
+          timestamp: now,
+        };
+        await this.supabase.broadcastEvent('admin:operations', 'REFUND_COMPLETED', payload);
+        await this.supabase.broadcastEvent(`order:${orderId}`, 'REFUND_COMPLETED', payload);
+      }
+    } catch {}
+
+    return completedRefund;
   }
 
   async rejectRefund(actor: string, orderId: string, refundId: string, notes: string) {
@@ -316,3 +750,4 @@ export class AdminIssuesService {
     return this.result(result.data, result.error, 'Unable to reject refund');
   }
 }
+

@@ -4,6 +4,9 @@ import React, {
   useState,
 } from 'react';
 import {
+  AppState,
+  AppStateStatus,
+  BackHandler,
   FlatList,
   RefreshControl,
   StatusBar,
@@ -69,33 +72,61 @@ export default function OrdersScreen({
   const [refreshNotice, setRefreshNotice] = useState<string | null>(null);
 
   const inFlightRef = React.useRef(false);
+  const queuedRefreshRef = React.useRef<{ isRefresh: boolean; silent: boolean } | null>(null);
+  const requestSeqRef = React.useRef(0);
+  const lastFetchRef = React.useRef(0);
   const ordersRef = React.useRef(orders);
   ordersRef.current = orders;
 
   const loadOrders = useCallback(
-    async (isRefresh = false) => {
-      if (inFlightRef.current) return;
+    async (isRefresh = false, silent = false, isUserAction = false) => {
+      const now = Date.now();
+      if (!isUserAction && !isRefresh && now - lastFetchRef.current < 1500) {
+        return;
+      }
+
+      if (inFlightRef.current) {
+        queuedRefreshRef.current = {
+          isRefresh: isRefresh || queuedRefreshRef.current?.isRefresh || false,
+          silent: silent && (queuedRefreshRef.current ? queuedRefreshRef.current.silent : true),
+        };
+        return;
+      }
+
       inFlightRef.current = true;
+      lastFetchRef.current = now;
+      const seq = ++requestSeqRef.current;
       try {
-        if (isRefresh) {
+        if (isRefresh && !silent) {
           setRefreshing(true);
-        } else if (ordersRef.current.length === 0) {
+        } else if (ordersRef.current.length === 0 && !silent) {
           setLoading(true);
         }
         setError(null);
         setRefreshNotice(null);
         const result = await getOrders(accessToken, { forceRefresh: isRefresh });
-        setOrders(result);
+        if (seq === requestSeqRef.current) {
+          setOrders(result);
+        }
       } catch (loadError: any) {
-        if (ordersRef.current.length === 0) {
-          setError(loadError?.message || 'Unable to load orders.');
-        } else {
-          setRefreshNotice('Unable to refresh orders right now. Showing cached list.');
+        if (seq === requestSeqRef.current) {
+          if (ordersRef.current.length === 0) {
+            setError(loadError?.message || 'Unable to load orders.');
+          } else {
+            setRefreshNotice('Unable to refresh orders right now. Showing cached list.');
+          }
         }
       } finally {
-        setLoading(false);
-        setRefreshing(false);
+        if (seq === requestSeqRef.current) {
+          setLoading(false);
+          setRefreshing(false);
+        }
         inFlightRef.current = false;
+        if (queuedRefreshRef.current) {
+          const queued = queuedRefreshRef.current;
+          queuedRefreshRef.current = null;
+          loadOrders(queued.isRefresh, queued.silent, true);
+        }
       }
     },
     [accessToken],
@@ -105,6 +136,10 @@ export default function OrdersScreen({
     null,
     useCallback(
       (event: RealtimeEventPayload) => {
+        // Bump sequence counter so any in-flight request started BEFORE this real-time event
+        // cannot overwrite the freshly received state
+        requestSeqRef.current += 1;
+
         if (event.orderId && event.status) {
           setOrders(prevOrders => {
             const index = prevOrders.findIndex(o => o.id === event.orderId);
@@ -120,7 +155,7 @@ export default function OrdersScreen({
             return prevOrders;
           });
         }
-        loadOrders(true);
+        loadOrders(true, true, true);
       },
       [loadOrders],
     ),
@@ -129,9 +164,30 @@ export default function OrdersScreen({
 
   useFocusEffect(
     useCallback(() => {
-      loadOrders();
-    }, [loadOrders]),
+      const onBackPress = () => {
+        onBack();
+        return true;
+      };
+      const subscription = BackHandler.addEventListener(
+        'hardwareBackPress',
+        onBackPress,
+      );
+      loadOrders(ordersRef.current.length > 0, ordersRef.current.length > 0);
+      return () => subscription.remove();
+    }, [loadOrders, onBack]),
   );
+
+  React.useEffect(() => {
+    const subscription = AppState.addEventListener(
+      'change',
+      (nextState: AppStateStatus) => {
+        if (nextState === 'active') {
+          loadOrders(true, true);
+        }
+      },
+    );
+    return () => subscription.remove();
+  }, [loadOrders]);
 
   const activeOrders = useMemo(
     () => orders.filter(order => !isPastOrder(order.current_status)),
@@ -298,7 +354,7 @@ export default function OrdersScreen({
         </View>
       ) : null}
 
-      {loading && !refreshing ? (
+      {loading && orders.length === 0 && !refreshing ? (
         <StateView type="loading" message="Loading your orders..." />
       ) : error ? (
         <StateView

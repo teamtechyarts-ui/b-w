@@ -226,5 +226,96 @@ describe('useAddresses hook', () => {
     expect(result.inUse).toBe(true);
     expect(result.error).toBe('Address is used by an existing order and cannot be deleted.');
   });
-});
+  it('preserves existing addresses when background reload fails', async () => {
+    (getMyAddresses as jest.Mock).mockResolvedValueOnce([
+      {
+        id: 'addr-existing',
+        label: 'Existing Home',
+        address_line1: 'Road 9',
+        city: 'Hyderabad',
+        state: 'Telangana',
+        postal_code: '500001',
+        latitude: 17.38,
+        longitude: 78.48,
+        is_default: true,
+      },
+    ]);
 
+    const view = await renderHook(() => useAddresses({accessToken: 'token-123'}));
+
+    await act(async () => {
+      await view.result.current.loadAddresses();
+    });
+
+    expect(view.result.current.addresses).toHaveLength(1);
+
+    // Now simulate background error
+    (getMyAddresses as jest.Mock).mockRejectedValueOnce(new Error('Network glitch'));
+
+    await act(async () => {
+      await view.result.current.loadAddresses(null, true);
+    });
+
+    // Existing addresses should NOT be wiped out
+    expect(view.result.current.addresses).toHaveLength(1);
+    expect(view.result.current.addresses[0].id).toBe('addr-existing');
+    expect(view.result.current.addressesLoading).toBe(false);
+  });
+
+  it('prevents race conditions by ignoring out-of-order stale responses', async () => {
+    let resolveFirst: any;
+    const firstPromise = new Promise(resolve => {
+      resolveFirst = resolve;
+    });
+
+    (getMyAddresses as jest.Mock)
+      .mockImplementationOnce(() => firstPromise)
+      .mockResolvedValueOnce([
+        {
+          id: 'addr-newer',
+          label: 'Newer Address',
+          address_line1: 'Road Newer',
+          city: 'Hyderabad',
+          state: 'Telangana',
+          postal_code: '500001',
+          latitude: 17.38,
+          longitude: 78.48,
+          is_default: true,
+        },
+      ]);
+
+    const view = await renderHook(() => useAddresses({accessToken: 'token-123'}));
+
+    // Fire first slow background request without act wrapper
+    const firstCallPromise = view.result.current.loadAddresses(null, true);
+
+    // Fire and await second fast request
+    await act(async () => {
+      await view.result.current.loadAddresses();
+    });
+
+    expect(view.result.current.addresses[0].id).toBe('addr-newer');
+
+    // Now first slow request finishes with stale data
+    await act(async () => {
+      resolveFirst([
+        {
+          id: 'addr-stale-older',
+          label: 'Old Address',
+          address_line1: 'Road Old',
+          city: 'Hyderabad',
+          state: 'Telangana',
+          postal_code: '500001',
+          latitude: 17.38,
+          longitude: 78.48,
+          is_default: true,
+        },
+      ]);
+      await firstCallPromise;
+    });
+
+    // Newer data must NOT be overwritten by older response
+    expect(view.result.current.addresses[0].id).toBe('addr-newer');
+  });
+
+});

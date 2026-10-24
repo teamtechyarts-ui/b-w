@@ -523,7 +523,7 @@ export default function AdminStaffScreen({accessToken, onBack, onStaff}: Props) 
           </View>
 
           {/* Loading Indicator */}
-          {loading ? (
+          {loading && !staff.length ? (
             <View style={styles.loadingContainer}>
               <ActivityIndicator accessibilityLabel="Loading staff" color="#2563EB" size="large" />
               <Text style={styles.loadingText}>Loading staff directory…</Text>

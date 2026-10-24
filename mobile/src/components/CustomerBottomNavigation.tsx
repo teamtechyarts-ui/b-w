@@ -16,7 +16,7 @@ type Props = {
 
 const tabs: {key: CustomerTab; label: string; icon: IconName}[] = [
   {key: 'home', label: 'Home', icon: 'home'},
-  {key: 'orders', label: 'Orders', icon: 'box'},
+  {key: 'orders', label: 'Orders', icon: 'orders'},
   {key: 'account', label: 'Account', icon: 'user'},
 ];
 

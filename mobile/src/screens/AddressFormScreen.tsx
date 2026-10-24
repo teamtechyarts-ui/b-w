@@ -1,6 +1,7 @@
-import React, {useState} from 'react';
+import React, {useEffect, useState} from 'react';
 import {
   ActivityIndicator,
+  BackHandler,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -58,6 +59,22 @@ export default function AddressFormScreen({
   const [accuracyMeters, setAccuracyMeters] = useState<number | null>(null);
   const [showPickerOptions, setShowPickerOptions] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    const onBackPress = () => {
+      if (saving || locating) {
+        return true;
+      }
+      if (showPickerOptions) {
+        setShowPickerOptions(false);
+        return true;
+      }
+      onBack();
+      return true;
+    };
+    const sub = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+    return () => sub.remove();
+  }, [saving, locating, showPickerOptions, onBack]);
 
   const initialStatus: LocationStatus =
     form.latitude && form.longitude

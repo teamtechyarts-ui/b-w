@@ -1,6 +1,7 @@
-import React, {useState} from 'react';
+import React, {useEffect, useState} from 'react';
 import {
   ActivityIndicator,
+  BackHandler,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -45,6 +46,22 @@ export default function PaymentScreen({
   onPlaceOrder,
 }: PaymentScreenProps) {
   const [termsVisible, setTermsVisible] = useState(false);
+
+  useEffect(() => {
+    const onBackPress = () => {
+      if (termsVisible) {
+        setTermsVisible(false);
+        return true;
+      }
+      if (placingOrder) {
+        return true;
+      }
+      onBack();
+      return true;
+    };
+    const sub = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+    return () => sub.remove();
+  }, [termsVisible, placingOrder, onBack]);
 
   const disabled = !selectedPaymentMethod || !termsAccepted || placingOrder;
 

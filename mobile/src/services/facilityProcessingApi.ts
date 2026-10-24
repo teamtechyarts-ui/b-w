@@ -8,7 +8,8 @@ export type QualityDecision = {id: string; cycle_number: number; approved: boole
 export type ProcessingHistory = {orderId: string; orderStatus: string; stages: StageRecord[];
   activeOperationId: string | null; nextStage: ProcessingStage | null;
   openDiscrepancies: number; completedStageCount: number; qualityDecisions?: QualityDecision[];
-  role?: 'manager' | 'facility_employee'; canQualityCheck?: boolean; rewashCycle?: number};
+  role?: 'manager' | 'facility_employee'; canQualityCheck?: boolean; rewashCycle?: number;
+  packingRequired?: boolean; isPacked?: boolean; packingReady?: boolean};
 
 export function getFacilityProcessing(accessToken: string, orderId: string) {
   return apiRequest<ProcessingHistory>(`/facility/orders/${encodeURIComponent(orderId)}/processing`, {accessToken});

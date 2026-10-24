@@ -199,7 +199,7 @@ test('Facility Staff sees QC controls, must explain failure, and history survive
   await fireEvent.press(view.getByLabelText('Shirt'));
   await fireEvent.press(view.getByText('Fail QC — require rewash'));
   await waitFor(() =>
-    expect(view.getByText('Cycle 0 · Failed — rewash required')).toBeTruthy(),
+    expect(view.getByText('Cycle 1 · Failed — rewash required')).toBeTruthy(),
   );
   expect(decide).toHaveBeenCalledWith('token', 'order-1', {
     approved: false,
@@ -302,9 +302,9 @@ test('renders full processing history with completed and in-progress stages', as
     />,
   );
   await waitFor(() =>
-    expect(view.getByText('Cycle 0 · Wash · Completed')).toBeTruthy(),
+    expect(view.getByText('Cycle 1 · Wash · Completed')).toBeTruthy(),
   );
-  expect(view.getByText('Cycle 0 · Dry · In progress')).toBeTruthy();
+  expect(view.getByText('Cycle 1 · Dry · In progress')).toBeTruthy();
   expect(view.getByText('Complete Dry')).toBeTruthy();
   expect(view.queryByText('Ready to start processing')).toBeNull();
 });
@@ -422,4 +422,67 @@ test('stepper updates sequentially as stages complete: Wash -> Dry -> Iron -> Fo
   );
   expect(view3.getByTestId('step-qc-active')).toBeTruthy();
 });
+
+test('disables Pass QC and provides Confirm Final Packing action button when packing is not ready', async () => {
+  get.mockResolvedValueOnce({
+    ...empty,
+    orderStatus: 'processing',
+    nextStage: null,
+    canQualityCheck: true,
+    packingRequired: true,
+    packingReady: false,
+    stages: [
+      { id: 'p1', operation_type: 'packaging', started_at: 't1', completed_at: 't2' },
+    ],
+  });
+  const onConfirm = jest.fn();
+  const view = await render(
+    <FacilityProcessingPanel
+      accessToken="token"
+      orderId="order-1"
+      onChanged={jest.fn()}
+      onConfirmPackingPress={onConfirm}
+    />,
+  );
+  await waitFor(() =>
+    expect(
+      view.getByText('Confirm final packing before QC can make this order ready.'),
+    ).toBeTruthy(),
+  );
+  const passBtn = view.getByRole('button', { name: 'Pass QC' });
+  expect(passBtn.props.accessibilityState?.disabled).toBe(true);
+
+  const confirmBtn = view.getByRole('button', { name: 'Confirm final packing' });
+  expect(confirmBtn).toBeTruthy();
+  fireEvent.press(confirmBtn);
+  expect(onConfirm).toHaveBeenCalled();
+});
+
+test('enables Pass QC when backend confirms packing is ready', async () => {
+  get.mockResolvedValueOnce({
+    ...empty,
+    orderStatus: 'processing',
+    nextStage: null,
+    canQualityCheck: true,
+    packingRequired: false,
+    packingReady: true,
+    stages: [
+      { id: 'p1', operation_type: 'packaging', started_at: 't1', completed_at: 't2' },
+    ],
+  });
+  const view = await render(
+    <FacilityProcessingPanel
+      accessToken="token"
+      orderId="order-1"
+      onChanged={jest.fn()}
+    />,
+  );
+  await waitFor(() => expect(view.getByText('Pass QC')).toBeTruthy());
+  expect(
+    view.queryByText('Confirm final packing before QC can make this order ready.'),
+  ).toBeNull();
+  const passBtn = view.getByRole('button', { name: 'Pass QC' });
+  expect(passBtn.props.accessibilityState?.disabled).toBeFalsy();
+});
+
 

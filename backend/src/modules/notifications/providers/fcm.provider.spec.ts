@@ -65,11 +65,42 @@ describe('FcmProvider', () => {
         body: 'Your order was updated.',
       },
       data: { orderId: 'order-id' },
+      android: {
+        priority: 'high',
+        notification: {
+          channelId: 'bright_white_notifications',
+          sound: 'default',
+          priority: 'high',
+          defaultSound: true,
+          defaultVibrateTimings: true,
+        },
+      },
+      apns: {
+        payload: {
+          aps: {
+            sound: 'default',
+          },
+        },
+      },
     });
   });
 
   it('uses application-default credentials when configured for ADC', () => {
     const f = fixture({ FIREBASE_PROJECT_ID: 'test-project' });
+
+    expect(f.provider.configured).toBe(true);
+    expect(f.firebase.applicationDefault).toHaveBeenCalledTimes(1);
+    expect(f.firebase.cert).not.toHaveBeenCalled();
+  });
+
+  it('uses application-default credentials when GOOGLE_APPLICATION_CREDENTIALS is set even if placeholder service account keys exist in environment', () => {
+    const f = fixture({
+      GOOGLE_APPLICATION_CREDENTIALS: '/path/to/service-account.json',
+      FIREBASE_PROJECT_ID: 'dev-bright-white',
+      FIREBASE_CLIENT_EMAIL: 'dev-firebase@bright-white.local',
+      FIREBASE_PRIVATE_KEY:
+        '-----BEGIN PRIVATE KEY-----\\ndev-placeholder-private-key\\n-----END PRIVATE KEY-----\\n',
+    });
 
     expect(f.provider.configured).toBe(true);
     expect(f.firebase.applicationDefault).toHaveBeenCalledTimes(1);

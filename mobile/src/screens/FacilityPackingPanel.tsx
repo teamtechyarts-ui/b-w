@@ -20,6 +20,7 @@ type Props = {
   orderId: string;
   onChanged: () => void;
   onReadiness: (ready: boolean) => void;
+  refreshTrigger?: number;
 };
 
 export default function FacilityPackingPanel({
@@ -27,6 +28,7 @@ export default function FacilityPackingPanel({
   orderId,
   onChanged,
   onReadiness,
+  refreshTrigger,
 }: Props) {
   const [details, setDetails] = useState<PackingDetails | null>(null);
   const [counts, setCounts] = useState<Record<string, string>>({});
@@ -36,39 +38,50 @@ export default function FacilityPackingPanel({
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const lock = useRef(false);
+  const detailsRef = useRef<PackingDetails | null>(null);
+  detailsRef.current = details;
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError('');
-    try {
-      const result = await getFacilityPacking(accessToken, orderId);
-      setDetails(result);
-      setCounts(
-        Object.fromEntries(
-          result.items.map(item => [
-            item.id,
-            String(item.verifiedQuantity ?? ''),
-          ]),
-        ),
-      );
-      onReadiness(
-        !result.packingRequired ||
-          result.history.some(row => row.cycle_number === result.cycleNumber),
-      );
-    } catch (cause) {
-      setError(
-        cause instanceof Error ? cause.message : 'Final packing unavailable.',
-      );
-      onReadiness(false);
-    } finally {
-      setLoading(false);
-    }
-  }, [accessToken, orderId, onReadiness]);
+  const load = useCallback(
+    async (isSilent = false) => {
+      if (!isSilent && !detailsRef.current) {
+        setLoading(true);
+      }
+      setError('');
+      try {
+        const result = await getFacilityPacking(accessToken, orderId);
+        setDetails(result);
+        setCounts(prev => {
+          if (Object.keys(prev).length > 0) return prev;
+          return Object.fromEntries(
+            result.items.map(item => [
+              item.id,
+              String(item.verifiedQuantity ?? ''),
+            ]),
+          );
+        });
+        onReadiness(
+          !result.packingRequired ||
+            result.history.some(row => row.cycle_number === result.cycleNumber),
+        );
+      } catch (cause) {
+        if (!isSilent && !detailsRef.current) {
+          setDetails(null);
+        }
+        setError(
+          cause instanceof Error ? cause.message : 'Final packing unavailable.',
+        );
+        onReadiness(false);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [accessToken, orderId, onReadiness],
+  );
 
   useOrderRealtime(
     orderId,
     useCallback(() => {
-      load();
+      load(true);
       onChanged();
     }, [load, onChanged]),
     accessToken,
@@ -78,6 +91,12 @@ export default function FacilityPackingPanel({
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    if (refreshTrigger !== undefined && refreshTrigger > 0) {
+      load(true);
+    }
+  }, [refreshTrigger, load]);
 
   const submit = async () => {
     if (lock.current || !details) return;
@@ -109,7 +128,8 @@ export default function FacilityPackingPanel({
       setMessage(
         'Final packing confirmed. QC approval can make this order ready for delivery.',
       );
-      await load();
+      onReadiness(true);
+      await load(true);
       onChanged();
     } catch (cause) {
       setError(
@@ -142,10 +162,10 @@ export default function FacilityPackingPanel({
   return (
     <View style={styles.panel}>
       <Text style={styles.heading}>
-        Final packing · cycle {details?.cycleNumber ?? 0}
+        Final packing · Cycle {(details?.cycleNumber ?? 0) + 1}
       </Text>
 
-      {loading ? (
+      {loading && !details ? (
         <ActivityIndicator
           accessibilityLabel="Loading final packing"
           color={colors.primary}
@@ -182,7 +202,7 @@ export default function FacilityPackingPanel({
         <View key={record.id} style={styles.record}>
           <View style={styles.recordHeader}>
             <Text style={styles.recordTitle}>
-              Cycle {record.cycle_number} · Packing confirmed
+              Cycle {record.cycle_number + 1} · Packing confirmed
             </Text>
             <View style={styles.confirmedPill}>
               <Text style={styles.confirmedPillText}>Confirmed</Text>

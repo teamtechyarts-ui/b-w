@@ -104,7 +104,7 @@ export class FcmProvider implements PushProvider {
     environment: Environment,
     firebase: FirebaseAdminAdapter,
   ): Messaging | null {
-    const projectId =
+    const rawProjectId =
       value(environment, 'FIREBASE_PROJECT_ID') ??
       value(environment, 'GOOGLE_CLOUD_PROJECT') ??
       value(environment, 'GCLOUD_PROJECT');
@@ -115,17 +115,24 @@ export class FcmProvider implements PushProvider {
       'GOOGLE_APPLICATION_CREDENTIALS',
     );
 
-    const hasServiceAccountPart = Boolean(clientEmail || privateKey);
+    const validProjectId =
+      rawProjectId && isConfiguredFirebaseCredential(rawProjectId)
+        ? rawProjectId
+        : undefined;
+
+    const hasServiceAccountPart = Boolean(
+      (clientEmail && isConfiguredFirebaseCredential(clientEmail)) ||
+        (privateKey && isConfiguredFirebaseCredential(privateKey)),
+    );
     const hasCompleteServiceAccount = Boolean(
-      projectId &&
+      validProjectId &&
         clientEmail &&
         privateKey &&
-        isConfiguredFirebaseCredential(projectId) &&
         isConfiguredFirebaseCredential(clientEmail) &&
         isConfiguredFirebaseCredential(privateKey),
     );
     const canUseApplicationDefault = Boolean(
-      projectId || applicationCredentials,
+      applicationCredentials || validProjectId,
     );
 
     if (
@@ -145,12 +152,12 @@ export class FcmProvider implements PushProvider {
         firebase.initializeApp({
           credential: hasCompleteServiceAccount
             ? firebase.cert({
-                projectId: projectId!,
+                projectId: validProjectId!,
                 clientEmail: clientEmail!,
                 privateKey: privateKey!.replace(/\\n/g, '\n'),
               })
             : firebase.applicationDefault(),
-          ...(projectId ? { projectId } : {}),
+          ...(validProjectId ? { projectId: validProjectId } : {}),
         });
 
       return firebase.getMessaging(app);
@@ -179,15 +186,43 @@ export class FcmProvider implements PushProvider {
           title: message.title,
           body: message.body,
         },
+        android: {
+          priority: 'high',
+          notification: {
+            sound: 'default',
+            channelId: 'bright_white_notifications',
+            priority: 'high',
+            defaultSound: true,
+            defaultVibrateTimings: true,
+          },
+        },
+        apns: {
+          payload: {
+            aps: {
+              sound: 'default',
+            },
+          },
+        },
         ...(message.data ? { data: message.data } : {}),
       });
+
 
       return { ok: true, providerMessageId };
     } catch (error: unknown) {
       const errorCode = firebaseErrorCode(error);
 
-      if (errorCode && invalidTokenCodes.has(errorCode)) {
-        return { ok: false, reason: 'invalid_token', errorCode };
+      const isInvalidToken =
+        Boolean(errorCode && invalidTokenCodes.has(errorCode)) ||
+        (errorCode === 'messaging/invalid-argument' &&
+          typeof (error as any)?.message === 'string' &&
+          (error as any).message.toLowerCase().includes('token'));
+
+      if (isInvalidToken) {
+        return {
+          ok: false,
+          reason: 'invalid_token',
+          errorCode: errorCode ?? 'messaging/invalid-registration-token',
+        };
       }
 
       if (errorCode && transientCodes.has(errorCode)) {

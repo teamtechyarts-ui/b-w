@@ -2,6 +2,7 @@ import React, {useState} from 'react';
 import {
   ActivityIndicator,
   Modal,
+  RefreshControl,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -22,6 +23,8 @@ type AddressScreenProps = {
   saving: boolean;
   selectedAddressId: string | null;
   selectedAddress: AddressItem | null;
+  refreshing?: boolean;
+  onRefresh?: () => void;
 
   onBack: () => void;
   onSelectAddress: (addressId: string) => void;
@@ -43,6 +46,8 @@ export default function AddressScreen({
   saving,
   selectedAddressId,
   selectedAddress,
+  refreshing = false,
+  onRefresh,
   onBack,
   onSelectAddress,
   onAddAddress,
@@ -141,7 +146,7 @@ export default function AddressScreen({
           <CheckoutProgressBar currentStep="address" />
         ) : null}
 
-        {loading ? (
+        {loading && addresses.length === 0 ? (
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color="#111111" />
             <Text style={styles.loadingText}>Loading addresses...</Text>
@@ -151,7 +156,15 @@ export default function AddressScreen({
             <ScrollView
               style={styles.flex}
               contentContainerStyle={styles.scrollContent}
-              showsVerticalScrollIndicator={false}>
+              showsVerticalScrollIndicator={false}
+              refreshControl={
+                onRefresh ? (
+                  <RefreshControl
+                    refreshing={refreshing}
+                    onRefresh={onRefresh}
+                  />
+                ) : undefined
+              }>
               {!manageOnly ? (
                 <View style={styles.checkoutStep}>
                   <Text style={styles.checkoutStepNumber}>1</Text>

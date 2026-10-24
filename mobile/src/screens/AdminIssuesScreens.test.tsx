@@ -453,5 +453,75 @@ describe('AdminIssuesScreens', () => {
       );
     });
   });
+
+  test('direct refund form enforces separate amount and notes inputs, validates field errors, and submits correctly', async () => {
+    const view = await render(
+      <AdminIssueDetailScreen
+        accessToken="token"
+        orderId="o1"
+        onBack={jest.fn()}
+        onOrder={jest.fn()}
+      />,
+    );
+    await waitFor(() =>
+      expect(view.getByText('Available to refund: ₹90.00')).toBeTruthy(),
+    );
+
+    // 1. Missing amount
+    await fireEvent.press(view.getByText('Create Refund Request'));
+    await waitFor(() => {
+      expect(view.getByText('Enter a valid positive refund amount.')).toBeTruthy();
+    });
+
+    // 2. Amount exceeds available balance
+    await fireEvent.changeText(
+      view.getByLabelText('Refund amount for p1'),
+      '150',
+    );
+    await fireEvent.press(view.getByText('Create Refund Request'));
+    await waitFor(() => {
+      expect(view.getByText('Refund amount cannot exceed available ₹90.00.')).toBeTruthy();
+    });
+
+    // 3. Valid amount but missing notes
+    await fireEvent.changeText(
+      view.getByLabelText('Refund amount for p1'),
+      '25',
+    );
+    await fireEvent.press(view.getByText('Create Refund Request'));
+    await waitFor(() => {
+      expect(
+        view.getByText('Please enter decision notes explaining this refund (minimum 3 characters).'),
+      ).toBeTruthy();
+    });
+
+    // 4. Notes too short (< 3 characters)
+    await fireEvent.changeText(
+      view.getByLabelText('Refund decision notes for p1'),
+      'ok',
+    );
+    await fireEvent.press(view.getByText('Create Refund Request'));
+    await waitFor(() => {
+      expect(
+        view.getByText('Please enter decision notes explaining this refund (minimum 3 characters).'),
+      ).toBeTruthy();
+    });
+
+    // 5. Valid amount and valid notes
+    await fireEvent.changeText(
+      view.getByLabelText('Refund decision notes for p1'),
+      'Direct reimbursement approved by manager',
+    );
+    await fireEvent.press(view.getByText('Create Refund Request'));
+    await waitFor(() => {
+      expect(requestAdminRefund).toHaveBeenCalledWith(
+        'token',
+        'o1',
+        'p1',
+        25,
+        'Direct reimbursement approved by manager',
+      );
+    });
+  });
 });
 

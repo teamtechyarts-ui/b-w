@@ -1,3 +1,4 @@
+import { ServiceUnavailableException } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { hashDriverPin } from './driver-pin.util';
 
@@ -339,6 +340,294 @@ describe('AuthService provisioning', () => {
       const resEmp: any = await fEmp.service.staffSignIn('+919876543210', '654321');
       expect(resEmp.session).toEqual(fEmp.session);
       expect(resEmp.facility?.name).toBe('Central Hub');
+    });
+  });
+
+  describe('signUp Registration Flow', () => {
+    it('creates unconfirmed user via admin.createUser and issues OTP for valid new credentials', async () => {
+      const emailVerification = {
+        issueAndSendVerificationOtp: jest.fn().mockResolvedValue(undefined),
+      };
+      const createUser = jest.fn().mockResolvedValue({
+        data: { user: { id: 'new-user-123', email: 'new@example.com' } },
+        error: null,
+      });
+
+      const db = {
+        auth: {
+          admin: {
+            createUser,
+            getUserById: jest.fn(),
+          },
+        },
+        from: jest.fn((table: string) => {
+          const query: any = {
+            select: jest.fn(() => query),
+            eq: jest.fn(() => query),
+            maybeSingle: jest.fn().mockResolvedValue({ data: null, error: null }),
+          };
+          return query;
+        }),
+      };
+
+      const service = new AuthService(
+        { admin: db, createAuthClient: jest.fn() } as any,
+        undefined,
+        emailVerification as any,
+      );
+
+      const result = await service.signUp('new@example.com', 'SecurePass123!', 'New User', '+919876543219');
+
+      expect(db.from).toHaveBeenCalledWith('profiles');
+      expect(createUser).toHaveBeenCalledWith({
+        email: 'new@example.com',
+        password: 'SecurePass123!',
+        email_confirm: false,
+        user_metadata: {
+          full_name: 'New User',
+          phone: '+919876543219',
+        },
+      });
+      expect(emailVerification.issueAndSendVerificationOtp).toHaveBeenCalledWith(
+        'new-user-123',
+        'new@example.com',
+      );
+      expect(result).toEqual({
+        session: null,
+        user: null,
+        profile: null,
+        requiresEmailConfirmation: true,
+        message: 'Account created successfully. A verification code has been sent to your email.',
+      });
+    });
+
+    it('rejects signup with 409 Conflict if phone number already belongs to another user', async () => {
+      const createUser = jest.fn();
+      const db = {
+        auth: {
+          admin: {
+            createUser,
+            getUserById: jest.fn().mockResolvedValue({
+              data: { user: { id: 'other-user', email: 'other@example.com', email_confirmed_at: '2026-01-01' } },
+            }),
+          },
+        },
+        from: jest.fn((table: string) => {
+          const query: any = {
+            select: jest.fn(() => query),
+            eq: jest.fn(() => query),
+            maybeSingle: jest.fn().mockResolvedValue({ data: { id: 'other-user', phone: '+919876543210' }, error: null }),
+          };
+          return query;
+        }),
+      };
+
+      const service = new AuthService({ admin: db, createAuthClient: jest.fn() } as any);
+
+      await expect(
+        service.signUp('test@example.com', 'SecurePass123!', 'Alice', '+919876543210'),
+      ).rejects.toThrow('An account with this phone number already exists.');
+
+      expect(createUser).not.toHaveBeenCalled();
+    });
+
+    it('handles 422 duplicate email for unconfirmed user by resending OTP without exposing user UUID', async () => {
+      const emailVerification = {
+        issueAndSendVerificationOtp: jest.fn().mockResolvedValue(undefined),
+      };
+      const createUser = jest.fn().mockResolvedValue({
+        data: null,
+        error: {
+          status: 422,
+          message: 'A user with this email address has already been registered',
+        },
+      });
+      const generateLink = jest.fn().mockResolvedValue({
+        data: {
+          user: {
+            id: 'unconfirmed-user-456',
+            email: 'unconfirmed@example.com',
+            email_confirmed_at: null,
+          },
+        },
+        error: null,
+      });
+
+      const db = {
+        auth: {
+          admin: {
+            createUser,
+            generateLink,
+            getUserById: jest.fn(),
+          },
+        },
+        from: jest.fn(() => ({
+          select: jest.fn().mockReturnThis(),
+          eq: jest.fn().mockReturnThis(),
+          maybeSingle: jest.fn().mockResolvedValue({ data: null }),
+        })),
+      };
+
+      const service = new AuthService(
+        { admin: db, createAuthClient: jest.fn() } as any,
+        undefined,
+        emailVerification as any,
+      );
+
+      const result = await service.signUp(
+        'unconfirmed@example.com',
+        'SecurePass123!',
+        'Pending User',
+      );
+
+      expect(emailVerification.issueAndSendVerificationOtp).toHaveBeenCalledWith(
+        'unconfirmed-user-456',
+        'unconfirmed@example.com',
+      );
+      // Ensures user UUID is not exposed
+      expect(result.user).toBeNull();
+      expect(result.requiresEmailConfirmation).toBe(true);
+    });
+
+    it('handles 422 duplicate email for confirmed user by throwing 409 Conflict', async () => {
+      const createUser = jest.fn().mockResolvedValue({
+        data: null,
+        error: {
+          status: 422,
+          message: 'A user with this email address has already been registered',
+        },
+      });
+      const generateLink = jest.fn().mockResolvedValue({
+        data: {
+          user: {
+            id: 'confirmed-user-789',
+            email: 'confirmed@example.com',
+            email_confirmed_at: '2026-01-01T00:00:00.000Z',
+          },
+        },
+        error: null,
+      });
+
+      const db = {
+        auth: {
+          admin: {
+            createUser,
+            generateLink,
+          },
+        },
+        from: jest.fn(() => ({
+          select: jest.fn().mockReturnThis(),
+          eq: jest.fn().mockReturnThis(),
+          maybeSingle: jest.fn().mockResolvedValue({ data: null }),
+        })),
+      };
+
+      const service = new AuthService({ admin: db, createAuthClient: jest.fn() } as any);
+
+      await expect(
+        service.signUp('confirmed@example.com', 'SecurePass123!', 'Confirmed User'),
+      ).rejects.toThrow('An account with this email already exists. Please sign in instead.');
+    });
+
+    it('handles 500 database error from trigger and maps to 409 if phone exists in profiles', async () => {
+      const createUser = jest.fn().mockResolvedValue({
+        data: null,
+        error: {
+          status: 500,
+          message: 'Database error creating new user',
+        },
+      });
+
+      let checkCount = 0;
+      const db = {
+        auth: {
+          admin: {
+            createUser,
+          },
+        },
+        from: jest.fn(() => ({
+          select: jest.fn().mockReturnThis(),
+          eq: jest.fn().mockReturnThis(),
+          maybeSingle: jest.fn().mockImplementation(() => {
+            checkCount++;
+            // First check passes (e.g. race condition), second check finds the profile
+            if (checkCount === 1) return Promise.resolve({ data: null });
+            return Promise.resolve({ data: { id: 'racing-user', phone: '+919876543210' } });
+          }),
+        })),
+      };
+
+      const service = new AuthService({ admin: db, createAuthClient: jest.fn() } as any);
+
+      await expect(
+        service.signUp('race@example.com', 'SecurePass123!', 'Race User', '+919876543210'),
+      ).rejects.toThrow('An account with this phone number already exists.');
+    });
+
+    it('handles generic 500 database error safely by returning 400 Bad Request without leaking internal details', async () => {
+      const createUser = jest.fn().mockResolvedValue({
+        data: null,
+        error: {
+          status: 500,
+          message: 'Database error creating new user',
+        },
+      });
+
+      const db = {
+        auth: {
+          admin: {
+            createUser,
+          },
+        },
+        from: jest.fn(() => ({
+          select: jest.fn().mockReturnThis(),
+          eq: jest.fn().mockReturnThis(),
+          maybeSingle: jest.fn().mockResolvedValue({ data: null }),
+        })),
+      };
+
+      const service = new AuthService({ admin: db, createAuthClient: jest.fn() } as any);
+
+      await expect(
+        service.signUp('test@example.com', 'SecurePass123!', 'Test User'),
+      ).rejects.toThrow('Unable to create your account right now. Please verify your details or try again.');
+    });
+
+    it('propagates 503 ServiceUnavailableException if email verification delivery fails without deleting the user', async () => {
+      const createUser = jest.fn().mockResolvedValue({
+        data: { user: { id: 'created-user-123', email: 'failure@example.com' } },
+        error: null,
+      });
+      const db = {
+        auth: {
+          admin: {
+            createUser,
+            deleteUser: jest.fn(),
+          },
+        },
+        from: jest.fn(() => ({
+          select: jest.fn().mockReturnThis(),
+          eq: jest.fn().mockReturnThis(),
+          maybeSingle: jest.fn().mockResolvedValue({ data: null }),
+        })),
+      };
+      const emailVerification = {
+        issueAndSendVerificationOtp: jest.fn().mockRejectedValue(
+          new ServiceUnavailableException('Unable to deliver email verification code right now. Please try again later.'),
+        ),
+      };
+
+      const service = new AuthService(
+        { admin: db, createAuthClient: jest.fn() } as any,
+        undefined,
+        emailVerification as any,
+      );
+
+      await expect(
+        service.signUp('failure@example.com', 'SecurePass123!', 'Fail User'),
+      ).rejects.toThrow(ServiceUnavailableException);
+
+      expect(db.auth.admin.deleteUser).not.toHaveBeenCalled();
     });
   });
 });

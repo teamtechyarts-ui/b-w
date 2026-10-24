@@ -76,6 +76,92 @@ export class AdminAssignmentsService {
     return data;
   }
 
+  private async notifyAssignmentChange(orderId: string, driverId: string, action: string) {
+    try {
+      if (typeof this.supabase?.broadcastEvent !== 'function' || !orderId || typeof this.db?.from !== 'function') return;
+      const { data: ord } = await this.db.from('orders')
+        .select('id,order_number,current_status,facility_id,customer_id,customers(profile_id)')
+        .eq('id', orderId)
+        .maybeSingle();
+
+      const payload = {
+        eventType: 'ASSIGNMENT_UPDATED',
+        entityId: orderId,
+        orderId,
+        orderNumber: ord?.order_number,
+        status: ord?.current_status,
+        driverId,
+        action,
+        timestamp: new Date().toISOString(),
+      };
+
+      const broadcasts: Promise<any>[] = [
+        this.supabase.broadcastEvent('orders:all', 'ORDER_STATUS_CHANGED', payload),
+        this.supabase.broadcastEvent(`order:${orderId}`, 'ORDER_STATUS_CHANGED', payload),
+        this.supabase.broadcastEvent('admin:operations', 'ORDER_STATUS_CHANGED', payload),
+        this.supabase.broadcastEvent(`driver:${driverId}`, 'ASSIGNMENT_UPDATED', payload),
+        this.supabase.broadcastEvent('driver:available', 'JOB_CLAIMED', payload),
+        this.supabase.broadcastEvent('jobs:drivers', 'JOB_CLAIMED', payload),
+        this.supabase.broadcastEvent('facility:all', 'ASSIGNMENT_UPDATED', payload),
+      ];
+
+      if (ord?.facility_id) {
+        broadcasts.push(
+          this.supabase.broadcastEvent(`facility:${ord.facility_id}`, 'ASSIGNMENT_UPDATED', payload),
+        );
+      }
+
+      if (ord?.customer_id) {
+        broadcasts.push(
+          this.supabase.broadcastEvent(`customer:${ord.customer_id}`, 'ORDER_STATUS_CHANGED', payload),
+        );
+      }
+      const profileId = (ord as any)?.customers?.profile_id;
+      if (profileId && profileId !== ord?.customer_id) {
+        broadcasts.push(
+          this.supabase.broadcastEvent(`customer:${profileId}`, 'ORDER_STATUS_CHANGED', payload),
+        );
+      }
+
+      await Promise.allSettled(broadcasts);
+
+      // 1. Notify Customer about driver assignment
+      const customerProfileId = (ord as any)?.customers?.profile_id || ord?.customer_id;
+      if (customerProfileId && typeof (this.supabase as any)?.createAndBroadcastNotification === 'function') {
+        await (this.supabase as any).createAndBroadcastNotification({
+          profileId: customerProfileId,
+          orderId,
+          notificationType: 'driver_assigned',
+          title: 'Driver Assigned',
+          body: `A driver has been assigned for ${action || 'pickup'} of your order #${ord?.order_number || ''}.`,
+          data: { orderId, orderNumber: ord?.order_number, driverId, status: ord?.current_status, action },
+          channels: [`customer:${customerProfileId}`, `order:${orderId}`],
+        });
+      }
+
+      // 2. Notify Driver about new job assignment
+      if (driverId && typeof (this.supabase as any)?.createAndBroadcastNotification === 'function') {
+        let driverProfileId = driverId;
+        try {
+          const { data: drv } = await this.db.from('drivers').select('profile_id').eq('id', driverId).maybeSingle();
+          if (drv?.profile_id) driverProfileId = drv.profile_id;
+        } catch {}
+
+        await (this.supabase as any).createAndBroadcastNotification({
+          profileId: driverProfileId,
+          orderId,
+          notificationType: 'driver_job_assigned',
+          title: 'New Job Assigned',
+          body: `You have been assigned order #${ord?.order_number || ''} for ${action || 'pickup'}.`,
+          data: { orderId, orderNumber: ord?.order_number, driverId, action },
+          channels: [`driver:${driverProfileId}`, `driver:${driverId}`],
+        });
+      }
+    } catch {
+      // Safe catch
+    }
+  }
+
   async assign(actorId: string, orderId: string, driverId: string, type: string) {
     if (!driverId || !['pickup', 'delivery'].includes(type)) throw new BadRequestException('Driver and pickup or delivery type required');
     let data: any;
@@ -92,7 +178,7 @@ export class AdminAssignmentsService {
       });
       data = coreRes.data;
       error = coreRes.error;
-      if (!error && data?.assignment?.id) {
+      if (!error && data?.assignment?.id && typeof this.db?.from === 'function') {
         await this.db.from('admin_assignment_audit').insert({
           actor_profile_id: actorId,
           order_id: orderId,
@@ -103,32 +189,43 @@ export class AdminAssignmentsService {
     } else {
       error = rpcRes.error;
     }
-    return this.result(data, error, 'assign');
+    const result = this.result(data, error, 'assign');
+    await this.notifyAssignmentChange(orderId, driverId, 'assign');
+    return result;
   }
 
   async reassign(actorId: string, assignmentId: string, driverId: string) {
     if (!driverId) throw new BadRequestException('Replacement Driver required');
     let data: any;
     let error: any;
+    let targetOrderId = '';
 
     const rpcRes = await this.db.rpc('admin_reassign_driver_atomic', {
       p_admin_profile_id: actorId, p_assignment_id: assignmentId, p_new_driver_id: driverId,
     });
     if (!rpcRes.error) {
       data = rpcRes.data;
+      targetOrderId = data?.assignment?.order_id || data?.orderId || '';
     } else if (rpcRes.error.code === 'PGRST202') {
-      const { data: currentAss, error: assErr } = await this.db.from('driver_assignments')
-        .select('id,order_id,assignment_type').eq('id', assignmentId).maybeSingle();
-      if (assErr || !currentAss) throw new NotFoundException('Assignment not found');
+      let currentAss: any = null;
+      if (typeof this.db?.from === 'function') {
+        const assRes = await this.db.from('driver_assignments')
+          .select('id,order_id,assignment_type').eq('id', assignmentId).maybeSingle();
+        currentAss = assRes.data;
+      }
+      if (!currentAss) throw new NotFoundException('Assignment not found');
+      targetOrderId = currentAss.order_id;
 
-      await this.db.from('driver_assignments').update({ status: 'reassignment_required' }).eq('id', assignmentId);
+      if (typeof this.db?.from === 'function') {
+        await this.db.from('driver_assignments').update({ status: 'reassignment_required' }).eq('id', assignmentId);
+      }
 
       const coreRes = await this.db.rpc('create_driver_assignment_atomic', {
         p_order_id: currentAss.order_id, p_driver_id: driverId, p_assignment_type: currentAss.assignment_type, p_assignment_score: null,
       });
       data = coreRes.data;
       error = coreRes.error;
-      if (!error && data?.assignment?.id) {
+      if (!error && data?.assignment?.id && typeof this.db?.from === 'function') {
         await this.db.from('admin_assignment_audit').insert({
           actor_profile_id: actorId,
           order_id: currentAss.order_id,
@@ -140,6 +237,8 @@ export class AdminAssignmentsService {
     } else {
       error = rpcRes.error;
     }
-    return this.result(data, error, 'reassign');
+    const result = this.result(data, error, 'reassign');
+    await this.notifyAssignmentChange(targetOrderId || result?.assignment?.order_id, driverId, 'reassign');
+    return result;
   }
 }
