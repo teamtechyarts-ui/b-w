@@ -641,7 +641,7 @@ export class DeliveryService {
             title: 'Order Delivered',
             body: `Your order #${orderData?.order_number || ''} has been delivered. Thank you for choosing Bright & White!`,
             data: { orderId, orderNumber: orderData?.order_number, status: 'delivered' },
-            channels: [`customer:${targetProfileId}`, `order:${orderId}`],
+            channels: [`customer:${targetProfileId}`, `user:${targetProfileId}`],
           });
         }
       }

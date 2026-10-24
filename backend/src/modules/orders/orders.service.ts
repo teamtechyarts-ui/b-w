@@ -538,7 +538,7 @@ export class OrdersService {
           title: "Order Confirmed",
           body: `Your order #${orderResult.order_number} has been placed and confirmed.`,
           data: { orderId, orderNumber: orderResult.order_number, status: "confirmed" },
-          channels: [`customer:${profileId}`, `customer:${customerId}`, `order:${orderId}`],
+          channels: [`customer:${profileId}`, `customer:${customerId}`, `user:${profileId}`],
         });
       }
     }
@@ -625,7 +625,7 @@ export class OrdersService {
             title: 'Order Cancelled',
             body: `Your order #${orderData?.order_number || ''} was cancelled.`,
             data: { orderId, orderNumber: orderData?.order_number, status: 'cancelled', reason },
-            channels: [`customer:${profileId}`, `customer:${orderData?.customer_id}`, `order:${orderId}`].filter(Boolean),
+            channels: [`customer:${profileId}`, `customer:${orderData?.customer_id}`, `user:${profileId}`].filter(Boolean),
           });
         }
       }

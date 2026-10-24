@@ -249,6 +249,22 @@ export class AdminIssuesService {
         };
         await this.supabase.broadcastEvent('admin:operations', 'REFUND_APPROVED', payload);
         await this.supabase.broadcastEvent(`order:${orderId}`, 'REFUND_APPROVED', payload);
+
+        if (typeof (this.supabase as any)?.createAndBroadcastNotification === 'function') {
+          const { data: ord } = await this.db.from('orders').select('customer_id,customers(profile_id)').eq('id', orderId).maybeSingle();
+          const customerProfileId = (ord as any)?.customers?.profile_id || ord?.customer_id;
+          if (customerProfileId) {
+            await (this.supabase as any).createAndBroadcastNotification({
+              profileId: customerProfileId,
+              orderId,
+              notificationType: 'refund_processed',
+              title: 'Refund Approved',
+              body: `A refund of ₹${newRefund.amount} has been approved for your order.`,
+              data: { orderId, refundId: newRefund.id, amount: newRefund.amount },
+              channels: [`customer:${customerProfileId}`, `user:${customerProfileId}`],
+            });
+          }
+        }
       }
     } catch (bErr) {
       console.warn('[ENSURE_CLAIM_REFUND_BROADCAST_WARNING]', bErr);
@@ -297,6 +313,7 @@ export class AdminIssuesService {
 
     if (!result.error) {
       await checkAndTriggerRefund();
+      await this.notifyCustomerClaimDecision(claim, claimId, status);
       return result.data;
     }
 
@@ -355,44 +372,53 @@ export class AdminIssuesService {
       }
 
       await checkAndTriggerRefund();
-
-      try {
-        let customerProfileId: string | null = null;
-        if (claim.customer_id) {
-          const {data: cust} = await this.db.from('customers').select('profile_id').eq('id', claim.customer_id).maybeSingle();
-          customerProfileId = cust?.profile_id || null;
-        }
-        if (customerProfileId) {
-          if (typeof (this.supabase as any)?.createAndBroadcastNotification === 'function') {
-            await (this.supabase as any).createAndBroadcastNotification({
-              profileId: customerProfileId,
-              orderId: claim.order_id,
-              notificationType: `claim.${status}`,
-              title: 'Claim update',
-              body: `Your claim is ${status.replace(/_/g, ' ')}`,
-              data: {orderId: claim.order_id, claimId},
-              channels: [`customer:${customerProfileId}`, `order:${claim.order_id}`, 'admin:operations'],
-            });
-          } else {
-            await this.db.from('notifications').insert({
-              profile_id: customerProfileId,
-              order_id: claim.order_id,
-              notification_type: `claim.${status}`,
-              title: 'Claim update',
-              body: `Your claim is ${status.replace(/_/g, ' ')}`,
-              data: {orderId: claim.order_id, claimId},
-              status: 'queued',
-            });
-          }
-        }
-      } catch (notifErr) {
-        console.warn('[ADMIN_CLAIM_NOTIF_WARNING]', notifErr);
-      }
+      await this.notifyCustomerClaimDecision(claim, claimId, status);
 
       return updatedClaim;
     }
 
     return this.result(result.data, result.error, 'Unable to update claim');
+  }
+
+  private async notifyCustomerClaimDecision(claim: any, claimId: string, status: string) {
+    try {
+      let customerProfileId: string | null = null;
+      if (claim.customer_id) {
+        const {data: cust} = await this.db.from('customers').select('profile_id').eq('id', claim.customer_id).maybeSingle();
+        customerProfileId = cust?.profile_id || null;
+      }
+      if (customerProfileId) {
+        if (typeof (this.supabase as any)?.createAndBroadcastNotification === 'function') {
+          await (this.supabase as any).createAndBroadcastNotification({
+            profileId: customerProfileId,
+            orderId: claim.order_id,
+            notificationType: `claim.${status}`,
+            title: 'Claim update',
+            body: `Your claim is ${status.replace(/_/g, ' ')}`,
+            data: {orderId: claim.order_id, claimId},
+            channels: [`customer:${customerProfileId}`, `user:${customerProfileId}`],
+          });
+        } else {
+          await this.db.from('notifications').insert({
+            profile_id: customerProfileId,
+            order_id: claim.order_id,
+            notification_type: `claim.${status}`,
+            title: 'Claim update',
+            body: `Your claim is ${status.replace(/_/g, ' ')}`,
+            data: {orderId: claim.order_id, claimId},
+            status: 'queued',
+          });
+        }
+        await this.supabase.broadcastEvent(`customer:${customerProfileId}`, 'CLAIM_UPDATED', {
+          orderId: claim.order_id,
+          claimId,
+          status,
+          timestamp: new Date().toISOString(),
+        });
+      }
+    } catch (notifErr) {
+      console.warn('[ADMIN_CLAIM_NOTIF_WARNING]', notifErr);
+    }
   }
 
   private async paymentForOrder(orderId: string, paymentId: string) {

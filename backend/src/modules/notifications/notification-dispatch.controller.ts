@@ -1,5 +1,6 @@
 import {
   Controller,
+  Get,
   Param,
   ParseUUIDPipe,
   Post,
@@ -15,6 +16,12 @@ import { NotificationDispatcher } from './notification-dispatcher.service';
 @Roles('admin')
 export class NotificationDispatchController {
   constructor(private readonly dispatcher: NotificationDispatcher) {}
+
+  @Get('overview')
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
+  overview() {
+    return this.dispatcher.getDiagnosticOverview();
+  }
 
   @Post(':id/dispatch')
   @Throttle({ default: { limit: 20, ttl: 60000 } })

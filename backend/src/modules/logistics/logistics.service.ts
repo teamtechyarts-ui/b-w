@@ -3,6 +3,7 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from "@nestjs/common";
 
@@ -32,6 +33,8 @@ const LIVE_LOCATION_STATUSES = new Set([
 
 @Injectable()
 export class LogisticsService {
+  private readonly logger = new Logger(LogisticsService.name);
+
   constructor(
     private readonly supabase: SupabaseService,
     private readonly maps: MapsService,
@@ -445,6 +448,47 @@ export class LogisticsService {
       );
     }
 
+    try {
+      const { data: ord } = await this.db()
+        .from("orders")
+        .select("id,order_number,customer_id,customers(profile_id)")
+        .eq("id", orderId)
+        .maybeSingle();
+
+      const customerProfileId = (ord as any)?.customers?.profile_id || ord?.customer_id;
+      if (customerProfileId && typeof (this.supabase as any)?.createAndBroadcastNotification === "function") {
+        await (this.supabase as any).createAndBroadcastNotification({
+          profileId: customerProfileId,
+          orderId,
+          notificationType: "driver_assigned",
+          title: "Driver Assigned",
+          body: `A driver has been assigned for ${assignmentType} of your order #${ord?.order_number || ""}.`,
+          data: { orderId, orderNumber: ord?.order_number, driverId: best.driver_id, assignmentType, status: "assigned" },
+          channels: [`customer:${customerProfileId}`, `order:${orderId}`],
+        });
+      }
+
+      if (best.driver_id && typeof (this.supabase as any)?.createAndBroadcastNotification === "function") {
+        let driverProfileId = best.driver_id;
+        try {
+          const { data: drv } = await this.db().from("drivers").select("profile_id").eq("id", best.driver_id).maybeSingle();
+          if (drv?.profile_id) driverProfileId = drv.profile_id;
+        } catch {}
+
+        await (this.supabase as any).createAndBroadcastNotification({
+          profileId: driverProfileId,
+          orderId,
+          notificationType: "driver_job_assigned",
+          title: "New Job Assigned",
+          body: `You have been assigned order #${ord?.order_number || ""} for ${assignmentType}.`,
+          data: { orderId, orderNumber: ord?.order_number, driverId: best.driver_id, assignmentType, assignmentId: committed.assignment.id },
+          channels: [`driver:${driverProfileId}`, `driver:${best.driver_id}`],
+        });
+      }
+    } catch {
+      // Safe notification catch
+    }
+
     return {
       assignment: committed.assignment,
       scoring: best,
@@ -487,7 +531,7 @@ export class LogisticsService {
       if (typeof this.supabase?.broadcastEvent === "function" && data?.orderId) {
         const { data: ord } = await this.db()
           .from("orders")
-          .select("customer_id,facility_id,customers(profile_id)")
+          .select("order_number,customer_id,facility_id,customers(profile_id)")
           .eq("id", data.orderId)
           .maybeSingle();
 
@@ -511,13 +555,40 @@ export class LogisticsService {
             this.supabase.broadcastEvent(`customer:${ord.customer_id}`, "ORDER_STATUS_CHANGED", payload),
           );
         }
-        const profileId = (ord as any)?.customers?.profile_id;
-        if (profileId && profileId !== ord?.customer_id) {
+        const custProfileId = (ord as any)?.customers?.profile_id;
+        if (custProfileId && custProfileId !== ord?.customer_id) {
           broadcasts.push(
-            this.supabase.broadcastEvent(`customer:${profileId}`, "ORDER_STATUS_CHANGED", payload),
+            this.supabase.broadcastEvent(`customer:${custProfileId}`, "ORDER_STATUS_CHANGED", payload),
           );
         }
         await Promise.allSettled(broadcasts);
+
+        const customerProfileId = (ord as any)?.customers?.profile_id || ord?.customer_id;
+        if (accept && customerProfileId && typeof (this.supabase as any)?.createAndBroadcastNotification === "function") {
+          // 1. Customer-facing notification
+          await (this.supabase as any).createAndBroadcastNotification({
+            profileId: customerProfileId,
+            orderId: data.orderId,
+            notificationType: "driver_accepted",
+            title: "Driver Confirmed",
+            body: "Your driver has accepted the order and is preparing for transit.",
+            data: { orderId: data.orderId, driverId, status: data.orderStatus },
+            channels: [`customer:${customerProfileId}`, `user:${customerProfileId}`],
+          });
+        }
+
+        // 2. Driver-facing distinct confirmation
+        if (accept && profileId && typeof (this.supabase as any)?.createAndBroadcastNotification === "function") {
+          await (this.supabase as any).createAndBroadcastNotification({
+            profileId: profileId,
+            orderId: data.orderId,
+            notificationType: "driver_job_confirmed",
+            title: "Job Accepted",
+            body: `You accepted Order #${(ord as any)?.order_number || ''}. Proceed to customer pickup location.`,
+            data: { orderId: data.orderId, driverId, status: data.orderStatus },
+            channels: [`driver:${profileId}`, `user:${profileId}`],
+          });
+        }
       }
     } catch {
       // Safe catch
@@ -623,7 +694,7 @@ export class LogisticsService {
       if (typeof this.supabase?.broadcastEvent === "function" && data?.orderId) {
         const { data: ord } = await this.db()
           .from("orders")
-          .select("customer_id,facility_id,customers(profile_id)")
+          .select("customer_id,facility_id,order_number,customers(profile_id)")
           .eq("id", data.orderId)
           .maybeSingle();
 
@@ -660,6 +731,22 @@ export class LogisticsService {
           );
         }
         await Promise.allSettled(broadcasts);
+
+        const customerProfileId = (ord as any)?.customers?.profile_id || ord?.customer_id;
+        if (customerProfileId && typeof (this.supabase as any)?.createAndBroadcastNotification === "function") {
+          const isDelivery = assignment.assignment_type === "delivery";
+          await (this.supabase as any).createAndBroadcastNotification({
+            profileId: customerProfileId,
+            orderId: data.orderId,
+            notificationType: isDelivery ? "out_for_delivery" : "driver_en_route",
+            title: isDelivery ? "Out For Delivery" : "Driver On The Way",
+            body: isDelivery
+              ? `Your order #${ord?.order_number || ""} is out for delivery and will arrive shortly.`
+              : `Your driver is en route to pick up your garments for order #${ord?.order_number || ""}.`,
+            data: { orderId: data.orderId, driverId, status: data.orderStatus, assignmentType: assignment.assignment_type },
+            channels: [`customer:${customerProfileId}`, `order:${data.orderId}`],
+          });
+        }
       }
     } catch {
       // Safe catch
@@ -697,25 +784,165 @@ export class LogisticsService {
       throw new ConflictException("Cannot mark arrival on an inactive assignment");
     }
 
-    if (assignment.status === "arrived") {
-      const { data: ord } = await this.db()
-        .from("orders")
-        .select("id,current_status")
-        .eq("id", assignment.order_id)
+    const { data: order, error: orderError } = await this.db()
+      .from("orders")
+      .select("id,current_status,facility_id,customer_id,order_number,customers(profile_id)")
+      .eq("id", assignment.order_id)
+      .maybeSingle();
+
+    if (orderError || !order) {
+      throw new NotFoundException("Order not found");
+    }
+
+    this.logger.log(
+      `[LOGISTICS_ARRIVE_DIAGNOSTIC] arrive request: assignmentId=${assignmentId}, driverId=${driverId}, assignmentType=${assignment.assignment_type}, assignmentStatus=${assignment.status}, orderId=${order.id}, orderStatus=${order.current_status}, facilityId=${order.facility_id}`
+    );
+
+    // 1. Pickup assignment arrival at facility
+    if (
+      assignment.assignment_type === "pickup" &&
+      (order.current_status === "in_transit_to_facility" || order.current_status === "picked_up")
+    ) {
+      const { data: existingArrivals } = await this.db()
+        .from("driver_navigation_events")
+        .select("id,created_at")
+        .eq("order_id", assignment.order_id)
+        .eq("driver_id", driverId)
+        .eq("event_type", "arrived_at_facility")
+        .order("created_at", { ascending: false })
+        .limit(1);
+
+      const { data: driverProfile } = await this.db()
+        .from("drivers")
+        .select("id,profile_id,profiles(full_name)")
+        .eq("id", driverId)
         .maybeSingle();
+      const driverName = (driverProfile as any)?.profiles?.full_name || "Assigned Driver";
+
+      const existingArrival = existingArrivals && existingArrivals.length > 0 ? existingArrivals[0] : null;
+      const arrivedAtTimestamp = existingArrival ? existingArrival.created_at : new Date().toISOString();
+
+      if (!existingArrival) {
+        await this.db()
+          .from("driver_navigation_events")
+          .insert({
+            driver_id: driverId,
+            order_id: assignment.order_id,
+            event_type: "arrived_at_facility",
+          });
+      }
+
+      const payload = {
+        eventType: "DRIVER_ARRIVED_AT_FACILITY",
+        entityId: assignment.order_id,
+        orderId: assignment.order_id,
+        orderNumber: order.order_number,
+        status: "in_transit_to_facility",
+        driverArrivedAtFacility: true,
+        facilityId: order.facility_id,
+        driverId,
+        driverName,
+        assignmentType: "pickup",
+        assignmentStatus: "arrived",
+        timestamp: arrivedAtTimestamp,
+      };
+
+      if (typeof this.supabase?.broadcastEvent === "function") {
+        const broadcasts: Promise<any>[] = [
+          this.supabase.broadcastEvent("facility:all", "DRIVER_ARRIVED_AT_FACILITY", payload),
+          this.supabase.broadcastEvent("orders:all", "DRIVER_ARRIVED_AT_FACILITY", payload),
+          this.supabase.broadcastEvent(`driver:${driverId}`, "ASSIGNMENT_UPDATED", payload),
+          this.supabase.broadcastEvent(`order:${assignment.order_id}`, "DRIVER_ARRIVED_AT_FACILITY", payload),
+          this.supabase.broadcastEvent("admin:operations", "DRIVER_ARRIVED_AT_FACILITY", payload),
+        ];
+        if (profileId && profileId !== driverId) {
+          broadcasts.push(
+            this.supabase.broadcastEvent(`driver:${profileId}`, "ASSIGNMENT_UPDATED", payload),
+          );
+        }
+        if (order.facility_id) {
+          broadcasts.push(
+            this.supabase.broadcastEvent(`facility:${order.facility_id}`, "DRIVER_ARRIVED_AT_FACILITY", payload),
+          );
+        }
+        await Promise.allSettled(broadcasts);
+      }
+
+      // Create and dispatch notification for facility staff
+      if (typeof (this.supabase as any)?.createAndBroadcastNotification === "function") {
+        const notifTitle = "Driver Arrived at Facility";
+        const notifBody = `Driver ${driverName} arrived with Order #${order.order_number || ''}. Ready for intake.`;
+
+        let staffNotified = false;
+        if (order.facility_id) {
+          const { data: staffList } = await this.db()
+            .from("facility_employees")
+            .select("profile_id")
+            .eq("facility_id", order.facility_id)
+            .eq("is_active", true);
+
+          for (const staff of staffList ?? []) {
+            if (staff.profile_id) {
+              staffNotified = true;
+              await (this.supabase as any).createAndBroadcastNotification({
+                profileId: staff.profile_id,
+                orderId: assignment.order_id,
+                notificationType: "driver_arrived_at_facility",
+                title: notifTitle,
+                body: notifBody,
+                data: payload,
+                channels: [`facility:${order.facility_id}`, `user:${staff.profile_id}`],
+              });
+            }
+          }
+        }
+
+        if (!staffNotified) {
+          await this.supabase.broadcastEvent("facility:all", "NOTIFICATION_CREATED", {
+            eventType: "NOTIFICATION_CREATED",
+            entityId: `arrival-${assignment.order_id}`,
+            orderId: assignment.order_id,
+            notification: {
+              id: `notif-arrival-${Date.now()}`,
+              title: notifTitle,
+              body: notifBody,
+              order_id: assignment.order_id,
+              data: payload,
+            },
+            data: payload,
+            timestamp: arrivedAtTimestamp,
+          });
+        }
+
+        // Driver-facing facility arrival confirmation
+        if (profileId && typeof (this.supabase as any)?.createAndBroadcastNotification === "function") {
+          await (this.supabase as any).createAndBroadcastNotification({
+            profileId,
+            orderId: assignment.order_id,
+            notificationType: "driver_facility_arrival_confirmed",
+            title: "Arrived at Facility",
+            body: "You arrived at the facility. Show the facility handoff QR code to staff.",
+            data: payload,
+            channels: [`driver:${profileId}`, `user:${profileId}`],
+          });
+        }
+      }
+
+      this.logger.log(
+        `[LOGISTICS_ARRIVE_DIAGNOSTIC] Pickup facility arrival completed: orderId=${assignment.order_id}, facilityId=${order.facility_id}, driverId=${driverId}`
+      );
 
       return {
         assignmentId,
         orderId: assignment.order_id,
         assignmentStatus: "arrived",
-        orderStatus:
-          ord?.current_status ||
-          (assignment.assignment_type === "pickup"
-            ? "pickup_otp_pending"
-            : "delivery_otp_pending"),
+        orderStatus: "in_transit_to_facility",
+        facilityArrival: true,
+        arrivedAt: arrivedAtTimestamp,
       };
     }
 
+    // 2. Delivery assignment arrival at facility (phase 1: driver arrives to pick up clean clothes)
     if (assignment.assignment_type === "delivery") {
       const [collectionRes, arrivalRes] = await Promise.all([
         this.db()
@@ -726,7 +953,7 @@ export class LogisticsService {
           .limit(1),
         this.db()
           .from("driver_navigation_events")
-          .select("id")
+          .select("id,created_at")
           .eq("order_id", assignment.order_id)
           .eq("driver_id", driverId)
           .eq("event_type", "arrived_at_facility")
@@ -736,77 +963,68 @@ export class LogisticsService {
       const collectionOp = collectionRes.data?.[0];
       const existingArrival = arrivalRes.data?.[0];
 
-      if (!collectionOp && !existingArrival) {
-        const now = new Date().toISOString();
-        await this.db()
-          .from("driver_navigation_events")
-          .insert({
-            driver_id: driverId,
-            order_id: assignment.order_id,
-            event_type: "arrived_at_facility",
-          });
-
-        try {
-          const { data: order } = await this.db()
-            .from("orders")
-            .select("id,current_status,facility_id,customer_id,order_number")
-            .eq("id", assignment.order_id)
-            .maybeSingle();
-
-          const { data: driverProfile } = await this.db()
-            .from("drivers")
-            .select("id,profile_id,profiles(full_name)")
-            .eq("id", driverId)
-            .maybeSingle();
-
-          const driverName = (driverProfile as any)?.profiles?.full_name || "Assigned Driver";
-
-          if (typeof this.supabase?.broadcastEvent === "function") {
-            const payload = {
-              eventType: "DRIVER_ARRIVED_AT_FACILITY",
-              entityId: assignment.order_id,
-              orderId: assignment.order_id,
-              orderNumber: order?.order_number,
-              status: order?.current_status || "delivery_accepted",
-              driverArrivedAtFacility: true,
-              facilityId: order?.facility_id,
-              driverId,
-              driverName,
-              assignmentType: "delivery",
-              assignmentStatus: "arrived",
-              timestamp: now,
-            };
-
-            const broadcasts: Promise<any>[] = [
-              this.supabase.broadcastEvent("facility:all", "DRIVER_ARRIVED_AT_FACILITY", payload),
-              this.supabase.broadcastEvent(`driver:${driverId}`, "ASSIGNMENT_UPDATED", payload),
-              this.supabase.broadcastEvent(`order:${assignment.order_id}`, "DRIVER_ARRIVED_AT_FACILITY", payload),
-              this.supabase.broadcastEvent("admin:operations", "DRIVER_ARRIVED_AT_FACILITY", payload),
-            ];
-            if (order?.facility_id) {
-              broadcasts.push(
-                this.supabase.broadcastEvent(`facility:${order.facility_id}`, "DRIVER_ARRIVED_AT_FACILITY", payload),
-              );
-            }
-            if (profileId && profileId !== driverId) {
-              broadcasts.push(
-                this.supabase.broadcastEvent(`driver:${profileId}`, "ASSIGNMENT_UPDATED", payload),
-              );
-            }
-            await Promise.allSettled(broadcasts);
-          }
-        } catch {
-          // Safe catch
-        }
-      }
-
       if (!collectionOp) {
+        const now = new Date().toISOString();
+        if (!existingArrival) {
+          await this.db()
+            .from("driver_navigation_events")
+            .insert({
+              driver_id: driverId,
+              order_id: assignment.order_id,
+              event_type: "arrived_at_facility",
+            });
+        }
+
+        const { data: driverProfile } = await this.db()
+          .from("drivers")
+          .select("id,profile_id,profiles(full_name)")
+          .eq("id", driverId)
+          .maybeSingle();
+        const driverName = (driverProfile as any)?.profiles?.full_name || "Assigned Driver";
+
+        const payload = {
+          eventType: "DRIVER_ARRIVED_AT_FACILITY",
+          entityId: assignment.order_id,
+          orderId: assignment.order_id,
+          orderNumber: order.order_number,
+          status: order.current_status || "delivery_accepted",
+          driverArrivedAtFacility: true,
+          facilityId: order.facility_id,
+          driverId,
+          driverName,
+          assignmentType: "delivery",
+          assignmentStatus: "arrived",
+          timestamp: existingArrival?.created_at || now,
+        };
+
+        if (typeof this.supabase?.broadcastEvent === "function") {
+          const broadcasts: Promise<any>[] = [
+            this.supabase.broadcastEvent("facility:all", "DRIVER_ARRIVED_AT_FACILITY", payload),
+            this.supabase.broadcastEvent("orders:all", "DRIVER_ARRIVED_AT_FACILITY", payload),
+            this.supabase.broadcastEvent(`driver:${driverId}`, "ASSIGNMENT_UPDATED", payload),
+            this.supabase.broadcastEvent(`order:${assignment.order_id}`, "DRIVER_ARRIVED_AT_FACILITY", payload),
+            this.supabase.broadcastEvent("admin:operations", "DRIVER_ARRIVED_AT_FACILITY", payload),
+          ];
+          if (order.facility_id) {
+            broadcasts.push(
+              this.supabase.broadcastEvent(`facility:${order.facility_id}`, "DRIVER_ARRIVED_AT_FACILITY", payload),
+            );
+          }
+          if (profileId && profileId !== driverId) {
+            broadcasts.push(
+              this.supabase.broadcastEvent(`driver:${profileId}`, "ASSIGNMENT_UPDATED", payload),
+            );
+          }
+          await Promise.allSettled(broadcasts);
+        }
+
         return {
           assignmentId,
           orderId: assignment.order_id,
           assignmentStatus: "arrived",
           orderStatus: "delivery_accepted",
           facilityArrival: true,
+          arrivedAt: existingArrival?.created_at || now,
         };
       }
 
@@ -829,15 +1047,23 @@ export class LogisticsService {
       }
     }
 
-    // Auto-transition accepted pickup to en_route before arrive
-    if (assignment.assignment_type === "pickup" && assignment.status === "accepted") {
-      const { data: ord } = await this.db()
-        .from("orders")
-        .select("id,current_status")
-        .eq("id", assignment.order_id)
-        .maybeSingle();
+    // 3. If assignment already marked arrived at customer, return idempotent status
+    if (assignment.status === "arrived") {
+      return {
+        assignmentId,
+        orderId: assignment.order_id,
+        assignmentStatus: "arrived",
+        orderStatus:
+          order.current_status ||
+          (assignment.assignment_type === "pickup"
+            ? "pickup_otp_pending"
+            : "delivery_otp_pending"),
+      };
+    }
 
-      if (ord?.current_status === "pickup_accepted") {
+    // Auto-transition accepted pickup to en_route before arrive at customer
+    if (assignment.assignment_type === "pickup" && assignment.status === "accepted") {
+      if (order.current_status === "pickup_accepted") {
         const { error: navError } = await this.db().rpc(
           "transition_driver_assignment_atomic",
           {
@@ -852,88 +1078,6 @@ export class LogisticsService {
             navError.message ?? "Unable to start pickup navigation",
           );
         }
-      }
-    }
-
-    // Pickup driver arrival at assigned facility
-    if (assignment.assignment_type === "pickup") {
-      const { data: order } = await this.db()
-        .from("orders")
-        .select("id,current_status,facility_id,customer_id")
-        .eq("id", assignment.order_id)
-        .maybeSingle();
-
-      if (order?.current_status === "in_transit_to_facility") {
-        const { data: existingArrivals } = await this.db()
-          .from("driver_navigation_events")
-          .select("id,created_at")
-          .eq("order_id", assignment.order_id)
-          .eq("driver_id", driverId)
-          .eq("event_type", "arrived_at_facility")
-          .order("created_at", { ascending: false })
-          .limit(1);
-
-        if (existingArrivals && existingArrivals.length > 0) {
-          return {
-            assignmentId,
-            orderId: assignment.order_id,
-            assignmentStatus: "arrived",
-            orderStatus: "in_transit_to_facility",
-            facilityArrival: true,
-            arrivedAt: existingArrivals[0].created_at,
-          };
-        }
-
-        const now = new Date().toISOString();
-        await this.db()
-          .from("driver_navigation_events")
-          .insert({
-            driver_id: driverId,
-            order_id: assignment.order_id,
-            event_type: "arrived_at_facility",
-          });
-
-        try {
-          if (typeof this.supabase?.broadcastEvent === "function") {
-            const payload = {
-              eventType: "DRIVER_ARRIVED_AT_FACILITY",
-              entityId: assignment.order_id,
-              orderId: assignment.order_id,
-              status: "in_transit_to_facility",
-              driverArrivedAtFacility: true,
-              facilityId: order.facility_id,
-              driverId,
-              timestamp: now,
-            };
-            const broadcasts: Promise<any>[] = [
-              this.supabase.broadcastEvent("facility:all", "DRIVER_ARRIVED_AT_FACILITY", payload),
-              this.supabase.broadcastEvent(`driver:${driverId}`, "ASSIGNMENT_UPDATED", payload),
-              this.supabase.broadcastEvent(`order:${assignment.order_id}`, "DRIVER_ARRIVED_AT_FACILITY", payload),
-            ];
-            if (profileId && profileId !== driverId) {
-              broadcasts.push(
-                this.supabase.broadcastEvent(`driver:${profileId}`, "ASSIGNMENT_UPDATED", payload),
-              );
-            }
-            if (order.facility_id) {
-              broadcasts.push(
-                this.supabase.broadcastEvent(`facility:${order.facility_id}`, "DRIVER_ARRIVED_AT_FACILITY", payload),
-              );
-            }
-            await Promise.allSettled(broadcasts);
-          }
-        } catch {
-          // Safe catch
-        }
-
-        return {
-          assignmentId,
-          orderId: assignment.order_id,
-          assignmentStatus: "arrived",
-          orderStatus: "in_transit_to_facility",
-          facilityArrival: true,
-          arrivedAt: now,
-        };
       }
     }
 
@@ -985,13 +1129,40 @@ export class LogisticsService {
             this.supabase.broadcastEvent(`customer:${ord.customer_id}`, "ORDER_STATUS_CHANGED", payload),
           );
         }
-        const profileId = (ord as any)?.customers?.profile_id;
-        if (profileId && profileId !== ord?.customer_id) {
+        const custProfileId = (ord as any)?.customers?.profile_id;
+        if (custProfileId && custProfileId !== ord?.customer_id) {
           broadcasts.push(
-            this.supabase.broadcastEvent(`customer:${profileId}`, "ORDER_STATUS_CHANGED", payload),
+            this.supabase.broadcastEvent(`customer:${custProfileId}`, "ORDER_STATUS_CHANGED", payload),
           );
         }
         await Promise.allSettled(broadcasts);
+
+        const customerProfileId = (ord as any)?.customers?.profile_id || ord?.customer_id;
+        if (customerProfileId && typeof (this.supabase as any)?.createAndBroadcastNotification === "function") {
+          // 1. Customer-facing notification
+          await (this.supabase as any).createAndBroadcastNotification({
+            profileId: customerProfileId,
+            orderId: data.orderId,
+            notificationType: "driver_arrived",
+            title: "Driver Arrived",
+            body: "Your driver has arrived at your address. Please keep your garments or verification code ready.",
+            data: { orderId: data.orderId, driverId, status: data.orderStatus },
+            channels: [`customer:${customerProfileId}`, `user:${customerProfileId}`],
+          });
+        }
+
+        // 2. Driver-facing arrival confirmation
+        if (profileId && typeof (this.supabase as any)?.createAndBroadcastNotification === "function") {
+          await (this.supabase as any).createAndBroadcastNotification({
+            profileId: profileId,
+            orderId: data.orderId,
+            notificationType: "driver_arrived_pickup_confirmed",
+            title: "Arrived at Pickup",
+            body: "You have arrived at customer pickup. Verify pickup OTP with the customer.",
+            data: { orderId: data.orderId, driverId, status: data.orderStatus },
+            channels: [`driver:${profileId}`, `user:${profileId}`],
+          });
+        }
       }
     } catch {
       // Safe catch
@@ -1163,7 +1334,7 @@ export class LogisticsService {
 
     const { data: order, error: orderError } = await this.db()
       .from("orders")
-      .select("id,current_status,facility_id,customer_id")
+      .select("id,current_status,facility_id,customer_id,order_number,customers(profile_id)")
       .eq("id", assignment.order_id)
       .maybeSingle();
 
@@ -1268,8 +1439,27 @@ export class LogisticsService {
             this.supabase.broadcastEvent(`customer:${order.customer_id}`, "ORDER_STATUS_CHANGED", payload),
           );
         }
+        const profileId = (order as any)?.customers?.profile_id;
+        if (profileId && profileId !== order.customer_id) {
+          broadcasts.push(
+            this.supabase.broadcastEvent(`customer:${profileId}`, "ORDER_STATUS_CHANGED", payload),
+          );
+        }
 
         await Promise.allSettled(broadcasts);
+
+        const customerProfileId = (order as any)?.customers?.profile_id || order?.customer_id;
+        if (customerProfileId && typeof (this.supabase as any)?.createAndBroadcastNotification === "function") {
+          await (this.supabase as any).createAndBroadcastNotification({
+            profileId: customerProfileId,
+            orderId: committed.orderId,
+            notificationType: "order_in_transit_to_facility",
+            title: "Garments En Route to Facility",
+            body: `Your picked up garments for order #${order?.order_number || ""} are on the way to our cleaning facility.`,
+            data: { orderId: committed.orderId, status: committed.orderStatus },
+            channels: [`customer:${customerProfileId}`, `order:${committed.orderId}`],
+          });
+        }
       }
     } catch {
       // Safe catch

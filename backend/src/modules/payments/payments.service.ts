@@ -124,9 +124,76 @@ export class PaymentsService {
             title: 'Payment Confirmed',
             body: `Payment for order #${order?.order_number || ''} has been confirmed.`,
             data: { orderId, orderNumber: order?.order_number, status: 'confirmed' },
-            channels: [`customer:${targetProfileId}`, `order:${orderId}`],
+            channels: [`customer:${targetProfileId}`, `user:${targetProfileId}`],
           });
         }
+      }
+    } catch {
+      // Safe catch
+    }
+  }
+
+  private async notifyCustomerOfPaymentFailure(orderId: string) {
+    try {
+      const { data: ord } = await this.db()
+        .from("orders")
+        .select("id,order_number,customer_id,customers(profile_id)")
+        .eq("id", orderId)
+        .maybeSingle();
+
+      const profileId = (ord as any)?.customers?.profile_id || ord?.customer_id;
+      if (profileId && typeof (this.supabase as any)?.createAndBroadcastNotification === "function") {
+        await (this.supabase as any).createAndBroadcastNotification({
+          profileId,
+          orderId,
+          notificationType: "payment_failed",
+          title: "Payment Failed",
+          body: `Payment for order #${ord?.order_number || ""} could not be processed. Please retry or choose another payment method.`,
+          data: { orderId, orderNumber: ord?.order_number, status: "payment_failed" },
+          channels: [`customer:${profileId}`, `user:${profileId}`],
+        });
+      }
+    } catch {
+      // Safe catch
+    }
+  }
+
+  private async notifyCustomerOfRefund(
+    orderId: string | null | undefined,
+    refundId: string,
+    amount: number | string,
+    paymentOrderId?: string,
+  ) {
+    try {
+      let targetOrderId = orderId;
+      if (!targetOrderId && paymentOrderId) {
+        const { data: po } = await this.db()
+          .from("payment_orders")
+          .select("order_id")
+          .eq("id", paymentOrderId)
+          .maybeSingle();
+        targetOrderId = po?.order_id;
+      }
+
+      if (!targetOrderId) return;
+
+      const { data: ord } = await this.db()
+        .from("orders")
+        .select("id,order_number,customer_id,customers(profile_id)")
+        .eq("id", targetOrderId)
+        .maybeSingle();
+
+      const profileId = (ord as any)?.customers?.profile_id || ord?.customer_id;
+      if (profileId && typeof (this.supabase as any)?.createAndBroadcastNotification === "function") {
+        await (this.supabase as any).createAndBroadcastNotification({
+          profileId,
+          orderId: targetOrderId,
+          notificationType: "refund_processed",
+          title: "Refund Processed",
+          body: `A refund of ₹${amount} for order #${ord?.order_number || ""} has been processed to your payment method.`,
+          data: { orderId: targetOrderId, refundId, amount, status: "processed" },
+          channels: [`customer:${profileId}`, `user:${profileId}`],
+        });
       }
     } catch {
       // Safe catch
@@ -733,6 +800,7 @@ export class PaymentsService {
       }
     } else {
       await this.recordFailedPayment(paymentOrder, normalized);
+      await this.notifyCustomerOfPaymentFailure(paymentOrder.order_id);
     }
   }
 
@@ -751,7 +819,7 @@ export class PaymentsService {
 
     const reference = refund.notes?.bright_white_refund_id;
     const select =
-      "id,payment_order_id,amount,provider_refund_id,payment_orders(provider_payment_id,currency)";
+      "id,payment_order_id,amount,provider_refund_id,payment_orders(order_id,provider_payment_id,currency)";
     const { data: byProviderId, error } = await this.db()
       .from("refund_requests")
       .select(select)
@@ -812,6 +880,14 @@ export class PaymentsService {
       normalized,
     );
     await this.recordProviderRefund(refundRequest.id, normalized);
+    if (normalized.status === "processed") {
+      await this.notifyCustomerOfRefund(
+        relatedPayment.order_id,
+        refundRequest.id,
+        refundRequest.amount,
+        refundRequest.payment_order_id,
+      );
+    }
   }
 
   async webhook(rawBody: Buffer, signature: string, eventId?: string) {
@@ -984,6 +1060,14 @@ export class PaymentsService {
     try {
       this.ensureMatchingRefund(refundClaim, providerRefund);
       recorded = await this.recordProviderRefund(refundId, providerRefund);
+      if (recorded.status === "processed" || recorded.status === "completed") {
+        await this.notifyCustomerOfRefund(
+          null,
+          refundId,
+          refundClaim.amount,
+          refundClaim.paymentOrderId,
+        );
+      }
     } catch (error) {
       await this.markRefundProviderUncertain(refundId, providerRefund.id);
       throw error;

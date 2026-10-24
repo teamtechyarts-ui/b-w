@@ -3,6 +3,7 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  OnModuleDestroy,
   OnModuleInit,
 } from '@nestjs/common';
 import { SupabaseService } from '../supabase/supabase.service';
@@ -100,7 +101,9 @@ function failedProviderResult(): PushSendResult {
 }
 
 @Injectable()
-export class NotificationDispatcher implements OnModuleInit {
+export class NotificationDispatcher implements OnModuleInit, OnModuleDestroy {
+  private queueInterval: NodeJS.Timeout | null = null;
+
   constructor(
     private readonly supabase: SupabaseService,
     @Inject(PUSH_PROVIDER) private readonly pushProvider: PushProvider,
@@ -108,6 +111,61 @@ export class NotificationDispatcher implements OnModuleInit {
 
   onModuleInit() {
     this.supabase.setNotificationDispatcher((id) => this.dispatchPersisted(id));
+    // Start periodic background worker to reliably consume queued notifications
+    this.queueInterval = setInterval(() => {
+      this.processPendingQueue().catch(() => {});
+    }, 20000);
+  }
+
+  onModuleDestroy() {
+    if (this.queueInterval) {
+      clearInterval(this.queueInterval);
+      this.queueInterval = null;
+    }
+  }
+
+  async processPendingQueue(limit = 20): Promise<number> {
+    try {
+      const { data, error } = await this.db()
+        .from('notifications')
+        .select('id')
+        .in('status', ['queued', 'failed'])
+        .order('created_at', { ascending: true })
+        .limit(limit);
+
+      if (error || !data || data.length === 0) return 0;
+
+      let processedCount = 0;
+      for (const row of data) {
+        try {
+          const res = await this.dispatchPersisted(row.id);
+          if (res.dispatched) processedCount++;
+        } catch {
+          // Individual failure must not block the queue
+        }
+      }
+      return processedCount;
+    } catch {
+      return 0;
+    }
+  }
+
+  async getDiagnosticOverview() {
+    const [queuedRes, sentRes, failedRes, devicesRes] = await Promise.allSettled([
+      this.db().from('notifications').select('id', { count: 'exact', head: true }).eq('status', 'queued'),
+      this.db().from('notifications').select('id', { count: 'exact', head: true }).eq('status', 'sent'),
+      this.db().from('notifications').select('id', { count: 'exact', head: true }).eq('status', 'failed'),
+      this.db().from('device_tokens').select('id', { count: 'exact', head: true }).eq('is_active', true),
+    ]);
+
+    return {
+      providerConfigured: this.pushProvider.configured,
+      activeDevices: devicesRes.status === 'fulfilled' ? (devicesRes.value as any).count ?? 0 : 0,
+      queuedNotifications: queuedRes.status === 'fulfilled' ? (queuedRes.value as any).count ?? 0 : 0,
+      sentNotifications: sentRes.status === 'fulfilled' ? (sentRes.value as any).count ?? 0 : 0,
+      failedNotifications: failedRes.status === 'fulfilled' ? (failedRes.value as any).count ?? 0 : 0,
+      workerActive: Boolean(this.queueInterval),
+    };
   }
 
   private db() {
@@ -196,6 +254,12 @@ export class NotificationDispatcher implements OnModuleInit {
     }
 
     const activeDevices = (devices ?? []) as DeviceToken[];
+    console.log('[RECIPIENT_RESOLVED]', {
+      notificationId: claimedNotification.id,
+      recipientProfileId: claimedNotification.profile_id,
+      activeDeviceCount: activeDevices.length,
+    });
+
     if (activeDevices.length === 0) {
       return this.finish(
         claimedNotification,
@@ -208,27 +272,61 @@ export class NotificationDispatcher implements OnModuleInit {
     const pushData = toPushData(claimedNotification);
     const deliveryResults = await Promise.all(
       activeDevices.map(async (device): Promise<DeviceDeliveryResult> => {
-        let result: PushSendResult;
+        console.log('[FCM_TOKEN_FOUND]', {
+          notificationId: claimedNotification.id,
+          recipientProfileId: claimedNotification.profile_id,
+          deviceTokenId: device.id,
+          tokenPreview: device.push_token ? `${device.push_token.slice(0, 10)}...` : null,
+        });
 
-        try {
-          result = await this.pushProvider.send({
-            token: device.push_token,
-            title: claimedNotification.title,
-            body:
-              claimedNotification.body ?? claimedNotification.message ?? '',
-            data: pushData,
-          });
-        } catch {
-          result = failedProviderResult();
+        console.log('[FCM_SEND_STARTED]', {
+          notificationId: claimedNotification.id,
+          deviceTokenId: device.id,
+          notificationType: claimedNotification.notification_type || claimedNotification.event_type,
+        });
+
+        let result: PushSendResult = failedProviderResult();
+        const maxAttempts = 2;
+
+        for (let attempt = 0; attempt <= maxAttempts; attempt++) {
+          try {
+            result = await this.pushProvider.send({
+              token: device.push_token,
+              title: claimedNotification.title,
+              body:
+                claimedNotification.body ?? claimedNotification.message ?? '',
+              data: pushData,
+            });
+          } catch {
+            result = failedProviderResult();
+          }
+
+          if (result.ok || result.reason !== 'transient' || attempt === maxAttempts) {
+            break;
+          }
+
+          await new Promise((resolve) => setTimeout(resolve, 200 * (attempt + 1)));
         }
 
         if (result.ok) {
+          console.log('[FCM_SEND_ACCEPTED]', {
+            notificationId: claimedNotification.id,
+            deviceTokenId: device.id,
+            providerMessageId: result.providerMessageId,
+          });
           return {
             deviceTokenId: device.id,
             status: 'sent',
             providerMessageId: result.providerMessageId,
           };
         }
+
+        console.warn('[FCM_SEND_FAILED]', {
+          notificationId: claimedNotification.id,
+          deviceTokenId: device.id,
+          reason: result.reason,
+          errorCode: result.errorCode,
+        });
 
         return {
           deviceTokenId: device.id,
@@ -244,6 +342,13 @@ export class NotificationDispatcher implements OnModuleInit {
       .map((result) => result.deviceTokenId);
 
     if (invalidTokenIds.length > 0) {
+      for (const invalidId of invalidTokenIds) {
+        console.log('[INVALID_TOKEN_DEACTIVATED]', {
+          deviceTokenId: invalidId,
+          recipientProfileId: claimedNotification.profile_id,
+        });
+      }
+
       const { error: deactivateError } = await this.db()
         .from('device_tokens')
         .update({ is_active: false, updated_at: new Date().toISOString() })

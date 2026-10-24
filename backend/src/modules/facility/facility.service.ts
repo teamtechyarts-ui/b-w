@@ -72,6 +72,19 @@ export class FacilityService {
         }
 
         await Promise.allSettled(broadcasts);
+
+        const customerProfileId = (order as any)?.customers?.profile_id || order?.customer_id;
+        if (customerProfileId && typeof (this.supabase as any)?.createAndBroadcastNotification === "function") {
+          await (this.supabase as any).createAndBroadcastNotification({
+            profileId: customerProfileId,
+            orderId,
+            notificationType: "order_ready_for_delivery",
+            title: "Order Ready for Delivery",
+            body: `Great news! Your garments for order #${order?.order_number || ""} are freshly cleaned and ready for delivery.`,
+            data: { orderId, orderNumber: order?.order_number, status: "ready_for_delivery" },
+            channels: [`customer:${customerProfileId}`, `user:${customerProfileId}`],
+          });
+        }
       }
     } catch {
       // Safe catch
@@ -130,6 +143,32 @@ export class FacilityService {
       }
 
       await Promise.allSettled(broadcasts);
+
+      const customerProfileId = (order as any)?.customers?.profile_id || order?.customer_id;
+      if (customerProfileId && typeof (this.supabase as any)?.createAndBroadcastNotification === "function") {
+        if (eventType === "FACILITY_INTAKE") {
+          await (this.supabase as any).createAndBroadcastNotification({
+            profileId: customerProfileId,
+            orderId,
+            notificationType: "order_facility_intake",
+            title: "Order Arrived at Facility",
+            body: `Your order #${order?.order_number || ""} has arrived safely at our facility and is being inspected.`,
+            data: { orderId, orderNumber: order?.order_number, status },
+            channels: [`customer:${customerProfileId}`, `user:${customerProfileId}`],
+          });
+        } else if (eventType === "PROCESSING_STAGE_STARTED") {
+          const stage = extra.stage || "cleaning";
+          await (this.supabase as any).createAndBroadcastNotification({
+            profileId: customerProfileId,
+            orderId,
+            notificationType: "order_processing",
+            title: "Garments Being Cleaned",
+            body: `Your clothes for order #${order?.order_number || ""} are now in the ${stage} stage.`,
+            data: { orderId, orderNumber: order?.order_number, status, stage },
+            channels: [`customer:${customerProfileId}`, `user:${customerProfileId}`],
+          });
+        }
+      }
     } catch {
       // Safe catch
     }

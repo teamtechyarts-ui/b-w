@@ -71,22 +71,52 @@ describe('RealtimeGateway', () => {
             }),
           };
         }
-        return { select: jest.fn().mockReturnThis() };
+        if (table === 'drivers') {
+          return {
+            select: jest.fn().mockReturnThis(),
+            eq: jest.fn().mockReturnThis(),
+            maybeSingle: jest.fn().mockResolvedValue({
+              data: { id: 'driver-1', is_active: true },
+            }),
+          };
+        }
+        if (table === 'facility_employees') {
+          return {
+            select: jest.fn().mockReturnThis(),
+            eq: jest.fn().mockReturnThis(),
+            maybeSingle: jest.fn().mockResolvedValue({
+              data: { facility_id: 'facility-10', is_active: true },
+            }),
+          };
+        }
+        return {
+          select: jest.fn().mockReturnThis(),
+          eq: jest.fn().mockReturnThis(),
+          maybeSingle: jest.fn().mockResolvedValue({ data: null }),
+        };
       });
 
       await gateway.handleConnection(mockSocket);
 
       expect(mockSocket.join).toHaveBeenCalledWith('user:user-abc');
+      expect(mockSocket.join).toHaveBeenCalledWith('customer:user-abc');
+      expect(mockSocket.join).toHaveBeenCalledWith('orders:all');
       expect(mockSocket.join).toHaveBeenCalledWith('role:driver');
       expect(mockSocket.join).toHaveBeenCalledWith('facility:facility-10');
+      expect(mockSocket.join).toHaveBeenCalledWith('facility:all');
+      expect(mockSocket.join).toHaveBeenCalledWith('driver:driver-1');
       expect(mockSocket.emit).toHaveBeenCalledWith(
         'connection_established',
         expect.objectContaining({
           userId: 'user-abc',
           rooms: expect.arrayContaining([
             'user:user-abc',
+            'customer:user-abc',
+            'orders:all',
             'role:driver',
             'facility:facility-10',
+            'facility:all',
+            'driver:driver-1',
           ]),
         }),
       );
@@ -195,6 +225,50 @@ describe('RealtimeGateway', () => {
 
       expect(result).toEqual({ ok: true, room: 'order:order-1' });
       expect(mockSocket.join).toHaveBeenCalledWith('order:order-1');
+    });
+  });
+
+  describe('handleSubscribeChannel', () => {
+    it('allows staff to subscribe to facility channel', async () => {
+      mockSocket.data = {
+        user: { id: 'mgr-1', roles: ['manager'], facilityId: 'fac-1' },
+        subscribedRooms: new Set<string>(),
+      };
+
+      const result = await gateway.handleSubscribeChannel(mockSocket, {
+        channel: 'facility:all',
+      });
+
+      expect(result).toEqual({ ok: true, room: 'facility:all' });
+      expect(mockSocket.join).toHaveBeenCalledWith('facility:all');
+    });
+
+    it('allows driver to subscribe to available driver jobs pool', async () => {
+      mockSocket.data = {
+        user: { id: 'drv-1', roles: ['driver'] },
+        subscribedRooms: new Set<string>(),
+      };
+
+      const result = await gateway.handleSubscribeChannel(mockSocket, {
+        channel: 'driver:available',
+      });
+
+      expect(result).toEqual({ ok: true, room: 'driver:available' });
+      expect(mockSocket.join).toHaveBeenCalledWith('driver:available');
+    });
+
+    it('unsubscribes client from channel on handleUnsubscribeChannel', () => {
+      mockSocket.data = {
+        user: { id: 'usr-1', roles: ['customer'] },
+        subscribedRooms: new Set<string>(['customer:usr-1']),
+      };
+
+      const result = gateway.handleUnsubscribeChannel(mockSocket, {
+        channel: 'customer:usr-1',
+      });
+
+      expect(result).toEqual({ ok: true, room: 'customer:usr-1' });
+      expect(mockSocket.leave).toHaveBeenCalledWith('customer:usr-1');
     });
   });
 });

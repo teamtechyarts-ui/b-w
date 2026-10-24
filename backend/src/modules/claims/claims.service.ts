@@ -92,7 +92,7 @@ export class ClaimsService {
           title: 'Claim Submitted',
           body: `Claim submitted for order: ${dto.description.slice(0, 50)}`,
           data: { orderId, claimId: (data as any)?.id },
-          channels: [`customer:${profileId}`, `order:${orderId}`, 'admin:operations'],
+          channels: [`customer:${profileId}`, `user:${profileId}`],
         });
       }
       await this.supabase.broadcastEvent('admin:operations', 'CLAIM_SUBMITTED', {

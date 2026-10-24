@@ -538,7 +538,7 @@ export class OtpService {
             title: 'Order Picked Up',
             body: `Your order #${orderData?.order_number || ''} has been picked up by the driver.`,
             data: { orderId, orderNumber: orderData?.order_number, status: 'picked_up' },
-            channels: [`customer:${targetProfileId}`, `order:${orderId}`],
+            channels: [`customer:${targetProfileId}`, `user:${targetProfileId}`],
           });
         }
       }

@@ -89,7 +89,7 @@ export class RealtimeGateway
       // Fetch user profile and roles
       const { data: profile } = await this.supabase.admin
         .from('profiles')
-        .select('id,is_active,facility_id')
+        .select('id,is_active')
         .eq('id', user.id)
         .maybeSingle();
 
@@ -111,20 +111,54 @@ export class RealtimeGateway
         .map((r: any) => r.roles?.code)
         .filter(Boolean);
 
+      // Query facility assignment from facility_employees
+      let facilityId: string | null = null;
+      const { data: staff } = await this.supabase.admin
+        .from('facility_employees')
+        .select('facility_id,is_active')
+        .eq('profile_id', user.id)
+        .eq('is_active', true)
+        .maybeSingle();
+      if (staff?.facility_id) {
+        facilityId = staff.facility_id;
+      }
+
+      // Query driver record if user has driver role
+      let driverId: string | null = null;
+      if (roles.includes('driver')) {
+        const { data: driver } = await this.supabase.admin
+          .from('drivers')
+          .select('id,is_active')
+          .eq('profile_id', user.id)
+          .eq('is_active', true)
+          .maybeSingle();
+        if (driver?.id) {
+          driverId = driver.id;
+        }
+      }
+
       const authUser: AuthenticatedUser = {
         id: user.id,
         email: user.email || null,
         phone: user.phone || null,
         roles,
-        facilityId: profile.facility_id || null,
+        facilityId: facilityId || null,
       };
 
       const subscribedRooms = new Set<string>();
 
-      // Automatically join user-specific room
+      // Automatically join user-specific and customer-specific rooms
       const userRoom = `user:${user.id}`;
       client.join(userRoom);
       subscribedRooms.add(userRoom);
+
+      const customerRoom = `customer:${user.id}`;
+      client.join(customerRoom);
+      subscribedRooms.add(customerRoom);
+
+      // Join orders:all for broad operational synchronization
+      client.join('orders:all');
+      subscribedRooms.add('orders:all');
 
       // Join role-specific rooms
       for (const role of roles) {
@@ -133,11 +167,43 @@ export class RealtimeGateway
         subscribedRooms.add(roleRoom);
       }
 
-      // Join facility room if applicable
-      if (profile.facility_id) {
-        const facilityRoom = `facility:${profile.facility_id}`;
-        client.join(facilityRoom);
-        subscribedRooms.add(facilityRoom);
+      // Join facility rooms if applicable
+      const isFacilityStaff = Boolean(
+        facilityId ||
+        roles.includes('facility_employee') ||
+        roles.includes('facility_operator') ||
+        roles.includes('manager')
+      );
+
+      if (isFacilityStaff) {
+        client.join('facility:all');
+        subscribedRooms.add('facility:all');
+        if (facilityId) {
+          const facilityRoom = `facility:${facilityId}`;
+          client.join(facilityRoom);
+          subscribedRooms.add(facilityRoom);
+        }
+      }
+
+      // Join driver-specific and job pool rooms if applicable
+      if (driverId) {
+        client.join(`driver:${driverId}`);
+        subscribedRooms.add(`driver:${driverId}`);
+
+        client.join(`driver:${user.id}`);
+        subscribedRooms.add(`driver:${user.id}`);
+
+        client.join('driver:available');
+        subscribedRooms.add('driver:available');
+
+        client.join('jobs:drivers');
+        subscribedRooms.add('jobs:drivers');
+      }
+
+      // Join admin operations room if applicable
+      if (roles.includes('admin')) {
+        client.join('admin:operations');
+        subscribedRooms.add('admin:operations');
       }
 
       client.data = {
@@ -146,7 +212,7 @@ export class RealtimeGateway
       };
 
       this.logger.log(
-        `[RealtimeGateway] Client connected: ${client.id} (user: ${user.id}, roles: [${roles.join(',')}])`,
+        `[RealtimeGateway] Client connected: ${client.id} (user: ${user.id}, roles: [${roles.join(',')}], facility: ${facilityId || 'none'})`,
       );
 
       client.emit('connection_established', {
@@ -170,6 +236,65 @@ export class RealtimeGateway
     );
   }
 
+  @SubscribeMessage('subscribe:channel')
+  async handleSubscribeChannel(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() data: { channel: string },
+  ) {
+    const user = client.data?.user;
+    if (!user || !data?.channel) {
+      return { ok: false, error: 'Unauthorized or missing channel' };
+    }
+
+    const ch = data.channel;
+    const isStaff = user.roles.some((r) =>
+      ['admin', 'facility', 'facility_employee', 'manager', 'driver'].includes(r),
+    );
+
+    // Validate permission for channel
+    if (ch.startsWith('order:')) {
+      const orderId = ch.slice(6);
+      if (!isStaff) {
+        const { data: order } = await this.supabase.admin
+          .from('orders')
+          .select('id,customer_id')
+          .eq('id', orderId)
+          .maybeSingle();
+
+        if (!order || order.customer_id !== user.id) {
+          return { ok: false, error: 'Access denied to this order' };
+        }
+      }
+    } else if (ch.startsWith('facility:') && ch !== 'facility:all') {
+      const targetFacilityId = ch.slice(9);
+      if (!user.roles.includes('admin') && user.facilityId !== targetFacilityId) {
+        return { ok: false, error: 'Access denied to this facility' };
+      }
+    } else if (ch.startsWith('customer:') || ch.startsWith('user:')) {
+      const targetId = ch.split(':')[1];
+      if (targetId !== user.id && !isStaff) {
+        return { ok: false, error: 'Access denied to this user channel' };
+      }
+    }
+
+    client.join(ch);
+    client.data.subscribedRooms?.add(ch);
+    return { ok: true, room: ch };
+  }
+
+  @SubscribeMessage('unsubscribe:channel')
+  handleUnsubscribeChannel(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() data: { channel: string },
+  ) {
+    if (data?.channel) {
+      client.leave(data.channel);
+      client.data.subscribedRooms?.delete(data.channel);
+      return { ok: true, room: data.channel };
+    }
+    return { ok: false };
+  }
+
   @SubscribeMessage('subscribe:order')
   async handleSubscribeOrder(
     @ConnectedSocket() client: AuthenticatedSocket,
@@ -182,7 +307,7 @@ export class RealtimeGateway
 
     const orderId = data.orderId;
     const isStaff = user.roles.some((r) =>
-      ['admin', 'facility', 'driver'].includes(r),
+      ['admin', 'facility', 'facility_employee', 'manager', 'driver'].includes(r),
     );
 
     if (!isStaff) {

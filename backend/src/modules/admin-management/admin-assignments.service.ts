@@ -135,7 +135,7 @@ export class AdminAssignmentsService {
           title: 'Driver Assigned',
           body: `A driver has been assigned for ${action || 'pickup'} of your order #${ord?.order_number || ''}.`,
           data: { orderId, orderNumber: ord?.order_number, driverId, status: ord?.current_status, action },
-          channels: [`customer:${customerProfileId}`, `order:${orderId}`],
+          channels: [`customer:${customerProfileId}`, `user:${customerProfileId}`],
         });
       }
 

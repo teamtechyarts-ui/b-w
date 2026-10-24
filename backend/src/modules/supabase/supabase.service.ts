@@ -98,6 +98,7 @@ export class SupabaseService {
       };
 
       // 1. Primary: Supabase Realtime REST Broadcast endpoint (instant delivery, zero socket thrashing)
+      let restSuccess = false;
       try {
         const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
         const timer = controller ? setTimeout(() => controller.abort(), 4000) : null;
@@ -121,42 +122,44 @@ export class SupabaseService {
         });
         if (timer) clearTimeout(timer);
         if (res.ok) {
-          return;
+          restSuccess = true;
         }
       } catch {
         // Fallback to WebSocket channel with verified subscription
       }
 
-      // 2. Fallback: WebSocket channel with verified Phoenix subscription
-      let ch = this.channelPool.get(channelName);
-      if (!ch) {
-        ch = this.admin.channel(channelName);
-        await new Promise<void>((resolve) => {
-          const timeout = setTimeout(resolve, 2000);
-          ch!.subscribe((status) => {
-            if (status === 'SUBSCRIBED') {
-              clearTimeout(timeout);
-              resolve();
-            }
+      // 2. Fallback: WebSocket channel with verified Phoenix subscription if REST did not succeed
+      if (!restSuccess) {
+        let ch = this.channelPool.get(channelName);
+        if (!ch) {
+          ch = this.admin.channel(channelName);
+          await new Promise<void>((resolve) => {
+            const timeout = setTimeout(resolve, 2000);
+            ch!.subscribe((status) => {
+              if (status === 'SUBSCRIBED') {
+                clearTimeout(timeout);
+                resolve();
+              }
+            });
           });
-        });
-        // Keep channel pool bounded
-        if (this.channelPool.size > 200) {
-          const firstKey = this.channelPool.keys().next().value;
-          if (firstKey) {
-            const oldCh = this.channelPool.get(firstKey);
-            try { oldCh?.unsubscribe(); } catch {}
-            this.channelPool.delete(firstKey);
+          // Keep channel pool bounded
+          if (this.channelPool.size > 200) {
+            const firstKey = this.channelPool.keys().next().value;
+            if (firstKey) {
+              const oldCh = this.channelPool.get(firstKey);
+              try { oldCh?.unsubscribe(); } catch {}
+              this.channelPool.delete(firstKey);
+            }
           }
+          this.channelPool.set(channelName, ch);
         }
-        this.channelPool.set(channelName, ch);
-      }
 
-      await ch.send({
-        type: 'broadcast',
-        event,
-        payload: messagePayload,
-      });
+        await ch.send({
+          type: 'broadcast',
+          event,
+          payload: messagePayload,
+        });
+      }
 
       // 3. Emit via NestJS WebSocket Gateway (Socket.IO) to connected authenticated clients
       if (this.realtimeService) {
@@ -199,6 +202,13 @@ export class SupabaseService {
     channels?: string[];
   }): Promise<any> {
     if (!params.profileId) return null;
+
+    console.log('[BUSINESS_EVENT_CREATED]', {
+      notificationType: params.notificationType,
+      orderId: params.orderId || null,
+      recipientProfileId: params.profileId,
+      timestamp: new Date().toISOString(),
+    });
 
     try {
       // 1. Deduplication check: Avoid inserting duplicate notification if identical event exists for this order & user
@@ -259,19 +269,38 @@ export class SupabaseService {
         status: 'queued',
       };
 
-      // 3. Broadcast real-time notification payload
+      console.log('[NOTIFICATION_RECORD_CREATED]', {
+        notificationId: notificationItem.id,
+        recipientProfileId: params.profileId,
+        notificationType: params.notificationType,
+      });
+
+      // 3. Broadcast real-time notification payload with strict recipient isolation
       const broadcastPayload = {
         eventType: 'NOTIFICATION_CREATED',
         entityId: notificationItem.id,
         orderId,
+        profileId: params.profileId,
+        recipientId: params.profileId,
         notification: notificationItem,
         data: params.data || {},
         timestamp: new Date().toISOString(),
       };
 
-      const targetChannels = params.channels && params.channels.length > 0
+      // STRICT RECIPIENT ISOLATION:
+      // Private notifications MUST NEVER be broadcast to shared order channels (order:*) or global channels (orders:all).
+      // They must strictly target authenticated user-specific rooms (user:*, customer:*, driver:*) or authorized facility rooms.
+      const rawChannels = params.channels && params.channels.length > 0
         ? params.channels
-        : [`customer:${params.profileId}`, `driver:${params.profileId}`];
+        : [`user:${params.profileId}`, `customer:${params.profileId}`, `driver:${params.profileId}`];
+
+      const targetChannels = rawChannels.filter(
+        (ch) => !ch.startsWith('order:') && ch !== 'orders:all'
+      );
+
+      if (!targetChannels.includes(`user:${params.profileId}`)) {
+        targetChannels.push(`user:${params.profileId}`);
+      }
 
       await Promise.allSettled(
         targetChannels.map((ch) =>

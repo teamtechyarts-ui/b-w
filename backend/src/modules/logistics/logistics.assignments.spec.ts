@@ -122,4 +122,113 @@ describe('7C assignment decisions', () => {
       p_action: 'arrive',
     }));
   });
+
+  it('correctly transitions, records navigation event, and broadcasts when pickup driver in in_transit_to_facility arrives at facility', async () => {
+    const driverQuery: any = {
+      select: jest.fn().mockReturnThis(),
+      eq: jest.fn().mockReturnThis(),
+      maybeSingle: jest.fn().mockResolvedValue({
+        data: { id: 'driver-1', is_active: true, profile_id: 'driver-profile', profiles: { full_name: 'Fast Driver' } },
+        error: null,
+      }),
+    };
+
+    const assignmentQuery: any = {
+      select: jest.fn().mockReturnThis(),
+      eq: jest.fn().mockReturnThis(),
+      maybeSingle: jest.fn().mockResolvedValue({
+        data: { id: 'job-p1', order_id: 'order-p1', assignment_type: 'pickup', status: 'arrived' },
+        error: null,
+      }),
+    };
+
+    const orderQuery: any = {
+      select: jest.fn().mockReturnThis(),
+      eq: jest.fn().mockReturnThis(),
+      maybeSingle: jest.fn().mockResolvedValue({
+        data: { id: 'order-p1', current_status: 'in_transit_to_facility', facility_id: 'facility-p1', order_number: 'BW-200' },
+        error: null,
+      }),
+    };
+
+    const navInsert = jest.fn().mockResolvedValue({ error: null });
+    const navQuery: any = {
+      select: jest.fn().mockReturnThis(),
+      eq: jest.fn().mockReturnThis(),
+      order: jest.fn().mockReturnThis(),
+      limit: jest.fn().mockResolvedValue({ data: [], error: null }),
+      insert: navInsert,
+    };
+
+    const staffQuery: any = {
+      select: jest.fn().mockReturnThis(),
+      eq: jest.fn().mockReturnThis(),
+      maybeSingle: jest.fn().mockResolvedValue({ data: null, error: null }),
+      then: jest.fn((resolve: any) => resolve({ data: [{ profile_id: 'staff-profile-1' }], error: null })),
+    };
+
+    const broadcastEvent = jest.fn().mockResolvedValue({ ok: true });
+    const createAndBroadcastNotification = jest.fn().mockResolvedValue({ id: 'notif-1' });
+
+    const service = new LogisticsService({
+      admin: {
+        from: jest.fn((table: string) => {
+          if (table === 'drivers') return driverQuery;
+          if (table === 'driver_assignments') return assignmentQuery;
+          if (table === 'orders') return orderQuery;
+          if (table === 'driver_navigation_events') return navQuery;
+          if (table === 'facility_employees') return staffQuery;
+          return assignmentQuery;
+        }),
+      },
+      broadcastEvent,
+      createAndBroadcastNotification,
+    } as any, {} as any);
+
+    const result = await service.arrive('driver-profile', 'job-p1');
+
+    expect(result).toMatchObject({
+      assignmentId: 'job-p1',
+      orderId: 'order-p1',
+      assignmentStatus: 'arrived',
+      orderStatus: 'in_transit_to_facility',
+      facilityArrival: true,
+    });
+
+    // Verify database navigation event was inserted
+    expect(navInsert).toHaveBeenCalledWith(expect.objectContaining({
+      driver_id: 'driver-1',
+      order_id: 'order-p1',
+      event_type: 'arrived_at_facility',
+    }));
+
+    // Verify DRIVER_ARRIVED_AT_FACILITY broadcast was dispatched to facility:all and facility:facility-p1
+    expect(broadcastEvent).toHaveBeenCalledWith(
+      'facility:all',
+      'DRIVER_ARRIVED_AT_FACILITY',
+      expect.objectContaining({
+        eventType: 'DRIVER_ARRIVED_AT_FACILITY',
+        orderId: 'order-p1',
+        orderNumber: 'BW-200',
+        facilityId: 'facility-p1',
+        driverArrivedAtFacility: true,
+      }),
+    );
+    expect(broadcastEvent).toHaveBeenCalledWith(
+      'facility:facility-p1',
+      'DRIVER_ARRIVED_AT_FACILITY',
+      expect.objectContaining({
+        orderId: 'order-p1',
+        facilityId: 'facility-p1',
+      }),
+    );
+
+    // Verify facility staff notification was created and dispatched
+    expect(createAndBroadcastNotification).toHaveBeenCalledWith(expect.objectContaining({
+      profileId: 'staff-profile-1',
+      orderId: 'order-p1',
+      notificationType: 'driver_arrived_at_facility',
+      title: 'Driver Arrived at Facility',
+    }));
+  });
 });
