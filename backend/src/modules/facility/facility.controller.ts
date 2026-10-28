@@ -19,10 +19,12 @@ import {
 } from "./dto/verify-intake.dto";
 import { QualityDecisionDto } from "./dto/quality-decision.dto";
 import { ConfirmPackingDto } from "./dto/confirm-packing.dto";
+import { Throttle } from "@nestjs/throttler";
 
 @Controller("facility")
 @UseGuards(RolesGuard)
 @Roles("facility_employee", "manager")
+@Throttle({ default: { limit: 120, ttl: 60_000 } })
 export class FacilityController {
   constructor(private readonly facility: FacilityService) {}
 

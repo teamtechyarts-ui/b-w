@@ -127,6 +127,87 @@ export class PaymentsService {
             channels: [`customer:${targetProfileId}`, `user:${targetProfileId}`],
           });
         }
+
+        // Notify eligible drivers about the newly confirmed pickup job
+        try {
+          const rpcRes = await this.db().rpc(
+            'find_driver_assignment_candidates',
+            {
+              p_order_id: orderId,
+              p_assignment_type: 'pickup',
+              p_limit: 12,
+            },
+          );
+
+          let eligibleDriverProfileIds: string[] = [];
+          const candidates = rpcRes?.data;
+          if (!rpcRes?.error && Array.isArray(candidates) && candidates.length > 0) {
+            const candidateDriverIds = candidates.map((c: any) => c.driver_id).filter(Boolean);
+            if (candidateDriverIds.length > 0) {
+              const driversRes = await this.db()
+                .from('drivers')
+                .select('id, profile_id, is_active, is_available')
+                .in('id', candidateDriverIds)
+                .eq('is_active', true)
+                .eq('is_available', true);
+
+              const candidateDrivers = driversRes?.data;
+              eligibleDriverProfileIds = (candidateDrivers ?? [])
+                .map((d: any) => d.profile_id)
+                .filter((pId: string | null): pId is string => Boolean(pId));
+            }
+          }
+
+          if (eligibleDriverProfileIds.length === 0) {
+            const fallbackRes = await this.db()
+              .from('drivers')
+              .select('id, profile_id')
+              .eq('is_active', true)
+              .eq('is_available', true);
+
+            const fallbackDrivers = fallbackRes?.data;
+            eligibleDriverProfileIds = (fallbackDrivers ?? [])
+              .map((d: any) => d.profile_id)
+              .filter((pId: string | null): pId is string => Boolean(pId));
+          }
+
+          eligibleDriverProfileIds = Array.from(new Set(eligibleDriverProfileIds));
+
+          console.log('[DRIVER_NOTIFICATION_ELIGIBILITY_RESOLVED]', {
+            orderId,
+            orderNumber: order?.order_number,
+            eligibleDriverCount: eligibleDriverProfileIds.length,
+            eligibleProfileIds: eligibleDriverProfileIds,
+          });
+
+          for (const driverProfileId of eligibleDriverProfileIds) {
+            console.log('[DRIVER_RECIPIENT_RESOLVED]', {
+              orderId,
+              orderNumber: order?.order_number,
+              driverProfileId,
+              notificationType: 'new_pickup_available',
+            });
+
+            if (typeof (this.supabase as any)?.createAndBroadcastNotification === 'function') {
+              await (this.supabase as any).createAndBroadcastNotification({
+                profileId: driverProfileId,
+                orderId,
+                notificationType: 'new_pickup_available',
+                title: 'New Pickup Job Available',
+                body: `New pickup job available for order #${order?.order_number || ''}.`,
+                data: {
+                  orderId,
+                  orderNumber: order?.order_number || '',
+                  facilityId: order?.facility_id || '',
+                  eventType: 'new_pickup_available',
+                },
+                channels: [`driver:${driverProfileId}`, `user:${driverProfileId}`],
+              });
+            }
+          }
+        } catch (err: any) {
+          console.warn('[PaymentsService] Error notifying drivers of confirmed order:', err?.message);
+        }
       }
     } catch {
       // Safe catch

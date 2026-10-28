@@ -2,9 +2,9 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import {
-  ThrottlerGuard,
   ThrottlerModule,
 } from '@nestjs/throttler';
+import { AppThrottlerGuard } from './common/guards/app-throttler.guard';
 
 import { SupabaseModule } from './modules/supabase/supabase.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -87,7 +87,7 @@ import { validateProviderConfiguration } from './config/provider-config';
     },
     {
       provide: APP_GUARD,
-      useClass: ThrottlerGuard,
+      useClass: AppThrottlerGuard,
     },
   ],
 })

@@ -28,7 +28,7 @@
     "@nestjs/throttler": "^6.4.0",
     "@nestjs/websockets": "^11.0.0",
     "@sentry/node": "^9.0.0",
-    "@supabase/supabase-js": "2.49.1",
+    "@supabase/supabase-js": "~2.95.0",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
     "firebase-admin": "^13.10.0",
@@ -36,8 +36,12 @@
     "razorpay": "^2.9.8",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
-    "socket.io": "^4.8.1",
-    "zod": "^3.24.0"
+    "socket.io": "^4.8.1"
+  },
+  "overrides": {
+    "fastify": "^5.12.7",
+    "js-yaml": "^5.5.0",
+    "uuid": "^11.1.1"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",

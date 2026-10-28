@@ -25,6 +25,7 @@ type NotificationStatus =
 type PersistedNotification = {
   id: string;
   profile_id: string;
+  order_id?: string | null;
   notification_type?: string | null;
   event_type?: string | null;
   title: string;
@@ -126,24 +127,48 @@ export class NotificationDispatcher implements OnModuleInit, OnModuleDestroy {
 
   async processPendingQueue(limit = 20): Promise<number> {
     try {
-      const { data, error } = await this.db()
+      // Prioritize freshly queued notifications first
+      const { data: queuedData, error: queuedError } = await this.db()
         .from('notifications')
         .select('id')
-        .in('status', ['queued', 'failed'])
+        .eq('status', 'queued')
         .order('created_at', { ascending: true })
         .limit(limit);
 
-      if (error || !data || data.length === 0) return 0;
-
       let processedCount = 0;
-      for (const row of data) {
-        try {
-          const res = await this.dispatchPersisted(row.id);
-          if (res.dispatched) processedCount++;
-        } catch {
-          // Individual failure must not block the queue
+      if (!queuedError && queuedData && queuedData.length > 0) {
+        for (const row of queuedData) {
+          try {
+            const res = await this.dispatchPersisted(row.id);
+            if (res.dispatched) processedCount++;
+          } catch {
+            // Individual failure must not block the queue
+          }
+        }
+        return processedCount;
+      }
+
+      // If no queued notifications exist, attempt retry for recent failed notifications only (past 24h)
+      const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const { data: failedData, error: failedError } = await this.db()
+        .from('notifications')
+        .select('id')
+        .eq('status', 'failed')
+        .gte('created_at', oneDayAgo)
+        .order('created_at', { ascending: false })
+        .limit(limit);
+
+      if (!failedError && failedData && failedData.length > 0) {
+        for (const row of failedData) {
+          try {
+            const res = await this.dispatchPersisted(row.id);
+            if (res.dispatched) processedCount++;
+          } catch {
+            // Individual failure must not block the queue
+          }
         }
       }
+
       return processedCount;
     } catch {
       return 0;
@@ -272,17 +297,23 @@ export class NotificationDispatcher implements OnModuleInit, OnModuleDestroy {
     const pushData = toPushData(claimedNotification);
     const deliveryResults = await Promise.all(
       activeDevices.map(async (device): Promise<DeviceDeliveryResult> => {
+        const maskedToken = device.push_token ? `${device.push_token.slice(0, 10)}...` : null;
+
         console.log('[FCM_TOKEN_FOUND]', {
           notificationId: claimedNotification.id,
+          orderId: claimedNotification.order_id || null,
           recipientProfileId: claimedNotification.profile_id,
           deviceTokenId: device.id,
-          tokenPreview: device.push_token ? `${device.push_token.slice(0, 10)}...` : null,
+          tokenPreview: maskedToken,
         });
 
         console.log('[FCM_SEND_STARTED]', {
           notificationId: claimedNotification.id,
+          orderId: claimedNotification.order_id || null,
+          recipientProfileId: claimedNotification.profile_id,
           deviceTokenId: device.id,
           notificationType: claimedNotification.notification_type || claimedNotification.event_type,
+          tokenPreview: maskedToken,
         });
 
         let result: PushSendResult = failedProviderResult();
@@ -311,7 +342,10 @@ export class NotificationDispatcher implements OnModuleInit, OnModuleDestroy {
         if (result.ok) {
           console.log('[FCM_SEND_ACCEPTED]', {
             notificationId: claimedNotification.id,
+            orderId: claimedNotification.order_id || null,
+            recipientProfileId: claimedNotification.profile_id,
             deviceTokenId: device.id,
+            tokenPreview: maskedToken,
             providerMessageId: result.providerMessageId,
           });
           return {
@@ -323,7 +357,10 @@ export class NotificationDispatcher implements OnModuleInit, OnModuleDestroy {
 
         console.warn('[FCM_SEND_FAILED]', {
           notificationId: claimedNotification.id,
+          orderId: claimedNotification.order_id || null,
+          recipientProfileId: claimedNotification.profile_id,
           deviceTokenId: device.id,
+          tokenPreview: maskedToken,
           reason: result.reason,
           errorCode: result.errorCode,
         });

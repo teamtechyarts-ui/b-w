@@ -505,6 +505,15 @@ export class OrdersService {
 
     // If order moves directly to confirmed, notify driver pool, admin, and customer immediately
     if (targetStatus === "confirmed") {
+      console.log('[ORDER_CREATED]', {
+        orderId,
+        orderNumber: orderResult.order_number,
+        status: 'confirmed',
+        customerProfileId: profileId,
+        facilityId: assignedFacilityId,
+        timestamp: new Date().toISOString(),
+      });
+
       const broadcastPayload = {
         eventType: "ORDER_CREATED",
         entityId: orderId,
@@ -541,9 +550,127 @@ export class OrdersService {
           channels: [`customer:${profileId}`, `customer:${customerId}`, `user:${profileId}`],
         });
       }
+
+      // Dispatch targeted push notification to eligible drivers for pickup
+      await this.notifyEligibleDriversForNewOrder(
+        orderId,
+        orderResult.order_number,
+        assignedFacilityId,
+      );
     }
 
     return orderResult;
+  }
+
+  async notifyEligibleDriversForNewOrder(
+    orderId: string,
+    orderNumber: string,
+    facilityId?: string | null,
+  ): Promise<string[]> {
+    try {
+      // 1. Check if an active driver assignment already exists
+      const assignRes = await this.db()
+        .from('driver_assignments')
+        .select('id, driver_id, status')
+        .eq('order_id', orderId)
+        .in('status', ['assigned', 'accepted', 'en_route', 'arrived'])
+        .maybeSingle();
+
+      if (assignRes?.data) {
+        return [];
+      }
+
+      let eligibleDriverProfileIds: string[] = [];
+
+      // 2. Candidate search via spatial proximity & availability RPC
+      try {
+        const rpcRes = await this.db().rpc(
+          'find_driver_assignment_candidates',
+          {
+            p_order_id: orderId,
+            p_assignment_type: 'pickup',
+            p_limit: 12,
+          },
+        );
+
+        const candidates = rpcRes?.data;
+        if (!rpcRes?.error && Array.isArray(candidates) && candidates.length > 0) {
+          const candidateDriverIds = candidates.map((c: any) => c.driver_id).filter(Boolean);
+          if (candidateDriverIds.length > 0) {
+            const driversRes = await this.db()
+              .from('drivers')
+              .select('id, profile_id, is_active, is_available')
+              .in('id', candidateDriverIds)
+              .eq('is_active', true)
+              .eq('is_available', true);
+
+            const candidateDrivers = driversRes?.data;
+            eligibleDriverProfileIds = (candidateDrivers ?? [])
+              .map((d: any) => d.profile_id)
+              .filter((pId: string | null): pId is string => Boolean(pId));
+          }
+        }
+      } catch (err: any) {
+        console.warn('[OrdersService] candidate search RPC error:', err?.message);
+      }
+
+      // 3. Fallback to active and available drivers if spatial RPC returned no candidates
+      if (eligibleDriverProfileIds.length === 0) {
+        const fallbackRes = await this.db()
+          .from('drivers')
+          .select('id, profile_id')
+          .eq('is_active', true)
+          .eq('is_available', true);
+
+        const fallbackDrivers = fallbackRes?.data;
+        eligibleDriverProfileIds = (fallbackDrivers ?? [])
+          .map((d: any) => d.profile_id)
+          .filter((pId: string | null): pId is string => Boolean(pId));
+      }
+
+      // Deduplicate profile IDs
+      eligibleDriverProfileIds = Array.from(new Set(eligibleDriverProfileIds));
+
+      console.log('[DRIVER_NOTIFICATION_ELIGIBILITY_RESOLVED]', {
+        orderId,
+        orderNumber,
+        facilityId: facilityId || null,
+        eligibleDriverCount: eligibleDriverProfileIds.length,
+        eligibleProfileIds: eligibleDriverProfileIds,
+      });
+
+      // 4. Dispatch targeted push notification to each eligible driver
+      for (const driverProfileId of eligibleDriverProfileIds) {
+        console.log('[DRIVER_RECIPIENT_RESOLVED]', {
+          orderId,
+          orderNumber,
+          driverProfileId,
+          notificationType: 'new_pickup_available',
+        });
+
+        if (typeof (this.supabase as any)?.createAndBroadcastNotification === 'function') {
+          await (this.supabase as any).createAndBroadcastNotification({
+            profileId: driverProfileId,
+            orderId,
+            notificationType: 'new_pickup_available',
+            title: 'New Pickup Job Available',
+            body: `New pickup job available for order #${orderNumber}.`,
+            data: {
+              orderId,
+              orderNumber,
+              facilityId: facilityId || '',
+              eventType: 'new_pickup_available',
+            },
+            channels: [`driver:${driverProfileId}`, `user:${driverProfileId}`],
+          });
+        }
+      }
+
+      return eligibleDriverProfileIds;
+    } catch (err: any) {
+      console.warn('[OrdersService] notifyEligibleDriversForNewOrder error:', err?.message);
+      return [];
+    }
   }
 
   async cancel(profileId: string, orderId: string, reason: string) {

@@ -211,6 +211,7 @@ export class SupabaseAuthGuard implements CanActivate {
         throw new UnauthorizedException('Inactive driver account');
       }
     }
+    let facilityId: string | null = null;
     if (roles.includes('facility_employee') || roles.includes('manager')) {
       const { data: staff, error: staffError } = await this.supabase.admin
         .from('facility_employees').select('id,facility_id,employee_role,is_active')
@@ -226,6 +227,7 @@ export class SupabaseAuthGuard implements CanActivate {
       if (facilityError || !facility?.is_active) {
         throw new UnauthorizedException('Inactive facility');
       }
+      facilityId = staff.facility_id;
     }
 
     const resolvedUser = {
@@ -234,6 +236,7 @@ export class SupabaseAuthGuard implements CanActivate {
       email: user.email ?? null,
       roles: [...new Set(roles)],
       permissions: [...new Set(permissions)],
+      facility_id: facilityId,
     };
 
     request.user = resolvedUser;
