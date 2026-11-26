@@ -1,4 +1,7 @@
-import { NotificationDispatcher } from './notification-dispatcher.service';
+import {
+  NotificationDispatcher,
+  shouldRunBackgroundQueueWorker,
+} from './notification-dispatcher.service';
 
 type DatabaseResponse = {
   data?: unknown;
@@ -10,13 +13,44 @@ type ExpectedQuery = {
   response: DatabaseResponse;
 };
 
-function databaseFixture(expectedQueries: ExpectedQuery[]) {
+function databaseFixture(
+  expectedQueries: ExpectedQuery[],
+  rpcHandler?: (
+    fnName: string,
+    params: Record<string, any>,
+  ) => Promise<DatabaseResponse>,
+) {
   const calls: Array<{
     table: string;
     methods: Array<{ name: string; arguments: unknown[] }>;
   }> = [];
 
+  const defaultRpc = async (
+    fnName: string,
+    params: Record<string, any>,
+  ): Promise<DatabaseResponse> => {
+    if (fnName === 'acquire_or_renew_worker_lease') {
+      return {
+        data: [
+          {
+            lease_name: params.p_lease_name,
+            holder_id: params.p_holder_id,
+            acquired: true,
+          },
+        ],
+        error: null,
+      };
+    }
+    if (fnName === 'release_worker_lease') {
+      return { data: true, error: null };
+    }
+    return { data: null, error: null };
+  };
+
   const db = {
+    rpc: jest.fn((fnName: string, params: Record<string, any> = {}) =>
+      rpcHandler ? rpcHandler(fnName, params) : defaultRpc(fnName, params),
+    ),
     from: jest.fn((table: string) => {
       const expected = expectedQueries.shift();
       if (!expected || expected.table !== table) {
@@ -32,6 +66,7 @@ function databaseFixture(expectedQueries: ExpectedQuery[]) {
       for (const name of [
         'select',
         'eq',
+        'gte',
         'update',
         'insert',
         'in',
@@ -75,8 +110,12 @@ function serviceFixture(
     providerMessageId: 'provider-message-id',
   }),
   configured = true,
+  rpcHandler?: (
+    fnName: string,
+    params: Record<string, any>,
+  ) => Promise<DatabaseResponse>,
 ) {
-  const database = databaseFixture(expectedQueries);
+  const database = databaseFixture(expectedQueries, rpcHandler);
   const provider = { configured, send };
   const service = new NotificationDispatcher(
     { admin: database.db } as any,
@@ -306,5 +345,609 @@ describe('NotificationDispatcher', () => {
     )?.arguments[0];
     expect(JSON.stringify(attemptInsert)).not.toContain('provider message');
     expect(JSON.stringify(attemptInsert)).not.toContain('SECRET_PUSH_TOKEN_A');
+  });
+
+  it('skips background queue polling when push provider is not configured', async () => {
+    const f = serviceFixture([], jest.fn(), false);
+    const processed = await f.service.processPendingQueue();
+    expect(processed).toBe(0);
+    expect(f.db.from).not.toHaveBeenCalled();
+  });
+
+  it('throttles failed notification retries and skips permanent or max-attempt failures', async () => {
+    const f = serviceFixture([
+      { table: 'notifications', response: { data: [], error: null } }, // queued check
+      {
+        table: 'notifications',
+        response: {
+          data: [{ id: 'perm-fail' }, { id: 'max-attempt-fail' }],
+          error: null,
+        },
+      }, // failed check
+      {
+        table: 'notification_delivery_attempts',
+        response: {
+          data: [
+            {
+              notification_id: 'perm-fail',
+              attempt_number: 1,
+              provider_response: { reason: 'no_active_devices' },
+            },
+            {
+              notification_id: 'max-attempt-fail',
+              attempt_number: 3,
+              provider_response: { reason: 'transient' },
+            },
+          ],
+          error: null,
+        },
+      },
+      // Second call within 15 minutes should only query queued, NOT failed
+      { table: 'notifications', response: { data: [], error: null } },
+    ]);
+
+    const first = await f.service.processPendingQueue();
+    expect(first).toBe(0);
+
+    const second = await f.service.processPendingQueue();
+    expect(second).toBe(0);
+    expect(f.remaining).toEqual([]);
+  });
+
+  describe('background worker designation and lifecycle', () => {
+    const originalEnv = { ...process.env };
+
+    afterEach(() => {
+      process.env = { ...originalEnv };
+      jest.restoreAllMocks();
+    });
+
+    it('primary worker starts background sweeps and retains event-driven dispatch', async () => {
+      process.env.NODE_APP_INSTANCE = '0';
+      delete process.env.NOTIFICATION_QUEUE_WORKER;
+      delete process.env.NOTIFICATION_PRIMARY_WORKER_ID;
+
+      const setNotificationDispatcher = jest.fn();
+      const dispatcher = new NotificationDispatcher(
+        { admin: {}, setNotificationDispatcher } as any,
+        { configured: true, send: jest.fn() },
+      );
+
+      dispatcher.onModuleInit();
+      try {
+        expect(setNotificationDispatcher).toHaveBeenCalledTimes(1);
+        const overview = await dispatcher.getDiagnosticOverview().catch(() => null);
+        // workerActive reflects queueInterval created on primary worker
+        expect((dispatcher as any).queueInterval).not.toBeNull();
+        expect(overview).toBeDefined();
+      } finally {
+        dispatcher.onModuleDestroy();
+      }
+    });
+
+    it('secondary workers do not start background sweeps but retain event-driven dispatch', () => {
+      process.env.NODE_APP_INSTANCE = '1';
+      delete process.env.NOTIFICATION_QUEUE_WORKER;
+      delete process.env.NOTIFICATION_PRIMARY_WORKER_ID;
+
+      const setNotificationDispatcher = jest.fn();
+      const dispatcher = new NotificationDispatcher(
+        { admin: {}, setNotificationDispatcher } as any,
+        { configured: true, send: jest.fn() },
+      );
+
+      dispatcher.onModuleInit();
+      expect(setNotificationDispatcher).toHaveBeenCalledTimes(1);
+      expect((dispatcher as any).queueInterval).toBeNull();
+      dispatcher.onModuleDestroy();
+    });
+
+    it('respects explicit NOTIFICATION_QUEUE_WORKER=false disable switch', () => {
+      process.env.NODE_APP_INSTANCE = '0';
+      process.env.NOTIFICATION_QUEUE_WORKER = 'false';
+
+      const setNotificationDispatcher = jest.fn();
+      const dispatcher = new NotificationDispatcher(
+        { admin: {}, setNotificationDispatcher } as any,
+        { configured: true, send: jest.fn() },
+      );
+
+      dispatcher.onModuleInit();
+      expect(setNotificationDispatcher).toHaveBeenCalledTimes(1);
+      expect((dispatcher as any).queueInterval).toBeNull();
+      dispatcher.onModuleDestroy();
+    });
+
+    it('supports explicit primary worker designation and handles missing worker identity safely', () => {
+      expect(
+        shouldRunBackgroundQueueWorker({
+          NOTIFICATION_PRIMARY_WORKER_ID: 'worker-a',
+          NOTIFICATION_WORKER_ID: 'worker-a',
+        } as any),
+      ).toBe(true);
+      expect(
+        shouldRunBackgroundQueueWorker({
+          NOTIFICATION_PRIMARY_WORKER_ID: 'worker-a',
+          NOTIFICATION_WORKER_ID: 'worker-b',
+        } as any),
+      ).toBe(false);
+      // Missing worker identity when primary ID is set -> does not run
+      expect(
+        shouldRunBackgroundQueueWorker({
+          NOTIFICATION_PRIMARY_WORKER_ID: 'worker-a',
+        } as any),
+      ).toBe(false);
+      // Missing all worker identity env vars -> safe fallback enables recovery
+      expect(shouldRunBackgroundQueueWorker({} as any)).toBe(true);
+    });
+
+    it('repeated onModuleInit and onModuleDestroy calls do not create duplicate timers', () => {
+      process.env.NOTIFICATION_QUEUE_WORKER = 'true';
+      const setIntervalSpy = jest.spyOn(global, 'setInterval');
+      const clearIntervalSpy = jest.spyOn(global, 'clearInterval');
+
+      const dispatcher = new NotificationDispatcher(
+        { admin: {}, setNotificationDispatcher: jest.fn() } as any,
+        { configured: true, send: jest.fn() },
+      );
+
+      dispatcher.onModuleInit();
+      const firstTimer = (dispatcher as any).queueInterval;
+      dispatcher.onModuleInit();
+      const secondTimer = (dispatcher as any).queueInterval;
+
+      expect(setIntervalSpy).toHaveBeenCalledTimes(2);
+      expect(clearIntervalSpy).toHaveBeenCalledWith(firstTimer);
+      expect(secondTimer).not.toBe(firstTimer);
+
+      dispatcher.onModuleDestroy();
+      expect(clearIntervalSpy).toHaveBeenCalledWith(secondTimer);
+      expect((dispatcher as any).queueInterval).toBeNull();
+    });
+
+    it('across 4 simulated cluster instances, only instance 0 starts background sweeps while all 4 retain event-driven dispatch', () => {
+      const dispatchers = ['0', '1', '2', '3'].map((instanceId) => {
+        process.env.NODE_APP_INSTANCE = instanceId;
+        delete process.env.NOTIFICATION_QUEUE_WORKER;
+        delete process.env.NOTIFICATION_PRIMARY_WORKER_ID;
+        const setNotificationDispatcher = jest.fn();
+        const instance = new NotificationDispatcher(
+          { admin: {}, setNotificationDispatcher } as any,
+          { configured: true, send: jest.fn() },
+        );
+        instance.onModuleInit();
+        return { instanceId, instance, setNotificationDispatcher };
+      });
+
+      try {
+        const activeSweepCount = dispatchers.filter(
+          (d) => (d.instance as any).queueInterval !== null,
+        ).length;
+        expect(activeSweepCount).toBe(1);
+        expect((dispatchers[0].instance as any).queueInterval).not.toBeNull();
+        for (const d of dispatchers) {
+          expect(d.setNotificationDispatcher).toHaveBeenCalledTimes(1);
+        }
+      } finally {
+        for (const d of dispatchers) {
+          d.instance.onModuleDestroy();
+        }
+      }
+    });
+  });
+
+  describe('distributed lease coordination', () => {
+    function createSimulatedLeaseStore(initialNowMs = 1_700_000_000_000) {
+      let nowMs = initialNowMs;
+      const leases = new Map<
+        string,
+        { holder_id: string; leased_until_ms: number; updated_at_ms: number }
+      >();
+
+      const rpcHandler = async (
+        fnName: string,
+        params: Record<string, any>,
+      ): Promise<DatabaseResponse> => {
+        if (fnName === 'acquire_or_renew_worker_lease') {
+          const leaseName = String(params.p_lease_name);
+          const holderId = String(params.p_holder_id);
+          const ttlSeconds = Number(params.p_ttl_seconds);
+          const existing = leases.get(leaseName);
+
+          if (
+            !existing ||
+            existing.leased_until_ms <= nowMs ||
+            existing.holder_id === holderId
+          ) {
+            const next = {
+              holder_id: holderId,
+              leased_until_ms: nowMs + ttlSeconds * 1000,
+              updated_at_ms: nowMs,
+            };
+            leases.set(leaseName, next);
+            return {
+              data: [
+                {
+                  lease_name: leaseName,
+                  holder_id: next.holder_id,
+                  leased_until: new Date(next.leased_until_ms).toISOString(),
+                  acquired: true,
+                },
+              ],
+              error: null,
+            };
+          }
+
+          return {
+            data: [
+              {
+                lease_name: leaseName,
+                holder_id: existing.holder_id,
+                leased_until: new Date(existing.leased_until_ms).toISOString(),
+                acquired: false,
+              },
+            ],
+            error: null,
+          };
+        }
+
+        if (fnName === 'verify_worker_lease') {
+          const leaseName = String(params.p_lease_name);
+          const holderId = String(params.p_holder_id);
+          const existing = leases.get(leaseName);
+          const valid = Boolean(
+            existing &&
+              existing.holder_id === holderId &&
+              existing.leased_until_ms > nowMs,
+          );
+          return { data: valid, error: null };
+        }
+
+        if (fnName === 'release_worker_lease') {
+          const leaseName = String(params.p_lease_name);
+          const holderId = String(params.p_holder_id);
+          const existing = leases.get(leaseName);
+          if (existing && existing.holder_id === holderId) {
+            leases.delete(leaseName);
+            return { data: true, error: null };
+          }
+          return { data: false, error: null };
+        }
+
+        return { data: null, error: null };
+      };
+
+      return {
+        rpcHandler,
+        advanceMs(ms: number) {
+          nowMs += ms;
+        },
+        getLease(leaseName = 'notification_queue_sweep') {
+          return leases.get(leaseName) ?? null;
+        },
+        forceOwner(
+          holderId: string,
+          ttlSeconds = 360,
+          leaseName = 'notification_queue_sweep',
+        ) {
+          leases.set(leaseName, {
+            holder_id: holderId,
+            leased_until_ms: nowMs + ttlSeconds * 1000,
+            updated_at_ms: nowMs,
+          });
+        },
+      };
+    }
+
+    it('when 4 instances start without NODE_APP_INSTANCE, only 1 acquires the lease and queries notifications', async () => {
+      const store = createSimulatedLeaseStore();
+      const instances = Array.from({ length: 4 }, () => {
+        const db = databaseFixture(
+          [
+            { table: 'notifications', response: { data: [], error: null } },
+            { table: 'notifications', response: { data: [], error: null } },
+          ],
+          store.rpcHandler,
+        );
+        const setNotificationDispatcher = jest.fn();
+        const dispatcher = new NotificationDispatcher(
+          { admin: db.db, setNotificationDispatcher } as any,
+          { configured: true, send: jest.fn() },
+        );
+        return { dispatcher, db, setNotificationDispatcher };
+      });
+
+      const results = await Promise.all(
+        instances.map((item) => item.dispatcher.processPendingQueue()),
+      );
+      expect(results).toEqual([0, 0, 0, 0]);
+
+      const queryCounts = instances.map((item) => item.db.calls.length);
+      expect(queryCounts.filter((count) => count === 2)).toHaveLength(1);
+      expect(queryCounts.filter((count) => count === 0)).toHaveLength(3);
+
+      const lease = store.getLease();
+      expect(lease).not.toBeNull();
+      const winnerIndex = queryCounts.findIndex((count) => count === 2);
+      expect(lease?.holder_id).toBe(instances[winnerIndex].dispatcher.getWorkerId());
+    });
+
+    it('skips sweeps on other instances while a valid lease exists and allows renewal by the holder', async () => {
+      const store = createSimulatedLeaseStore(1_700_000_000_000);
+      const primary = serviceFixture(
+        [
+          { table: 'notifications', response: { data: [], error: null } },
+          { table: 'notifications', response: { data: [], error: null } },
+          { table: 'notifications', response: { data: [], error: null } },
+        ],
+        undefined,
+        true,
+        store.rpcHandler,
+      );
+      const secondary = serviceFixture([], undefined, true, store.rpcHandler);
+
+      await primary.service.processPendingQueue();
+      const firstExpiry = store.getLease()?.leased_until_ms ?? 0;
+
+      store.advanceMs(60 * 1000); // 1 minute later (lease still valid)
+      await secondary.service.processPendingQueue();
+      expect(secondary.calls).toHaveLength(0);
+      expect(store.getLease()?.holder_id).toBe(primary.service.getWorkerId());
+
+      store.advanceMs(60 * 1000); // 2 minutes total
+      await primary.service.processPendingQueue();
+      const renewedExpiry = store.getLease()?.leased_until_ms ?? 0;
+      expect(renewedExpiry).toBeGreaterThan(firstExpiry);
+      expect(primary.calls).toHaveLength(3);
+    });
+
+    it('allows another instance to take over after lease expiry', async () => {
+      const store = createSimulatedLeaseStore(1_700_000_000_000);
+      const crashedPrimary = serviceFixture(
+        [
+          { table: 'notifications', response: { data: [], error: null } },
+          { table: 'notifications', response: { data: [], error: null } },
+        ],
+        undefined,
+        true,
+        store.rpcHandler,
+      );
+      const standby = serviceFixture(
+        [
+          { table: 'notifications', response: { data: [], error: null } },
+          { table: 'notifications', response: { data: [], error: null } },
+        ],
+        undefined,
+        true,
+        store.rpcHandler,
+      );
+
+      await crashedPrimary.service.processPendingQueue();
+      expect(store.getLease()?.holder_id).toBe(
+        crashedPrimary.service.getWorkerId(),
+      );
+
+      // Advance past the 360-second TTL without renewal
+      store.advanceMs(361 * 1000);
+
+      await standby.service.processPendingQueue();
+      expect(store.getLease()?.holder_id).toBe(standby.service.getWorkerId());
+      expect(standby.calls).toHaveLength(2);
+    });
+
+    it('prevents a stale holder from releasing a lease owned by another worker', async () => {
+      const store = createSimulatedLeaseStore();
+      const staleWorker = serviceFixture([], undefined, true, store.rpcHandler);
+      const activeWorker = serviceFixture(
+        [
+          { table: 'notifications', response: { data: [], error: null } },
+          { table: 'notifications', response: { data: [], error: null } },
+        ],
+        undefined,
+        true,
+        store.rpcHandler,
+      );
+
+      store.forceOwner(staleWorker.service.getWorkerId(), 10);
+      store.advanceMs(15 * 1000);
+      await activeWorker.service.processPendingQueue();
+      expect(store.getLease()?.holder_id).toBe(activeWorker.service.getWorkerId());
+
+      const released = await staleWorker.service.releaseLease();
+      expect(released).toBe(false);
+      expect(store.getLease()?.holder_id).toBe(activeWorker.service.getWorkerId());
+    });
+
+    function dispatchSuccessQueries(id: string): ExpectedQuery[] {
+      return [
+        {
+          table: 'notifications',
+          response: { data: { ...notification, id }, error: null },
+        },
+        {
+          table: 'notifications',
+          response: {
+            data: { ...notification, id, status: 'processing' },
+            error: null,
+          },
+        },
+        {
+          table: 'notification_preferences',
+          response: { data: { push_enabled: true }, error: null },
+        },
+        {
+          table: 'device_tokens',
+          response: { data: [{ id: 'dev-1', push_token: 'tok-1' }], error: null },
+        },
+        {
+          table: 'notification_delivery_attempts',
+          response: { data: null, error: null },
+        },
+        {
+          table: 'notification_delivery_attempts',
+          response: { data: null, error: null },
+        },
+        { table: 'notifications', response: { data: null, error: null } },
+      ];
+    }
+
+    it('stops processing remaining queued notifications when lease ownership is lost mid-sweep', async () => {
+      const store = createSimulatedLeaseStore();
+      let renewalAttempt = 0;
+
+      const f = serviceFixture(
+        [
+          {
+            table: 'notifications',
+            response: {
+              data: [{ id: 'notif-1' }, { id: 'notif-2' }, { id: 'notif-3' }],
+              error: null,
+            },
+          },
+          ...dispatchSuccessQueries('notif-1'),
+        ],
+        jest.fn(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 25));
+          return { ok: true, providerMessageId: 'msg-1' };
+        }),
+        true,
+        async (fnName, params) => {
+          if (fnName === 'acquire_or_renew_worker_lease') {
+            renewalAttempt += 1;
+            if (renewalAttempt === 1) {
+              return store.rpcHandler(fnName, params);
+            }
+            // Simulate another worker taking over the lease while notif-1 is in flight
+            store.forceOwner('other-worker-uuid', 360);
+            return store.rpcHandler(fnName, params);
+          }
+          return store.rpcHandler(fnName, params);
+        },
+      );
+
+      const processed = await f.service.processPendingQueue(20, 5);
+      expect(processed).toBe(1);
+      expect(f.send).toHaveBeenCalledTimes(1);
+      expect(f.remaining).toEqual([]);
+    });
+
+    it('fails safely without crashing or querying notifications on RPC or network error', async () => {
+      const f = serviceFixture(
+        [],
+        undefined,
+        true,
+        async () => ({ data: null, error: { message: 'connection reset' } }),
+      );
+
+      await expect(f.service.processPendingQueue()).resolves.toBe(0);
+      expect(f.calls).toHaveLength(0);
+
+      const throwing = serviceFixture([], undefined, true, async () => {
+        throw new Error('ECONNREFUSED');
+      });
+      await expect(throwing.service.processPendingQueue()).resolves.toBe(0);
+      expect(throwing.calls).toHaveLength(0);
+    });
+
+    it('renews the lease periodically during a long-running sweep', async () => {
+      const store = createSimulatedLeaseStore();
+      let renewCalls = 0;
+
+      const f = serviceFixture(
+        [
+          {
+            table: 'notifications',
+            response: { data: [{ id: 'notif-slow' }], error: null },
+          },
+          ...dispatchSuccessQueries('notif-slow'),
+        ],
+        jest.fn(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 45));
+          return { ok: true, providerMessageId: 'msg-slow' };
+        }),
+        true,
+        async (fnName, params) => {
+          if (fnName === 'acquire_or_renew_worker_lease') {
+            renewCalls += 1;
+            store.advanceMs(10_000);
+          }
+          return store.rpcHandler(fnName, params);
+        },
+      );
+
+      const processed = await f.service.processPendingQueue(20, 12);
+      expect(processed).toBe(1);
+      expect(renewCalls).toBeGreaterThanOrEqual(2);
+      expect(store.getLease()?.holder_id).toBe(f.service.getWorkerId());
+    });
+
+    it('releases the lease on graceful shutdown only if held by the current instance', async () => {
+      const store = createSimulatedLeaseStore();
+      const holder = serviceFixture(
+        [
+          { table: 'notifications', response: { data: [], error: null } },
+          { table: 'notifications', response: { data: [], error: null } },
+        ],
+        undefined,
+        true,
+        store.rpcHandler,
+      );
+      const nonHolder = serviceFixture([], undefined, true, store.rpcHandler);
+
+      await holder.service.processPendingQueue();
+      expect(store.getLease()?.holder_id).toBe(holder.service.getWorkerId());
+
+      // Non-holder shutdown must not release holder's lease
+      nonHolder.service.onModuleDestroy();
+      expect(store.getLease()?.holder_id).toBe(holder.service.getWorkerId());
+
+      // Holder shutdown releases its own lease
+      holder.service.onModuleDestroy();
+      await Promise.resolve();
+      expect(store.getLease()).toBeNull();
+    });
+
+    it('keeps event-driven dispatch active on all 4 instances even when only 1 holds the recovery lease', async () => {
+      const store = createSimulatedLeaseStore();
+      const handlers: Array<(id: string) => Promise<unknown>> = [];
+      const dispatchers = Array.from({ length: 4 }, (_, index) => {
+        const db = databaseFixture(
+          index === 0
+            ? [
+                { table: 'notifications', response: { data: [], error: null } },
+                { table: 'notifications', response: { data: [], error: null } },
+              ]
+            : dispatchSuccessQueries(`n-${index}`),
+          store.rpcHandler,
+        );
+        const send = jest.fn().mockResolvedValue({
+          ok: true,
+          providerMessageId: `msg-${index}`,
+        });
+        const setNotificationDispatcher = jest.fn((fn) => handlers.push(fn));
+        const dispatcher = new NotificationDispatcher(
+          { admin: db.db, setNotificationDispatcher } as any,
+          { configured: true, send },
+        );
+        dispatcher.onModuleInit();
+        return { dispatcher, db, send };
+      });
+
+      try {
+        await dispatchers[0].dispatcher.processPendingQueue();
+        expect(store.getLease()?.holder_id).toBe(
+          dispatchers[0].dispatcher.getWorkerId(),
+        );
+
+        // Non-lease-holder instance 2 still dispatches immediately via event-driven hook
+        const res = (await handlers[2]('n-2')) as any;
+        expect(res.dispatched).toBe(true);
+        expect(dispatchers[2].send).toHaveBeenCalledTimes(1);
+      } finally {
+        for (const item of dispatchers) {
+          item.dispatcher.onModuleDestroy();
+        }
+      }
+    });
   });
 });

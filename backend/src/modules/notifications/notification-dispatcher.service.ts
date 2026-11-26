@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   BadRequestException,
   Inject,
@@ -101,21 +102,96 @@ function failedProviderResult(): PushSendResult {
   return { ok: false, reason: 'provider_error' };
 }
 
+const QUEUE_POLL_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes safety-net sweep (event-driven is primary)
+const FAILED_RETRY_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes max frequency for transient failed retries
+const LEASE_NAME = 'notification_queue_sweep';
+const LEASE_TTL_SECONDS = 360; // 6 minutes
+const LEASE_RENEWAL_INTERVAL_MS = 120 * 1000; // 2 minutes renewal while long-running sweep is active
+const MAX_RETRY_ATTEMPTS = 3;
+const PERMANENT_FAILURE_REASONS = new Set([
+  'no_active_devices',
+  'push_disabled',
+  'provider_not_configured',
+  'invalid_token',
+]);
+
+export function shouldRunBackgroundQueueWorker(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const explicitFlag = env.NOTIFICATION_QUEUE_WORKER?.trim().toLowerCase();
+  if (explicitFlag === 'false') {
+    return false;
+  }
+  if (explicitFlag === 'true') {
+    return true;
+  }
+
+  const designatedId = env.NOTIFICATION_PRIMARY_WORKER_ID?.trim();
+  if (designatedId) {
+    const currentId = (
+      env.NOTIFICATION_WORKER_ID ??
+      env.NODE_APP_INSTANCE ??
+      env.PM2_INSTANCE_ID ??
+      env.HOSTNAME ??
+      ''
+    ).trim();
+    return currentId === designatedId;
+  }
+
+  const instanceId = (env.NODE_APP_INSTANCE ?? env.PM2_INSTANCE_ID)?.trim();
+  if (instanceId !== undefined && instanceId !== '') {
+    return instanceId === '0';
+  }
+
+  return true;
+}
+
 @Injectable()
 export class NotificationDispatcher implements OnModuleInit, OnModuleDestroy {
+  private readonly workerId: string = randomUUID();
   private queueInterval: NodeJS.Timeout | null = null;
+  private isProcessingQueue = false;
+  private lastFailedRetryAt = 0;
+  private holdsLease = false;
 
   constructor(
     private readonly supabase: SupabaseService,
     @Inject(PUSH_PROVIDER) private readonly pushProvider: PushProvider,
   ) {}
 
+  getWorkerId(): string {
+    return this.workerId;
+  }
+
   onModuleInit() {
+    this.onModuleDestroy();
+    // Preserve event-driven notification dispatch on every backend instance.
     this.supabase.setNotificationDispatcher((id) => this.dispatchPersisted(id));
-    // Start periodic background worker to reliably consume queued notifications
+
+    const backgroundWorkerEnabled = shouldRunBackgroundQueueWorker();
+    console.log('[NOTIFICATION_WORKER_INIT]', {
+      workerId: this.workerId,
+      leaseName: LEASE_NAME,
+      backgroundWorkerEnabled,
+      pollIntervalMs: QUEUE_POLL_INTERVAL_MS,
+      leaseTtlSeconds: LEASE_TTL_SECONDS,
+      leaseRenewalIntervalMs: LEASE_RENEWAL_INTERVAL_MS,
+    });
+
+    if (!backgroundWorkerEnabled) {
+      return;
+    }
+
+    // Safety-net background sweep coordinated across instances via distributed DB lease.
     this.queueInterval = setInterval(() => {
+      if (!this.pushProvider.configured) {
+        return;
+      }
       this.processPendingQueue().catch(() => {});
-    }, 20000);
+    }, QUEUE_POLL_INTERVAL_MS);
+    if (typeof this.queueInterval.unref === 'function') {
+      this.queueInterval.unref();
+    }
   }
 
   onModuleDestroy() {
@@ -123,11 +199,187 @@ export class NotificationDispatcher implements OnModuleInit, OnModuleDestroy {
       clearInterval(this.queueInterval);
       this.queueInterval = null;
     }
+    if (this.holdsLease) {
+      this.holdsLease = false;
+      this.releaseLease().catch(() => {});
+    }
   }
 
-  async processPendingQueue(limit = 20): Promise<number> {
+  async acquireOrRenewLease(
+    phase: 'acquire' | 'renew' = 'acquire',
+  ): Promise<boolean> {
     try {
-      // Prioritize freshly queued notifications first
+      const db = this.db() as any;
+      if (typeof db?.rpc !== 'function') {
+        console.warn('[NOTIFICATION_LEASE_RESULT]', {
+          phase,
+          workerId: this.workerId,
+          leaseName: LEASE_NAME,
+          acquired: false,
+          reason: 'rpc_unavailable',
+        });
+        return false;
+      }
+      const { data, error } = await db.rpc('acquire_or_renew_worker_lease', {
+        p_lease_name: LEASE_NAME,
+        p_holder_id: this.workerId,
+        p_ttl_seconds: LEASE_TTL_SECONDS,
+      });
+      if (error) {
+        this.holdsLease = false;
+        console.warn('[NOTIFICATION_LEASE_RESULT]', {
+          phase,
+          workerId: this.workerId,
+          leaseName: LEASE_NAME,
+          acquired: false,
+          reason: 'rpc_error',
+          errorMessage: error?.message ?? 'unknown_error',
+        });
+        return false;
+      }
+      const row = Array.isArray(data) ? data[0] : data;
+      const isOwner = Boolean(
+        row && row.holder_id === this.workerId && row.acquired !== false,
+      );
+      this.holdsLease = isOwner;
+      console.log('[NOTIFICATION_LEASE_RESULT]', {
+        phase,
+        workerId: this.workerId,
+        leaseName: LEASE_NAME,
+        acquired: isOwner,
+        returnedHolderId: row?.holder_id ?? null,
+        returnedAcquired: row?.acquired ?? null,
+        leasedUntil: row?.leased_until ?? null,
+      });
+      return isOwner;
+    } catch (err) {
+      this.holdsLease = false;
+      console.warn('[NOTIFICATION_LEASE_RESULT]', {
+        phase,
+        workerId: this.workerId,
+        leaseName: LEASE_NAME,
+        acquired: false,
+        reason: 'rpc_exception',
+        errorMessage: err instanceof Error ? err.message : 'unknown_exception',
+      });
+      return false;
+    }
+  }
+
+  async releaseLease(): Promise<boolean> {
+    try {
+      const db = this.db() as any;
+      if (typeof db?.rpc !== 'function') {
+        return false;
+      }
+      const { data, error } = await db.rpc('release_worker_lease', {
+        p_lease_name: LEASE_NAME,
+        p_holder_id: this.workerId,
+      });
+      this.holdsLease = false;
+      if (error) {
+        return false;
+      }
+      return Boolean(data);
+    } catch {
+      this.holdsLease = false;
+      return false;
+    }
+  }
+
+  private isRetryableAttempt(attempt: {
+    attempt_number?: number;
+    provider_response?: any;
+  } | null): boolean {
+    if (!attempt) return true;
+    if (Number(attempt.attempt_number ?? 0) >= MAX_RETRY_ATTEMPTS) {
+      return false;
+    }
+    const reason = attempt.provider_response?.reason;
+    if (typeof reason === 'string' && PERMANENT_FAILURE_REASONS.has(reason)) {
+      return false;
+    }
+    const devices = Array.isArray(attempt.provider_response?.devices)
+      ? attempt.provider_response.devices
+      : [];
+    if (
+      devices.length > 0 &&
+      devices.every(
+        (d: any) =>
+          typeof d?.reason === 'string' && PERMANENT_FAILURE_REASONS.has(d.reason),
+      )
+    ) {
+      return false;
+    }
+    return true;
+  }
+
+  async processPendingQueue(
+    limit = 20,
+    renewalIntervalMs = LEASE_RENEWAL_INTERVAL_MS,
+  ): Promise<number> {
+    if (this.isProcessingQueue) {
+      console.log('[NOTIFICATION_QUEUE_SWEEP_SKIPPED]', {
+        workerId: this.workerId,
+        leaseName: LEASE_NAME,
+        reason: 'already_processing',
+      });
+      return 0;
+    }
+    if (!this.pushProvider.configured) {
+      console.log('[NOTIFICATION_QUEUE_SWEEP_SKIPPED]', {
+        workerId: this.workerId,
+        leaseName: LEASE_NAME,
+        reason: 'provider_not_configured',
+      });
+      return 0;
+    }
+    this.isProcessingQueue = true;
+
+    let leaseLost = false;
+    let renewalTimer: NodeJS.Timeout | null = null;
+
+    try {
+      const acquired = await this.acquireOrRenewLease('acquire');
+      if (!acquired) {
+        console.log('[NOTIFICATION_QUEUE_SWEEP_SKIPPED]', {
+          workerId: this.workerId,
+          leaseName: LEASE_NAME,
+          reason: 'lease_not_acquired',
+        });
+        return 0;
+      }
+
+      console.log('[NOTIFICATION_QUEUE_SWEEP_STARTED]', {
+        workerId: this.workerId,
+        leaseName: LEASE_NAME,
+        limit,
+      });
+
+      renewalTimer = setInterval(() => {
+        this.acquireOrRenewLease('renew')
+          .then((stillOwner) => {
+            if (!stillOwner) {
+              leaseLost = true;
+              console.warn('[NOTIFICATION_LEASE_LOST]', {
+                workerId: this.workerId,
+                leaseName: LEASE_NAME,
+              });
+            }
+          })
+          .catch(() => {
+            leaseLost = true;
+            console.warn('[NOTIFICATION_LEASE_LOST]', {
+              workerId: this.workerId,
+              leaseName: LEASE_NAME,
+            });
+          });
+      }, renewalIntervalMs);
+      if (typeof renewalTimer.unref === 'function') {
+        renewalTimer.unref();
+      }
+
+      // 1. Prioritize queued notifications
       const { data: queuedData, error: queuedError } = await this.db()
         .from('notifications')
         .select('id')
@@ -138,6 +390,9 @@ export class NotificationDispatcher implements OnModuleInit, OnModuleDestroy {
       let processedCount = 0;
       if (!queuedError && queuedData && queuedData.length > 0) {
         for (const row of queuedData) {
+          if (leaseLost || !this.holdsLease) {
+            break;
+          }
           try {
             const res = await this.dispatchPersisted(row.id);
             if (res.dispatched) processedCount++;
@@ -148,8 +403,18 @@ export class NotificationDispatcher implements OnModuleInit, OnModuleDestroy {
         return processedCount;
       }
 
-      // If no queued notifications exist, attempt retry for recent failed notifications only (past 24h)
-      const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      if (leaseLost || !this.holdsLease) {
+        return 0;
+      }
+
+      // 2. Retry recent failed notifications at most once every FAILED_RETRY_INTERVAL_MS (15m)
+      const now = Date.now();
+      if (now - this.lastFailedRetryAt < FAILED_RETRY_INTERVAL_MS) {
+        return 0;
+      }
+      this.lastFailedRetryAt = now;
+
+      const oneDayAgo = new Date(now - 24 * 60 * 60 * 1000).toISOString();
       const { data: failedData, error: failedError } = await this.db()
         .from('notifications')
         .select('id')
@@ -159,7 +424,27 @@ export class NotificationDispatcher implements OnModuleInit, OnModuleDestroy {
         .limit(limit);
 
       if (!failedError && failedData && failedData.length > 0) {
+        const failedIds = failedData.map((row: { id: string }) => row.id);
+        const { data: attemptsData } = await this.db()
+          .from('notification_delivery_attempts')
+          .select('notification_id,attempt_number,provider_response')
+          .in('notification_id', failedIds)
+          .order('attempt_number', { ascending: false });
+
+        const latestAttemptById = new Map<string, any>();
+        for (const attempt of attemptsData ?? []) {
+          if (!latestAttemptById.has(attempt.notification_id)) {
+            latestAttemptById.set(attempt.notification_id, attempt);
+          }
+        }
+
         for (const row of failedData) {
+          if (leaseLost || !this.holdsLease) {
+            break;
+          }
+          if (!this.isRetryableAttempt(latestAttemptById.get(row.id) ?? null)) {
+            continue;
+          }
           try {
             const res = await this.dispatchPersisted(row.id);
             if (res.dispatched) processedCount++;
@@ -172,6 +457,11 @@ export class NotificationDispatcher implements OnModuleInit, OnModuleDestroy {
       return processedCount;
     } catch {
       return 0;
+    } finally {
+      if (renewalTimer) {
+        clearInterval(renewalTimer);
+      }
+      this.isProcessingQueue = false;
     }
   }
 
@@ -279,11 +569,6 @@ export class NotificationDispatcher implements OnModuleInit, OnModuleDestroy {
     }
 
     const activeDevices = (devices ?? []) as DeviceToken[];
-    console.log('[RECIPIENT_RESOLVED]', {
-      notificationId: claimedNotification.id,
-      recipientProfileId: claimedNotification.profile_id,
-      activeDeviceCount: activeDevices.length,
-    });
 
     if (activeDevices.length === 0) {
       return this.finish(
@@ -297,25 +582,6 @@ export class NotificationDispatcher implements OnModuleInit, OnModuleDestroy {
     const pushData = toPushData(claimedNotification);
     const deliveryResults = await Promise.all(
       activeDevices.map(async (device): Promise<DeviceDeliveryResult> => {
-        const maskedToken = device.push_token ? `${device.push_token.slice(0, 10)}...` : null;
-
-        console.log('[FCM_TOKEN_FOUND]', {
-          notificationId: claimedNotification.id,
-          orderId: claimedNotification.order_id || null,
-          recipientProfileId: claimedNotification.profile_id,
-          deviceTokenId: device.id,
-          tokenPreview: maskedToken,
-        });
-
-        console.log('[FCM_SEND_STARTED]', {
-          notificationId: claimedNotification.id,
-          orderId: claimedNotification.order_id || null,
-          recipientProfileId: claimedNotification.profile_id,
-          deviceTokenId: device.id,
-          notificationType: claimedNotification.notification_type || claimedNotification.event_type,
-          tokenPreview: maskedToken,
-        });
-
         let result: PushSendResult = failedProviderResult();
         const maxAttempts = 2;
 
@@ -340,14 +606,6 @@ export class NotificationDispatcher implements OnModuleInit, OnModuleDestroy {
         }
 
         if (result.ok) {
-          console.log('[FCM_SEND_ACCEPTED]', {
-            notificationId: claimedNotification.id,
-            orderId: claimedNotification.order_id || null,
-            recipientProfileId: claimedNotification.profile_id,
-            deviceTokenId: device.id,
-            tokenPreview: maskedToken,
-            providerMessageId: result.providerMessageId,
-          });
           return {
             deviceTokenId: device.id,
             status: 'sent',
@@ -358,9 +616,7 @@ export class NotificationDispatcher implements OnModuleInit, OnModuleDestroy {
         console.warn('[FCM_SEND_FAILED]', {
           notificationId: claimedNotification.id,
           orderId: claimedNotification.order_id || null,
-          recipientProfileId: claimedNotification.profile_id,
           deviceTokenId: device.id,
-          tokenPreview: maskedToken,
           reason: result.reason,
           errorCode: result.errorCode,
         });
@@ -379,12 +635,10 @@ export class NotificationDispatcher implements OnModuleInit, OnModuleDestroy {
       .map((result) => result.deviceTokenId);
 
     if (invalidTokenIds.length > 0) {
-      for (const invalidId of invalidTokenIds) {
-        console.log('[INVALID_TOKEN_DEACTIVATED]', {
-          deviceTokenId: invalidId,
-          recipientProfileId: claimedNotification.profile_id,
-        });
-      }
+      console.warn('[INVALID_TOKENS_DEACTIVATED]', {
+        notificationId: claimedNotification.id,
+        count: invalidTokenIds.length,
+      });
 
       const { error: deactivateError } = await this.db()
         .from('device_tokens')
