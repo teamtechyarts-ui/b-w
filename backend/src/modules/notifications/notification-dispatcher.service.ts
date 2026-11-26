@@ -34,6 +34,7 @@ type PersistedNotification = {
   message?: string | null;
   data?: unknown;
   status: NotificationStatus;
+  processing_started_at?: string | null;
 };
 
 type DeviceToken = {
@@ -104,15 +105,24 @@ function failedProviderResult(): PushSendResult {
 
 const QUEUE_POLL_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes safety-net sweep (event-driven is primary)
 const FAILED_RETRY_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes max frequency for transient failed retries
+const STALE_PROCESSING_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes before a processing claim is considered stale
+const STALE_PROCESSING_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours max age for automatic retry
 const LEASE_NAME = 'notification_queue_sweep';
 const LEASE_TTL_SECONDS = 360; // 6 minutes
 const LEASE_RENEWAL_INTERVAL_MS = 120 * 1000; // 2 minutes renewal while long-running sweep is active
 const MAX_RETRY_ATTEMPTS = 3;
+const SUCCESSFUL_NOTIFICATION_STATUSES = new Set<NotificationStatus>([
+  'sent',
+  'delivered',
+  'read',
+]);
 const PERMANENT_FAILURE_REASONS = new Set([
   'no_active_devices',
   'push_disabled',
   'provider_not_configured',
   'invalid_token',
+  'stale_processing_expired',
+  'stale_processing_max_attempts',
 ]);
 
 export function shouldRunBackgroundQueueWorker(
@@ -331,6 +341,159 @@ export class NotificationDispatcher implements OnModuleInit, OnModuleDestroy {
     return true;
   }
 
+  private resolveConfirmedSuccessfulStatus(
+    attempts: Array<{ status?: string | null }>,
+  ): NotificationStatus | null {
+    if (attempts.some((a) => a.status === 'read')) return 'read';
+    if (attempts.some((a) => a.status === 'delivered')) return 'delivered';
+    if (attempts.some((a) => a.status === 'sent')) return 'sent';
+    return null;
+  }
+
+  async recoverStaleProcessing(
+    limit = 20,
+    shouldContinue: () => boolean = () => true,
+  ): Promise<number> {
+    const now = Date.now();
+    const staleCutoffIso = new Date(
+      now - STALE_PROCESSING_TIMEOUT_MS,
+    ).toISOString();
+
+    const { data: staleRows, error: staleError } = await this.db()
+      .from('notifications')
+      .select('id,created_at,processing_started_at')
+      .eq('status', 'processing')
+      .lt('processing_started_at', staleCutoffIso)
+      .order('processing_started_at', { ascending: true })
+      .limit(limit);
+
+    if (staleError || !staleRows || staleRows.length === 0) {
+      if (staleError) {
+        console.warn('[NOTIFICATION_STALE_RECOVERY_ERROR]', {
+          workerId: this.workerId,
+          stage: 'select_stale',
+          errorCode: staleError?.code ?? null,
+          errorMessage: staleError?.message ?? 'unknown_error',
+        });
+      }
+      return 0;
+    }
+
+    const staleIds = staleRows.map((row: { id: string }) => row.id);
+    const { data: attemptsData, error: attemptsError } = await this.db()
+      .from('notification_delivery_attempts')
+      .select('notification_id,attempt_number,status,provider_response')
+      .in('notification_id', staleIds)
+      .order('attempt_number', { ascending: false });
+
+    if (attemptsError) {
+      console.warn('[NOTIFICATION_STALE_RECOVERY_ERROR]', {
+        workerId: this.workerId,
+        stage: 'select_attempts',
+        errorCode: attemptsError?.code ?? null,
+        errorMessage: attemptsError?.message ?? 'unknown_error',
+      });
+      return 0;
+    }
+
+    const attemptsByNotification = new Map<string, any[]>();
+    for (const attempt of attemptsData ?? []) {
+      const list = attemptsByNotification.get(attempt.notification_id) ?? [];
+      list.push(attempt);
+      attemptsByNotification.set(attempt.notification_id, list);
+    }
+
+    let recoveredCount = 0;
+
+    for (const row of staleRows as Array<{
+      id: string;
+      created_at?: string | null;
+      processing_started_at?: string | null;
+    }>) {
+      if (!shouldContinue()) {
+        break;
+      }
+      if (!row.processing_started_at) {
+        continue;
+      }
+
+      const startedAtMs = Date.parse(row.processing_started_at);
+      if (Number.isNaN(startedAtMs) || now - startedAtMs < STALE_PROCESSING_TIMEOUT_MS) {
+        continue;
+      }
+
+      const attempts = attemptsByNotification.get(row.id) ?? [];
+      const latestAttempt = attempts[0] ?? null;
+      const latestAttemptNumber = Number(latestAttempt?.attempt_number ?? 0);
+      const confirmedSuccessStatus =
+        this.resolveConfirmedSuccessfulStatus(attempts);
+
+      if (confirmedSuccessStatus) {
+        const { data: updated, error: updateError } = await this.db()
+          .from('notifications')
+          .update({
+            status: confirmedSuccessStatus,
+            processing_started_at: null,
+          })
+          .eq('id', row.id)
+          .eq('status', 'processing')
+          .eq('processing_started_at', row.processing_started_at)
+          .select('id')
+          .maybeSingle();
+
+        if (!updateError && updated) {
+          recoveredCount++;
+          console.log('[NOTIFICATION_STALE_RECOVERED]', {
+            workerId: this.workerId,
+            notificationId: row.id,
+            action: 'reconciled_success',
+            targetStatus: confirmedSuccessStatus,
+          });
+        }
+        continue;
+      }
+
+      const createdAtMs = row.created_at ? Date.parse(row.created_at) : NaN;
+      const isExpired =
+        !Number.isNaN(createdAtMs) &&
+        now - createdAtMs >= STALE_PROCESSING_MAX_AGE_MS;
+      const isMaxAttemptsOrPermanent =
+        latestAttemptNumber >= MAX_RETRY_ATTEMPTS ||
+        (latestAttempt !== null && !this.isRetryableAttempt(latestAttempt));
+
+      const recoveryReason = isExpired
+        ? 'stale_processing_expired'
+        : isMaxAttemptsOrPermanent
+          ? 'stale_processing_max_attempts'
+          : 'stale_processing_recovered';
+
+      const { data: updated, error: updateError } = await this.db()
+        .from('notifications')
+        .update({ status: 'failed', processing_started_at: null })
+        .eq('id', row.id)
+        .eq('status', 'processing')
+        .eq('processing_started_at', row.processing_started_at)
+        .select('id')
+        .maybeSingle();
+
+      if (updateError || !updated) {
+        continue;
+      }
+
+      recoveredCount++;
+
+      console.log('[NOTIFICATION_STALE_RECOVERED]', {
+        workerId: this.workerId,
+        notificationId: row.id,
+        action: recoveryReason,
+        targetStatus: 'failed',
+        existingAttemptCount: latestAttemptNumber,
+      });
+    }
+
+    return recoveredCount;
+  }
+
   async processPendingQueue(
     limit = 20,
     renewalIntervalMs = LEASE_RENEWAL_INTERVAL_MS,
@@ -424,14 +587,23 @@ export class NotificationDispatcher implements OnModuleInit, OnModuleDestroy {
         return 0;
       }
 
-      // 2. Retry recent failed notifications at most once every FAILED_RETRY_INTERVAL_MS (15m)
+      // 2. Recover stale processing rows & retry recent failed notifications at most once every FAILED_RETRY_INTERVAL_MS (15m)
       const now = Date.now();
       if (now - this.lastFailedRetryAt < FAILED_RETRY_INTERVAL_MS) {
         return 0;
       }
       this.lastFailedRetryAt = now;
 
-      const oneDayAgo = new Date(now - 24 * 60 * 60 * 1000).toISOString();
+      await this.recoverStaleProcessing(
+        limit,
+        () => !leaseLost && this.holdsLease,
+      );
+
+      if (leaseLost || !this.holdsLease) {
+        return 0;
+      }
+
+      const oneDayAgo = new Date(now - STALE_PROCESSING_MAX_AGE_MS).toISOString();
       const { data: failedData, error: failedError } = await this.db()
         .from('notifications')
         .select('id')
@@ -534,9 +706,10 @@ export class NotificationDispatcher implements OnModuleInit, OnModuleDestroy {
       };
     }
 
+    const claimTimestamp = new Date().toISOString();
     const { data: claimed, error: claimError } = await this.db()
       .from('notifications')
-      .update({ status: 'processing' })
+      .update({ status: 'processing', processing_started_at: claimTimestamp })
       .eq('id', notificationId)
       .eq('status', notification.status)
       .select('*')
@@ -559,133 +732,251 @@ export class NotificationDispatcher implements OnModuleInit, OnModuleDestroy {
     }
 
     const claimedNotification = claimed as PersistedNotification;
-    const { data: preferences, error: preferencesError } = await this.db()
-      .from('notification_preferences')
-      .select('push_enabled')
-      .eq('profile_id', claimedNotification.profile_id)
-      .maybeSingle();
+    const claimToken = claimedNotification.processing_started_at ?? claimTimestamp;
+    let finalized = false;
+    let sentCountSoFar = 0;
 
-    if (preferencesError) {
-      await this.finish(claimedNotification, 'failed', [], 'preferences_unavailable');
-      throw new BadRequestException('Unable to load notification preferences');
-    }
+    try {
+      const { data: preferences, error: preferencesError } = await this.db()
+        .from('notification_preferences')
+        .select('push_enabled')
+        .eq('profile_id', claimedNotification.profile_id)
+        .maybeSingle();
 
-    if (preferences?.push_enabled === false) {
-      return this.finish(claimedNotification, 'cancelled', [], 'push_disabled');
-    }
-
-    const { data: devices, error: devicesError } = await this.db()
-      .from('device_tokens')
-      .select('id,push_token')
-      .eq('profile_id', claimedNotification.profile_id)
-      .eq('is_active', true);
-
-    if (devicesError) {
-      await this.finish(claimedNotification, 'failed', [], 'devices_unavailable');
-      throw new BadRequestException('Unable to load active device tokens');
-    }
-
-    const activeDevices = (devices ?? []) as DeviceToken[];
-
-    if (activeDevices.length === 0) {
-      return this.finish(
-        claimedNotification,
-        'failed',
-        [],
-        'no_active_devices',
-      );
-    }
-
-    const pushData = toPushData(claimedNotification);
-    const deliveryResults = await Promise.all(
-      activeDevices.map(async (device): Promise<DeviceDeliveryResult> => {
-        let result: PushSendResult = failedProviderResult();
-        const maxAttempts = 2;
-
-        for (let attempt = 0; attempt <= maxAttempts; attempt++) {
-          try {
-            result = await this.pushProvider.send({
-              token: device.push_token,
-              title: claimedNotification.title,
-              body:
-                claimedNotification.body ?? claimedNotification.message ?? '',
-              data: pushData,
-            });
-          } catch {
-            result = failedProviderResult();
-          }
-
-          if (result.ok || result.reason !== 'transient' || attempt === maxAttempts) {
-            break;
-          }
-
-          await new Promise((resolve) => setTimeout(resolve, 200 * (attempt + 1)));
-        }
-
-        if (result.ok) {
-          return {
-            deviceTokenId: device.id,
-            status: 'sent',
-            providerMessageId: result.providerMessageId,
-          };
-        }
-
-        console.warn('[FCM_SEND_FAILED]', {
-          notificationId: claimedNotification.id,
-          orderId: claimedNotification.order_id || null,
-          deviceTokenId: device.id,
-          reason: result.reason,
-          errorCode: result.errorCode,
-        });
-
-        return {
-          deviceTokenId: device.id,
-          status: 'failed',
-          reason: result.reason,
-          ...(result.errorCode ? { errorCode: result.errorCode } : {}),
-        };
-      }),
-    );
-
-    const invalidTokenIds = deliveryResults
-      .filter((result) => result.reason === 'invalid_token')
-      .map((result) => result.deviceTokenId);
-
-    if (invalidTokenIds.length > 0) {
-      console.warn('[INVALID_TOKENS_DEACTIVATED]', {
-        notificationId: claimedNotification.id,
-        count: invalidTokenIds.length,
-      });
-
-      const { error: deactivateError } = await this.db()
-        .from('device_tokens')
-        .update({ is_active: false, updated_at: new Date().toISOString() })
-        .in('id', invalidTokenIds);
-
-      if (deactivateError) {
+      if (preferencesError) {
         await this.finish(
           claimedNotification,
+          claimToken,
           'failed',
-          deliveryResults,
-          'token_deactivation_failed',
+          [],
+          'preferences_unavailable',
         );
-        throw new BadRequestException('Unable to deactivate invalid device tokens');
+        finalized = true;
+        throw new BadRequestException('Unable to load notification preferences');
       }
+
+      if (preferences?.push_enabled === false) {
+        const result = await this.finish(
+          claimedNotification,
+          claimToken,
+          'cancelled',
+          [],
+          'push_disabled',
+        );
+        finalized = true;
+        return result;
+      }
+
+      const { data: devices, error: devicesError } = await this.db()
+        .from('device_tokens')
+        .select('id,push_token')
+        .eq('profile_id', claimedNotification.profile_id)
+        .eq('is_active', true);
+
+      if (devicesError) {
+        await this.finish(
+          claimedNotification,
+          claimToken,
+          'failed',
+          [],
+          'devices_unavailable',
+        );
+        finalized = true;
+        throw new BadRequestException('Unable to load active device tokens');
+      }
+
+      const activeDevices = (devices ?? []) as DeviceToken[];
+
+      if (activeDevices.length === 0) {
+        const result = await this.finish(
+          claimedNotification,
+          claimToken,
+          'failed',
+          [],
+          'no_active_devices',
+        );
+        finalized = true;
+        return result;
+      }
+
+      const pushData = toPushData(claimedNotification);
+      const deliveryResults = await Promise.all(
+        activeDevices.map(async (device): Promise<DeviceDeliveryResult> => {
+          let result: PushSendResult = failedProviderResult();
+          const maxAttempts = 2;
+
+          for (let attempt = 0; attempt <= maxAttempts; attempt++) {
+            try {
+              result = await this.pushProvider.send({
+                token: device.push_token,
+                title: claimedNotification.title,
+                body:
+                  claimedNotification.body ?? claimedNotification.message ?? '',
+                data: pushData,
+              });
+            } catch {
+              result = failedProviderResult();
+            }
+
+            if (result.ok || result.reason !== 'transient' || attempt === maxAttempts) {
+              break;
+            }
+
+            await new Promise((resolve) => setTimeout(resolve, 200 * (attempt + 1)));
+          }
+
+          if (result.ok) {
+            return {
+              deviceTokenId: device.id,
+              status: 'sent',
+              providerMessageId: result.providerMessageId,
+            };
+          }
+
+          console.warn('[FCM_SEND_FAILED]', {
+            notificationId: claimedNotification.id,
+            orderId: claimedNotification.order_id || null,
+            deviceTokenId: device.id,
+            reason: result.reason,
+            errorCode: result.errorCode,
+          });
+
+          return {
+            deviceTokenId: device.id,
+            status: 'failed',
+            reason: result.reason,
+            ...(result.errorCode ? { errorCode: result.errorCode } : {}),
+          };
+        }),
+      );
+
+      const sentCount = deliveryResults.filter(
+        (result) => result.status === 'sent',
+      ).length;
+      sentCountSoFar = sentCount;
+
+      const invalidTokenIds = deliveryResults
+        .filter((result) => result.reason === 'invalid_token')
+        .map((result) => result.deviceTokenId);
+
+      if (invalidTokenIds.length > 0) {
+        console.warn('[INVALID_TOKENS_DEACTIVATED]', {
+          notificationId: claimedNotification.id,
+          count: invalidTokenIds.length,
+        });
+
+        const { error: deactivateError } = await this.db()
+          .from('device_tokens')
+          .update({ is_active: false, updated_at: new Date().toISOString() })
+          .in('id', invalidTokenIds);
+
+        if (deactivateError) {
+          await this.finish(
+            claimedNotification,
+            claimToken,
+            'failed',
+            deliveryResults,
+            'token_deactivation_failed',
+          );
+          finalized = true;
+          throw new BadRequestException('Unable to deactivate invalid device tokens');
+        }
+      }
+
+      const result = await this.finish(
+        claimedNotification,
+        claimToken,
+        sentCount > 0 ? 'sent' : 'failed',
+        deliveryResults,
+      );
+      finalized = true;
+      return result;
+    } catch (err) {
+      if (!finalized) {
+        console.warn('[NOTIFICATION_DISPATCH_EXCEPTION]', {
+          workerId: this.workerId,
+          notificationId: claimedNotification.id,
+          sentCountSoFar,
+          errorMessage: err instanceof Error ? err.message : 'unknown_error',
+        });
+        await this.reconcileClaimedNotificationOnError(
+          claimedNotification.id,
+          claimToken,
+          sentCountSoFar,
+        );
+      }
+      throw err;
     }
+  }
 
-    const sentCount = deliveryResults.filter(
-      (result) => result.status === 'sent',
-    ).length;
+  private async reconcileClaimedNotificationOnError(
+    notificationId: string,
+    claimToken: string,
+    sentCountSoFar: number,
+  ): Promise<void> {
+    try {
+      const { data: attemptsData, error: attemptsError } = await this.db()
+        .from('notification_delivery_attempts')
+        .select('status,attempt_number')
+        .eq('notification_id', notificationId)
+        .order('attempt_number', { ascending: false });
 
-    return this.finish(
-      claimedNotification,
-      sentCount > 0 ? 'sent' : 'failed',
-      deliveryResults,
-    );
+      const confirmedSuccessStatus =
+        !attemptsError && Array.isArray(attemptsData)
+          ? this.resolveConfirmedSuccessfulStatus(attemptsData)
+          : null;
+
+      // Never blindly reset to queued; preserve confirmed/in-flight FCM success to avoid duplicate push.
+      const targetStatus: NotificationStatus =
+        confirmedSuccessStatus ?? (sentCountSoFar > 0 ? 'sent' : 'failed');
+
+      const { data: updated, error: updateError } = await this.db()
+        .from('notifications')
+        .update({ status: targetStatus, processing_started_at: null })
+        .eq('id', notificationId)
+        .eq('status', 'processing')
+        .eq('processing_started_at', claimToken)
+        .select('id')
+        .maybeSingle();
+
+      if (updateError) {
+        console.warn('[NOTIFICATION_DISPATCH_RECONCILE_FAILED]', {
+          workerId: this.workerId,
+          notificationId,
+          targetStatus,
+          errorCode: updateError?.code ?? null,
+          errorMessage: updateError?.message ?? 'unknown_error',
+        });
+        return;
+      }
+
+      if (!updated) {
+        console.warn('[NOTIFICATION_DISPATCH_RECONCILE_STALE_CLAIM]', {
+          workerId: this.workerId,
+          notificationId,
+          targetStatus,
+        });
+        return;
+      }
+
+      console.log('[NOTIFICATION_DISPATCH_RECONCILED]', {
+        workerId: this.workerId,
+        notificationId,
+        targetStatus,
+      });
+    } catch (reconcileErr) {
+      console.warn('[NOTIFICATION_DISPATCH_RECONCILE_FAILED]', {
+        workerId: this.workerId,
+        notificationId,
+        errorMessage:
+          reconcileErr instanceof Error ? reconcileErr.message : 'unknown_error',
+      });
+    }
   }
 
   private async finish(
     notification: PersistedNotification,
+    claimToken: string,
     status: NotificationStatus,
     results: DeviceDeliveryResult[],
     reason?: string,
@@ -729,14 +1020,34 @@ export class NotificationDispatcher implements OnModuleInit, OnModuleDestroy {
       throw new BadRequestException('Unable to record notification attempt');
     }
 
-    const { error: statusError } = await this.db()
+    const { data: updatedNotification, error: statusError } = await this.db()
       .from('notifications')
-      .update({ status })
+      .update({ status, processing_started_at: null })
       .eq('id', notification.id)
-      .eq('status', 'processing');
+      .eq('status', 'processing')
+      .eq('processing_started_at', claimToken)
+      .select('id')
+      .maybeSingle();
 
     if (statusError) {
       throw new BadRequestException('Unable to update notification status');
+    }
+
+    if (!updatedNotification) {
+      console.warn('[NOTIFICATION_FINISH_STALE_CLAIM]', {
+        workerId: this.workerId,
+        notificationId: notification.id,
+        attemptedStatus: status,
+      });
+      return {
+        notificationId: notification.id,
+        dispatched: false,
+        status: 'processing',
+        attemptedDeviceCount: results.length,
+        sentCount,
+        failedCount,
+        reason: 'stale_claim',
+      };
     }
 
     return {

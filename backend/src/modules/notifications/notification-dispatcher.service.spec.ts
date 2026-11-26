@@ -67,6 +67,7 @@ function databaseFixture(
         'select',
         'eq',
         'gte',
+        'lt',
         'update',
         'insert',
         'in',
@@ -167,7 +168,10 @@ describe('NotificationDispatcher', () => {
           table: 'notification_delivery_attempts',
           response: { data: null, error: null },
         },
-        { table: 'notifications', response: { data: null, error: null } },
+        {
+          table: 'notifications',
+          response: { data: { id: notification.id }, error: null },
+        },
       ],
       send,
     );
@@ -232,7 +236,10 @@ describe('NotificationDispatcher', () => {
         table: 'notification_delivery_attempts',
         response: { data: null, error: null },
       },
-      { table: 'notifications', response: { data: null, error: null } },
+      {
+        table: 'notifications',
+        response: { data: { id: notification.id }, error: null },
+      },
     ]);
 
     await expect(f.service.dispatchPersisted(notification.id)).resolves.toEqual({
@@ -266,7 +273,10 @@ describe('NotificationDispatcher', () => {
         table: 'notification_delivery_attempts',
         response: { data: null, error: null },
       },
-      { table: 'notifications', response: { data: null, error: null } },
+      {
+        table: 'notifications',
+        response: { data: { id: notification.id }, error: null },
+      },
     ]);
 
     await expect(f.service.dispatchPersisted(notification.id)).resolves.toEqual({
@@ -331,7 +341,10 @@ describe('NotificationDispatcher', () => {
           table: 'notification_delivery_attempts',
           response: { data: null, error: null },
         },
-        { table: 'notifications', response: { data: null, error: null } },
+        {
+          table: 'notifications',
+          response: { data: { id: notification.id }, error: null },
+        },
       ],
       send,
     );
@@ -357,6 +370,7 @@ describe('NotificationDispatcher', () => {
   it('throttles failed notification retries and skips permanent or max-attempt failures', async () => {
     const f = serviceFixture([
       { table: 'notifications', response: { data: [], error: null } }, // queued check
+      { table: 'notifications', response: { data: [], error: null } }, // stale processing check
       {
         table: 'notifications',
         response: {
@@ -382,7 +396,7 @@ describe('NotificationDispatcher', () => {
           error: null,
         },
       },
-      // Second call within 15 minutes should only query queued, NOT failed
+      // Second call within 15 minutes should only query queued, NOT stale/failed
       { table: 'notifications', response: { data: [], error: null } },
     ]);
 
@@ -646,6 +660,7 @@ describe('NotificationDispatcher', () => {
           [
             { table: 'notifications', response: { data: [], error: null } },
             { table: 'notifications', response: { data: [], error: null } },
+            { table: 'notifications', response: { data: [], error: null } },
           ],
           store.rpcHandler,
         );
@@ -663,12 +678,12 @@ describe('NotificationDispatcher', () => {
       expect(results).toEqual([0, 0, 0, 0]);
 
       const queryCounts = instances.map((item) => item.db.calls.length);
-      expect(queryCounts.filter((count) => count === 2)).toHaveLength(1);
+      expect(queryCounts.filter((count) => count === 3)).toHaveLength(1);
       expect(queryCounts.filter((count) => count === 0)).toHaveLength(3);
 
       const lease = store.getLease();
       expect(lease).not.toBeNull();
-      const winnerIndex = queryCounts.findIndex((count) => count === 2);
+      const winnerIndex = queryCounts.findIndex((count) => count === 3);
       expect(lease?.holder_id).toBe(instances[winnerIndex].dispatcher.getWorkerId());
     });
 
@@ -676,6 +691,7 @@ describe('NotificationDispatcher', () => {
       const store = createSimulatedLeaseStore(1_700_000_000_000);
       const primary = serviceFixture(
         [
+          { table: 'notifications', response: { data: [], error: null } },
           { table: 'notifications', response: { data: [], error: null } },
           { table: 'notifications', response: { data: [], error: null } },
           { table: 'notifications', response: { data: [], error: null } },
@@ -698,13 +714,14 @@ describe('NotificationDispatcher', () => {
       await primary.service.processPendingQueue();
       const renewedExpiry = store.getLease()?.leased_until_ms ?? 0;
       expect(renewedExpiry).toBeGreaterThan(firstExpiry);
-      expect(primary.calls).toHaveLength(3);
+      expect(primary.calls).toHaveLength(4);
     });
 
     it('allows another instance to take over after lease expiry', async () => {
       const store = createSimulatedLeaseStore(1_700_000_000_000);
       const crashedPrimary = serviceFixture(
         [
+          { table: 'notifications', response: { data: [], error: null } },
           { table: 'notifications', response: { data: [], error: null } },
           { table: 'notifications', response: { data: [], error: null } },
         ],
@@ -714,6 +731,7 @@ describe('NotificationDispatcher', () => {
       );
       const standby = serviceFixture(
         [
+          { table: 'notifications', response: { data: [], error: null } },
           { table: 'notifications', response: { data: [], error: null } },
           { table: 'notifications', response: { data: [], error: null } },
         ],
@@ -732,7 +750,7 @@ describe('NotificationDispatcher', () => {
 
       await standby.service.processPendingQueue();
       expect(store.getLease()?.holder_id).toBe(standby.service.getWorkerId());
-      expect(standby.calls).toHaveLength(2);
+      expect(standby.calls).toHaveLength(3);
     });
 
     it('prevents a stale holder from releasing a lease owned by another worker', async () => {
@@ -740,6 +758,7 @@ describe('NotificationDispatcher', () => {
       const staleWorker = serviceFixture([], undefined, true, store.rpcHandler);
       const activeWorker = serviceFixture(
         [
+          { table: 'notifications', response: { data: [], error: null } },
           { table: 'notifications', response: { data: [], error: null } },
           { table: 'notifications', response: { data: [], error: null } },
         ],
@@ -787,7 +806,7 @@ describe('NotificationDispatcher', () => {
           table: 'notification_delivery_attempts',
           response: { data: null, error: null },
         },
-        { table: 'notifications', response: { data: null, error: null } },
+        { table: 'notifications', response: { data: { id }, error: null } },
       ];
     }
 
@@ -887,6 +906,7 @@ describe('NotificationDispatcher', () => {
         [
           { table: 'notifications', response: { data: [], error: null } },
           { table: 'notifications', response: { data: [], error: null } },
+          { table: 'notifications', response: { data: [], error: null } },
         ],
         undefined,
         true,
@@ -914,6 +934,7 @@ describe('NotificationDispatcher', () => {
         const db = databaseFixture(
           index === 0
             ? [
+                { table: 'notifications', response: { data: [], error: null } },
                 { table: 'notifications', response: { data: [], error: null } },
                 { table: 'notifications', response: { data: [], error: null } },
               ]
@@ -1104,6 +1125,603 @@ describe('NotificationDispatcher', () => {
       await expect(f.service.acquireOrRenewLease('acquire')).resolves.toBe(false);
       await expect(f.service.processPendingQueue()).resolves.toBe(0);
       expect(f.calls).toHaveLength(0);
+    });
+  });
+
+  describe('stale processing lifecycle recovery and exception safety', () => {
+    it('ignores fresh processing records younger than 10 minutes', async () => {
+      const freshStartedAt = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+      const f = serviceFixture([
+        {
+          table: 'notifications',
+          response: {
+            data: [
+              {
+                id: 'fresh-processing',
+                created_at: new Date(Date.now() - 3 * 60 * 1000).toISOString(),
+                processing_started_at: freshStartedAt,
+              },
+            ],
+            error: null,
+          },
+        },
+        {
+          table: 'notification_delivery_attempts',
+          response: { data: [], error: null },
+        },
+      ]);
+
+      const recovered = await f.service.recoverStaleProcessing();
+      expect(recovered).toBe(0);
+      expect(f.send).not.toHaveBeenCalled();
+      expect(f.remaining).toEqual([]);
+    });
+
+    it('reconciles stale processing with confirmed successful attempt without re-sending', async () => {
+      const staleStartedAt = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+      const f = serviceFixture([
+        {
+          table: 'notifications',
+          response: {
+            data: [
+              {
+                id: 'already-sent-id',
+                created_at: new Date(Date.now() - 20 * 60 * 1000).toISOString(),
+                processing_started_at: staleStartedAt,
+              },
+            ],
+            error: null,
+          },
+        },
+        {
+          table: 'notification_delivery_attempts',
+          response: {
+            data: [
+              {
+                notification_id: 'already-sent-id',
+                attempt_number: 1,
+                status: 'sent',
+                provider_response: { sentCount: 1 },
+              },
+            ],
+            error: null,
+          },
+        },
+        {
+          table: 'notifications',
+          response: { data: { id: 'already-sent-id' }, error: null },
+        },
+      ]);
+
+      const recovered = await f.service.recoverStaleProcessing();
+      expect(recovered).toBe(1);
+      expect(f.send).not.toHaveBeenCalled();
+      expect(f.remaining).toEqual([]);
+
+      const updateCall = f.calls[2];
+      expect(updateCall.methods).toContainEqual({
+        name: 'update',
+        arguments: [{ status: 'sent', processing_started_at: null }],
+      });
+      expect(updateCall.methods).toContainEqual({
+        name: 'eq',
+        arguments: ['processing_started_at', staleStartedAt],
+      });
+    });
+
+    it('marks historical stale processing records older than 24 hours as failed without sending or synthetic attempts', async () => {
+      const oldCreatedAt = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+      const staleStartedAt = new Date(Date.now() - 47 * 60 * 60 * 1000).toISOString();
+      const f = serviceFixture([
+        {
+          table: 'notifications',
+          response: {
+            data: [
+              {
+                id: 'oct-historical-id',
+                created_at: oldCreatedAt,
+                processing_started_at: staleStartedAt,
+              },
+            ],
+            error: null,
+          },
+        },
+        {
+          table: 'notification_delivery_attempts',
+          response: { data: [], error: null },
+        },
+        {
+          table: 'notifications',
+          response: { data: { id: 'oct-historical-id' }, error: null },
+        },
+      ]);
+
+      const recovered = await f.service.recoverStaleProcessing();
+      expect(recovered).toBe(1);
+      expect(f.send).not.toHaveBeenCalled();
+      expect(f.remaining).toEqual([]);
+      expect(f.calls).toHaveLength(3); // No synthetic attempt insert
+
+      expect(f.calls[2].methods).toContainEqual({
+        name: 'update',
+        arguments: [{ status: 'failed', processing_started_at: null }],
+      });
+    });
+
+    it('respects maximum attempt count (3) and marks stale processing as failed without synthetic attempts', async () => {
+      const staleStartedAt = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+      const f = serviceFixture([
+        {
+          table: 'notifications',
+          response: {
+            data: [
+              {
+                id: 'max-attempt-stale',
+                created_at: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+                processing_started_at: staleStartedAt,
+              },
+            ],
+            error: null,
+          },
+        },
+        {
+          table: 'notification_delivery_attempts',
+          response: {
+            data: [
+              {
+                notification_id: 'max-attempt-stale',
+                attempt_number: 3,
+                status: 'failed',
+                provider_response: { reason: 'transient' },
+              },
+            ],
+            error: null,
+          },
+        },
+        {
+          table: 'notifications',
+          response: { data: { id: 'max-attempt-stale' }, error: null },
+        },
+      ]);
+
+      const recovered = await f.service.recoverStaleProcessing();
+      expect(recovered).toBe(1);
+      expect(f.send).not.toHaveBeenCalled();
+      expect(f.calls).toHaveLength(3); // No synthetic attempt insert
+      expect(f.calls[2].methods).toContainEqual({
+        name: 'update',
+        arguments: [{ status: 'failed', processing_started_at: null }],
+      });
+    });
+
+    it('recovers recent stale processing records safely for one controlled retry without synthetic attempts', async () => {
+      const staleStartedAt = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+      const f = serviceFixture([
+        {
+          table: 'notifications',
+          response: {
+            data: [
+              {
+                id: 'recent-stale-id',
+                created_at: new Date(Date.now() - 20 * 60 * 1000).toISOString(),
+                processing_started_at: staleStartedAt,
+              },
+            ],
+            error: null,
+          },
+        },
+        {
+          table: 'notification_delivery_attempts',
+          response: { data: [], error: null },
+        },
+        {
+          table: 'notifications',
+          response: { data: { id: 'recent-stale-id' }, error: null },
+        },
+      ]);
+
+      const recovered = await f.service.recoverStaleProcessing();
+      expect(recovered).toBe(1);
+      expect(f.calls).toHaveLength(3); // No synthetic attempt insert
+      expect(f.calls[2].methods).toContainEqual({
+        name: 'update',
+        arguments: [{ status: 'failed', processing_started_at: null }],
+      });
+    });
+
+    it('ignores legacy processing records with NULL processing_started_at', async () => {
+      const f = serviceFixture([
+        {
+          table: 'notifications',
+          response: {
+            data: [
+              {
+                id: 'legacy-null-ts',
+                created_at: new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString(),
+                processing_started_at: null,
+              },
+            ],
+            error: null,
+          },
+        },
+        {
+          table: 'notification_delivery_attempts',
+          response: { data: [], error: null },
+        },
+      ]);
+
+      const recovered = await f.service.recoverStaleProcessing();
+      expect(recovered).toBe(0);
+      expect(f.calls).toHaveLength(2);
+      expect(f.remaining).toEqual([]);
+    });
+
+    it('stops stale-processing recovery immediately when lease is lost', async () => {
+      const staleStartedAt = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+      let callsAllowed = 1;
+      const f = serviceFixture([
+        {
+          table: 'notifications',
+          response: {
+            data: [
+              {
+                id: 'stale-1',
+                created_at: new Date(Date.now() - 20 * 60 * 1000).toISOString(),
+                processing_started_at: staleStartedAt,
+              },
+              {
+                id: 'stale-2',
+                created_at: new Date(Date.now() - 20 * 60 * 1000).toISOString(),
+                processing_started_at: staleStartedAt,
+              },
+            ],
+            error: null,
+          },
+        },
+        {
+          table: 'notification_delivery_attempts',
+          response: { data: [], error: null },
+        },
+        {
+          table: 'notifications',
+          response: { data: { id: 'stale-1' }, error: null },
+        },
+      ]);
+
+      const recovered = await f.service.recoverStaleProcessing(20, () => {
+        if (callsAllowed > 0) {
+          callsAllowed -= 1;
+          return true;
+        }
+        return false;
+      });
+
+      expect(recovered).toBe(1);
+      expect(f.remaining).toEqual([]);
+      expect(f.calls).toHaveLength(3);
+    });
+
+    it('prevents Worker A from overwriting Worker B newer claim on finish()', async () => {
+      const workerAClaimToken = '2026-11-26T06:00:00.000000+00:00';
+      const f = serviceFixture([
+        { table: 'notifications', response: { data: notification, error: null } },
+        {
+          table: 'notifications',
+          response: {
+            data: {
+              ...notification,
+              status: 'processing',
+              processing_started_at: workerAClaimToken,
+            },
+            error: null,
+          },
+        },
+        {
+          table: 'notification_preferences',
+          response: { data: { push_enabled: true }, error: null },
+        },
+        {
+          table: 'device_tokens',
+          response: { data: [{ id: 'dev-1', push_token: 'tok-1' }], error: null },
+        },
+        {
+          table: 'notification_delivery_attempts',
+          response: { data: null, error: null },
+        },
+        {
+          table: 'notification_delivery_attempts',
+          response: { data: null, error: null },
+        },
+        // Worker B already holds a newer processing_started_at, so Worker A's fenced update matches 0 rows
+        { table: 'notifications', response: { data: null, error: null } },
+      ]);
+
+      const res = await f.service.dispatchPersisted(notification.id);
+      expect(res.dispatched).toBe(false);
+      expect(res.reason).toBe('stale_claim');
+      expect(f.remaining).toEqual([]);
+
+      const finishUpdate = f.calls[6];
+      expect(finishUpdate.methods).toContainEqual({
+        name: 'eq',
+        arguments: ['status', 'processing'],
+      });
+      expect(finishUpdate.methods).toContainEqual({
+        name: 'eq',
+        arguments: ['processing_started_at', workerAClaimToken],
+      });
+    });
+
+    it('prevents Worker A from reconciling an exception against Worker B newer claim', async () => {
+      const workerAClaimToken = '2026-11-26T06:00:00.000000+00:00';
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        const f = serviceFixture([
+          { table: 'notifications', response: { data: notification, error: null } },
+          {
+            table: 'notifications',
+            response: {
+              data: {
+                ...notification,
+                status: 'processing',
+                processing_started_at: workerAClaimToken,
+              },
+              error: null,
+            },
+          },
+          {
+            table: 'notification_preferences',
+            response: { data: { push_enabled: true }, error: null },
+          },
+          {
+            table: 'device_tokens',
+            response: { data: [{ id: 'dev-1', push_token: 'tok-1' }], error: null },
+          },
+          // finish() attempt insert fails after FCM succeeded
+          {
+            table: 'notification_delivery_attempts',
+            response: { data: null, error: null },
+          },
+          {
+            table: 'notification_delivery_attempts',
+            response: { data: null, error: { message: 'insert failed' } },
+          },
+          // reconcileClaimedNotificationOnError checks attempts, then fenced update matches 0 rows (Worker B owns newer claim)
+          {
+            table: 'notification_delivery_attempts',
+            response: { data: [], error: null },
+          },
+          { table: 'notifications', response: { data: null, error: null } },
+        ]);
+
+        await expect(f.service.dispatchPersisted(notification.id)).rejects.toThrow(
+          'Unable to record notification attempt',
+        );
+        expect(f.remaining).toEqual([]);
+        expect(f.calls[7].methods).toContainEqual({
+          name: 'eq',
+          arguments: ['processing_started_at', workerAClaimToken],
+        });
+        expect(warnSpy).toHaveBeenCalledWith(
+          '[NOTIFICATION_DISPATCH_RECONCILE_STALE_CLAIM]',
+          expect.objectContaining({
+            notificationId: notification.id,
+            targetStatus: 'sent',
+          }),
+        );
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    it('reconciles safely to sent when FCM succeeds but notification status update fails', async () => {
+      const f = serviceFixture([
+        { table: 'notifications', response: { data: notification, error: null } },
+        {
+          table: 'notifications',
+          response: { data: { ...notification, status: 'processing' }, error: null },
+        },
+        {
+          table: 'notification_preferences',
+          response: { data: { push_enabled: true }, error: null },
+        },
+        {
+          table: 'device_tokens',
+          response: { data: [{ id: 'dev-1', push_token: 'tok-1' }], error: null },
+        },
+        {
+          table: 'notification_delivery_attempts',
+          response: { data: null, error: null },
+        },
+        {
+          table: 'notification_delivery_attempts',
+          response: { data: null, error: null },
+        },
+        // notifications status update throws error
+        {
+          table: 'notifications',
+          response: { data: null, error: { message: 'status update timeout' } },
+        },
+        // reconcileClaimedNotificationOnError reads attempts (sees sent) and retries fenced update -> sent
+        {
+          table: 'notification_delivery_attempts',
+          response: {
+            data: [{ status: 'sent', attempt_number: 1 }],
+            error: null,
+          },
+        },
+        {
+          table: 'notifications',
+          response: { data: { id: notification.id }, error: null },
+        },
+      ]);
+
+      await expect(f.service.dispatchPersisted(notification.id)).rejects.toThrow(
+        'Unable to update notification status',
+      );
+      expect(f.remaining).toEqual([]);
+      expect(f.calls[8].methods).toContainEqual({
+        name: 'update',
+        arguments: [{ status: 'sent', processing_started_at: null }],
+      });
+    });
+
+    it('prevents two workers or a racing reaper/dispatcher from recovering the same notification twice', async () => {
+      const staleStartedAt = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+      // Worker 2 / racing reaper gets null on conditional update because status/processing_started_at already changed
+      const racingReaper = serviceFixture([
+        {
+          table: 'notifications',
+          response: {
+            data: [
+              {
+                id: 'race-notif-id',
+                created_at: new Date(Date.now() - 20 * 60 * 1000).toISOString(),
+                processing_started_at: staleStartedAt,
+              },
+            ],
+            error: null,
+          },
+        },
+        {
+          table: 'notification_delivery_attempts',
+          response: { data: [], error: null },
+        },
+        {
+          table: 'notifications',
+          response: { data: null, error: null }, // conditional match failed (already recovered or re-claimed with newer processing_started_at)
+        },
+      ]);
+
+      const recovered = await racingReaper.service.recoverStaleProcessing();
+      expect(recovered).toBe(0);
+      expect(racingReaper.remaining).toEqual([]);
+      // Must NOT insert a duplicate attempt when conditional update matched 0 rows
+      expect(racingReaper.calls).toHaveLength(3);
+    });
+
+    it('reconciles to sent without duplicate push when finish() fails after FCM accepted delivery', async () => {
+      const f = serviceFixture([
+        { table: 'notifications', response: { data: notification, error: null } },
+        {
+          table: 'notifications',
+          response: { data: { ...notification, status: 'processing' }, error: null },
+        },
+        {
+          table: 'notification_preferences',
+          response: { data: { push_enabled: true }, error: null },
+        },
+        {
+          table: 'device_tokens',
+          response: { data: [{ id: 'dev-1', push_token: 'tok-1' }], error: null },
+        },
+        // finish() attempt read throws error
+        {
+          table: 'notification_delivery_attempts',
+          response: { data: null, error: { message: 'transient db write error' } },
+        },
+        // reconcileClaimedNotificationOnError reads attempts and updates notifications -> sent
+        {
+          table: 'notification_delivery_attempts',
+          response: { data: [], error: null },
+        },
+        { table: 'notifications', response: { data: null, error: null } },
+      ]);
+
+      await expect(f.service.dispatchPersisted(notification.id)).rejects.toThrow(
+        'Unable to inspect notification attempts',
+      );
+      expect(f.send).toHaveBeenCalledTimes(1);
+      expect(f.remaining).toEqual([]);
+
+      const reconcileUpdate = f.calls[6];
+      expect(reconcileUpdate.methods).toContainEqual({
+        name: 'update',
+        arguments: [{ status: 'sent', processing_started_at: null }],
+      });
+    });
+
+    it('reconciles to failed (never queued) when an exception occurs before any FCM send succeeds', async () => {
+      const f = serviceFixture(
+        [
+          { table: 'notifications', response: { data: notification, error: null } },
+          {
+            table: 'notifications',
+            response: { data: { ...notification, status: 'processing' }, error: null },
+          },
+          {
+            table: 'notification_preferences',
+            response: { data: { push_enabled: true }, error: null },
+          },
+          {
+            table: 'device_tokens',
+            response: { data: [{ id: 'dev-1', push_token: 'tok-1' }], error: null },
+          },
+          // finish() fails when recording failed attempt
+          {
+            table: 'notification_delivery_attempts',
+            response: { data: null, error: { message: 'db timeout' } },
+          },
+          // reconcileClaimedNotificationOnError
+          {
+            table: 'notification_delivery_attempts',
+            response: { data: [], error: null },
+          },
+          { table: 'notifications', response: { data: null, error: null } },
+        ],
+        jest.fn().mockResolvedValue({ ok: false, reason: 'provider_error' }),
+      );
+
+      await expect(f.service.dispatchPersisted(notification.id)).rejects.toThrow(
+        'Unable to inspect notification attempts',
+      );
+      expect(f.remaining).toEqual([]);
+      expect(f.calls[6].methods).toContainEqual({
+        name: 'update',
+        arguments: [{ status: 'failed', processing_started_at: null }],
+      });
+    });
+
+    it('sets processing_started_at on claim and clears it on terminal transitions', async () => {
+      const f = serviceFixture([
+        { table: 'notifications', response: { data: notification, error: null } },
+        {
+          table: 'notifications',
+          response: { data: { ...notification, status: 'processing' }, error: null },
+        },
+        {
+          table: 'notification_preferences',
+          response: { data: { push_enabled: false }, error: null },
+        },
+        {
+          table: 'notification_delivery_attempts',
+          response: { data: null, error: null },
+        },
+        {
+          table: 'notification_delivery_attempts',
+          response: { data: null, error: null },
+        },
+        {
+          table: 'notifications',
+          response: { data: { id: notification.id }, error: null },
+        },
+      ]);
+
+      const result = await f.service.dispatchPersisted(notification.id);
+      expect(result.status).toBe('cancelled');
+      expect(f.remaining).toEqual([]);
+
+      const claimUpdate = f.calls[1].methods.find((m) => m.name === 'update')
+        ?.arguments[0] as any;
+      expect(claimUpdate.status).toBe('processing');
+      expect(typeof claimUpdate.processing_started_at).toBe('string');
+
+      const finalUpdate = f.calls[5].methods.find((m) => m.name === 'update')
+        ?.arguments[0] as any;
+      expect(finalUpdate).toEqual({
+        status: 'cancelled',
+        processing_started_at: null,
+      });
     });
   });
 });
