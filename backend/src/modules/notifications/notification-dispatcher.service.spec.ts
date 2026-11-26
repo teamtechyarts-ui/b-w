@@ -949,5 +949,161 @@ describe('NotificationDispatcher', () => {
         }
       }
     });
+
+    it('logs sanitized lease_rpc_error with errorCode on PostgreSQL 42702 error', async () => {
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+      try {
+        const f = serviceFixture([], undefined, true, async () => ({
+          data: null,
+          error: {
+            code: '42702',
+            message: 'column reference "lease_name" is ambiguous',
+          },
+        }));
+
+        await expect(f.service.processPendingQueue()).resolves.toBe(0);
+        expect(f.calls).toHaveLength(0);
+        expect(warnSpy).toHaveBeenCalledWith(
+          '[NOTIFICATION_LEASE_RESULT]',
+          expect.objectContaining({
+            phase: 'acquire',
+            workerId: f.service.getWorkerId(),
+            leaseName: 'notification_queue_sweep',
+            acquired: false,
+            reason: 'lease_rpc_error',
+            errorCode: '42702',
+            errorMessage: 'column reference "lease_name" is ambiguous',
+          }),
+        );
+        expect(logSpy).toHaveBeenCalledWith(
+          '[NOTIFICATION_QUEUE_SWEEP_SKIPPED]',
+          expect.objectContaining({
+            workerId: f.service.getWorkerId(),
+            leaseName: 'notification_queue_sweep',
+            reason: 'lease_rpc_error',
+          }),
+        );
+      } finally {
+        warnSpy.mockRestore();
+        logSpy.mockRestore();
+      }
+    });
+
+    it('logs sanitized lease_rpc_error with errorCode 42501 on permission-denied RPC error', async () => {
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+      try {
+        const f = serviceFixture([], undefined, true, async () => ({
+          data: null,
+          error: {
+            code: '42501',
+            message: 'permission denied for function acquire_or_renew_worker_lease',
+          },
+        }));
+
+        await expect(f.service.processPendingQueue()).resolves.toBe(0);
+        expect(f.calls).toHaveLength(0);
+        expect(warnSpy).toHaveBeenCalledWith(
+          '[NOTIFICATION_LEASE_RESULT]',
+          expect.objectContaining({
+            phase: 'acquire',
+            acquired: false,
+            reason: 'lease_rpc_error',
+            errorCode: '42501',
+          }),
+        );
+        expect(logSpy).toHaveBeenCalledWith(
+          '[NOTIFICATION_QUEUE_SWEEP_SKIPPED]',
+          expect.objectContaining({
+            reason: 'lease_rpc_error',
+          }),
+        );
+      } finally {
+        warnSpy.mockRestore();
+        logSpy.mockRestore();
+      }
+    });
+
+    it('logs lease_rpc_error on network exception and distinguishes it from normal lease contention', async () => {
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+      try {
+        const netErr = Object.assign(new Error('connect ECONNREFUSED'), {
+          code: 'ECONNREFUSED',
+        });
+        const networkFail = serviceFixture([], undefined, true, async () => {
+          throw netErr;
+        });
+
+        await expect(networkFail.service.processPendingQueue()).resolves.toBe(0);
+        expect(warnSpy).toHaveBeenCalledWith(
+          '[NOTIFICATION_LEASE_RESULT]',
+          expect.objectContaining({
+            reason: 'lease_rpc_error',
+            errorCode: 'ECONNREFUSED',
+            errorMessage: 'connect ECONNREFUSED',
+          }),
+        );
+        expect(logSpy).toHaveBeenCalledWith(
+          '[NOTIFICATION_QUEUE_SWEEP_SKIPPED]',
+          expect.objectContaining({
+            reason: 'lease_rpc_error',
+          }),
+        );
+
+        logSpy.mockClear();
+        const contested = serviceFixture([], undefined, true, async () => ({
+          data: [
+            {
+              lease_name: 'notification_queue_sweep',
+              holder_id: '00000000-0000-0000-0000-000000000001',
+              leased_until: '2026-11-26T12:00:00.000Z',
+              acquired: false,
+            },
+          ],
+          error: null,
+        }));
+
+        await expect(contested.service.processPendingQueue()).resolves.toBe(0);
+        expect(contested.calls).toHaveLength(0);
+        expect(logSpy).toHaveBeenCalledWith(
+          '[NOTIFICATION_LEASE_RESULT]',
+          expect.objectContaining({
+            acquired: false,
+            reason: 'lease_not_acquired',
+            returnedHolderId: '00000000-0000-0000-0000-000000000001',
+            returnedAcquired: false,
+          }),
+        );
+        expect(logSpy).toHaveBeenCalledWith(
+          '[NOTIFICATION_QUEUE_SWEEP_SKIPPED]',
+          expect.objectContaining({
+            reason: 'lease_not_acquired',
+          }),
+        );
+      } finally {
+        warnSpy.mockRestore();
+        logSpy.mockRestore();
+      }
+    });
+
+    it('rejects lease ownership if returned holder_id does not match current workerId', async () => {
+      const f = serviceFixture([], undefined, true, async () => ({
+        data: [
+          {
+            lease_name: 'notification_queue_sweep',
+            holder_id: '11111111-1111-1111-1111-111111111111',
+            leased_until: '2026-11-26T12:00:00.000Z',
+            acquired: true,
+          },
+        ],
+        error: null,
+      }));
+
+      await expect(f.service.acquireOrRenewLease('acquire')).resolves.toBe(false);
+      await expect(f.service.processPendingQueue()).resolves.toBe(0);
+      expect(f.calls).toHaveLength(0);
+    });
   });
 });

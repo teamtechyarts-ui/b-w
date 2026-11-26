@@ -205,9 +205,12 @@ export class NotificationDispatcher implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  async acquireOrRenewLease(
+  private async attemptAcquireOrRenewLease(
     phase: 'acquire' | 'renew' = 'acquire',
-  ): Promise<boolean> {
+  ): Promise<{
+    acquired: boolean;
+    skipReason?: 'lease_rpc_error' | 'lease_not_acquired';
+  }> {
     try {
       const db = this.db() as any;
       if (typeof db?.rpc !== 'function') {
@@ -216,9 +219,11 @@ export class NotificationDispatcher implements OnModuleInit, OnModuleDestroy {
           workerId: this.workerId,
           leaseName: LEASE_NAME,
           acquired: false,
-          reason: 'rpc_unavailable',
+          reason: 'lease_rpc_error',
+          errorCode: 'RPC_UNAVAILABLE',
+          errorMessage: 'Supabase admin client rpc() is unavailable',
         });
-        return false;
+        return { acquired: false, skipReason: 'lease_rpc_error' };
       }
       const { data, error } = await db.rpc('acquire_or_renew_worker_lease', {
         p_lease_name: LEASE_NAME,
@@ -232,10 +237,11 @@ export class NotificationDispatcher implements OnModuleInit, OnModuleDestroy {
           workerId: this.workerId,
           leaseName: LEASE_NAME,
           acquired: false,
-          reason: 'rpc_error',
+          reason: 'lease_rpc_error',
+          errorCode: error?.code ?? null,
           errorMessage: error?.message ?? 'unknown_error',
         });
-        return false;
+        return { acquired: false, skipReason: 'lease_rpc_error' };
       }
       const row = Array.isArray(data) ? data[0] : data;
       const isOwner = Boolean(
@@ -247,11 +253,14 @@ export class NotificationDispatcher implements OnModuleInit, OnModuleDestroy {
         workerId: this.workerId,
         leaseName: LEASE_NAME,
         acquired: isOwner,
+        reason: isOwner ? 'acquired' : 'lease_not_acquired',
         returnedHolderId: row?.holder_id ?? null,
         returnedAcquired: row?.acquired ?? null,
         leasedUntil: row?.leased_until ?? null,
       });
-      return isOwner;
+      return isOwner
+        ? { acquired: true }
+        : { acquired: false, skipReason: 'lease_not_acquired' };
     } catch (err) {
       this.holdsLease = false;
       console.warn('[NOTIFICATION_LEASE_RESULT]', {
@@ -259,11 +268,19 @@ export class NotificationDispatcher implements OnModuleInit, OnModuleDestroy {
         workerId: this.workerId,
         leaseName: LEASE_NAME,
         acquired: false,
-        reason: 'rpc_exception',
+        reason: 'lease_rpc_error',
+        errorCode: (err as any)?.code ?? 'RPC_EXCEPTION',
         errorMessage: err instanceof Error ? err.message : 'unknown_exception',
       });
-      return false;
+      return { acquired: false, skipReason: 'lease_rpc_error' };
     }
+  }
+
+  async acquireOrRenewLease(
+    phase: 'acquire' | 'renew' = 'acquire',
+  ): Promise<boolean> {
+    const result = await this.attemptAcquireOrRenewLease(phase);
+    return result.acquired;
   }
 
   async releaseLease(): Promise<boolean> {
@@ -340,12 +357,12 @@ export class NotificationDispatcher implements OnModuleInit, OnModuleDestroy {
     let renewalTimer: NodeJS.Timeout | null = null;
 
     try {
-      const acquired = await this.acquireOrRenewLease('acquire');
-      if (!acquired) {
+      const leaseAttempt = await this.attemptAcquireOrRenewLease('acquire');
+      if (!leaseAttempt.acquired) {
         console.log('[NOTIFICATION_QUEUE_SWEEP_SKIPPED]', {
           workerId: this.workerId,
           leaseName: LEASE_NAME,
-          reason: 'lease_not_acquired',
+          reason: leaseAttempt.skipReason ?? 'lease_not_acquired',
         });
         return 0;
       }
