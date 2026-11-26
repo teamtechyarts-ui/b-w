@@ -23,10 +23,13 @@ type NotificationStatus =
   | 'failed'
   | 'cancelled';
 
+type NotificationChannel = 'push' | 'sms' | 'whatsapp' | 'email' | 'in_app';
+
 type PersistedNotification = {
   id: string;
   profile_id: string;
   order_id?: string | null;
+  channel?: NotificationChannel | null;
   notification_type?: string | null;
   event_type?: string | null;
   title: string;
@@ -732,11 +735,23 @@ export class NotificationDispatcher implements OnModuleInit, OnModuleDestroy {
     }
 
     const claimedNotification = claimed as PersistedNotification;
+    const isInApp = claimedNotification.channel === 'in_app';
     const claimToken = claimedNotification.processing_started_at ?? claimTimestamp;
     let finalized = false;
     let sentCountSoFar = 0;
 
     try {
+      if (isInApp && !this.pushProvider.configured) {
+        const result = await this.finalizeWithoutProviderAttempt(
+          claimedNotification,
+          claimToken,
+          'sent',
+          'provider_not_configured',
+        );
+        finalized = true;
+        return result;
+      }
+
       const { data: preferences, error: preferencesError } = await this.db()
         .from('notification_preferences')
         .select('push_enabled')
@@ -744,6 +759,28 @@ export class NotificationDispatcher implements OnModuleInit, OnModuleDestroy {
         .maybeSingle();
 
       if (preferencesError) {
+        if (isInApp) {
+          console.warn('[NOTIFICATION_DB_ERROR]', {
+            workerId: this.workerId,
+            notificationId: claimedNotification.id,
+            channel: claimedNotification.channel ?? null,
+            eventType:
+              claimedNotification.event_type ??
+              claimedNotification.notification_type ??
+              null,
+            stage: 'select_preferences',
+            errorCode: preferencesError?.code ?? null,
+            errorMessage: preferencesError?.message ?? 'unknown_error',
+          });
+          const result = await this.finalizeWithoutProviderAttempt(
+            claimedNotification,
+            claimToken,
+            'sent',
+            'preferences_unavailable',
+          );
+          finalized = true;
+          return result;
+        }
         await this.finish(
           claimedNotification,
           claimToken,
@@ -756,6 +793,16 @@ export class NotificationDispatcher implements OnModuleInit, OnModuleDestroy {
       }
 
       if (preferences?.push_enabled === false) {
+        if (isInApp) {
+          const result = await this.finalizeWithoutProviderAttempt(
+            claimedNotification,
+            claimToken,
+            'sent',
+            'push_disabled',
+          );
+          finalized = true;
+          return result;
+        }
         const result = await this.finish(
           claimedNotification,
           claimToken,
@@ -774,6 +821,28 @@ export class NotificationDispatcher implements OnModuleInit, OnModuleDestroy {
         .eq('is_active', true);
 
       if (devicesError) {
+        if (isInApp) {
+          console.warn('[NOTIFICATION_DB_ERROR]', {
+            workerId: this.workerId,
+            notificationId: claimedNotification.id,
+            channel: claimedNotification.channel ?? null,
+            eventType:
+              claimedNotification.event_type ??
+              claimedNotification.notification_type ??
+              null,
+            stage: 'select_device_tokens',
+            errorCode: devicesError?.code ?? null,
+            errorMessage: devicesError?.message ?? 'unknown_error',
+          });
+          const result = await this.finalizeWithoutProviderAttempt(
+            claimedNotification,
+            claimToken,
+            'sent',
+            'devices_unavailable',
+          );
+          finalized = true;
+          return result;
+        }
         await this.finish(
           claimedNotification,
           claimToken,
@@ -788,6 +857,16 @@ export class NotificationDispatcher implements OnModuleInit, OnModuleDestroy {
       const activeDevices = (devices ?? []) as DeviceToken[];
 
       if (activeDevices.length === 0) {
+        if (isInApp) {
+          const result = await this.finalizeWithoutProviderAttempt(
+            claimedNotification,
+            claimToken,
+            'sent',
+            'no_active_devices',
+          );
+          finalized = true;
+          return result;
+        }
         const result = await this.finish(
           claimedNotification,
           claimToken,
@@ -874,20 +953,45 @@ export class NotificationDispatcher implements OnModuleInit, OnModuleDestroy {
           await this.finish(
             claimedNotification,
             claimToken,
-            'failed',
+            isInApp ? 'sent' : 'failed',
             deliveryResults,
             'token_deactivation_failed',
+            sentCount > 0 ? 'sent' : 'failed',
           );
           finalized = true;
           throw new BadRequestException('Unable to deactivate invalid device tokens');
         }
       }
 
+      const pushAttemptStatus: NotificationStatus =
+        sentCount > 0 ? 'sent' : 'failed';
+      const finalNotificationStatus: NotificationStatus = isInApp
+        ? 'sent'
+        : pushAttemptStatus;
+
+      if (isInApp && pushAttemptStatus === 'failed') {
+        console.warn('[NOTIFICATION_IN_APP_PUSH_FAILED]', {
+          workerId: this.workerId,
+          notificationId: claimedNotification.id,
+          channel: 'in_app',
+          eventType:
+            claimedNotification.event_type ??
+            claimedNotification.notification_type ??
+            null,
+          attemptedDeviceCount: deliveryResults.length,
+          failedCount: deliveryResults.length,
+        });
+      }
+
       const result = await this.finish(
         claimedNotification,
         claimToken,
-        sentCount > 0 ? 'sent' : 'failed',
+        finalNotificationStatus,
         deliveryResults,
+        isInApp && pushAttemptStatus === 'failed'
+          ? 'push_delivery_failed'
+          : undefined,
+        pushAttemptStatus,
       );
       finalized = true;
       return result;
@@ -896,11 +1000,16 @@ export class NotificationDispatcher implements OnModuleInit, OnModuleDestroy {
         console.warn('[NOTIFICATION_DISPATCH_EXCEPTION]', {
           workerId: this.workerId,
           notificationId: claimedNotification.id,
+          channel: claimedNotification.channel ?? null,
+          eventType:
+            claimedNotification.event_type ??
+            claimedNotification.notification_type ??
+            null,
           sentCountSoFar,
           errorMessage: err instanceof Error ? err.message : 'unknown_error',
         });
         await this.reconcileClaimedNotificationOnError(
-          claimedNotification.id,
+          claimedNotification,
           claimToken,
           sentCountSoFar,
         );
@@ -909,11 +1018,81 @@ export class NotificationDispatcher implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  private async finalizeWithoutProviderAttempt(
+    notification: PersistedNotification,
+    claimToken: string,
+    status: NotificationStatus,
+    pushSkipReason: string,
+  ): Promise<NotificationDispatchResult> {
+    const { data: updatedNotification, error: statusError } = await this.db()
+      .from('notifications')
+      .update({ status, processing_started_at: null })
+      .eq('id', notification.id)
+      .eq('status', 'processing')
+      .eq('processing_started_at', claimToken)
+      .select('id')
+      .maybeSingle();
+
+    if (statusError) {
+      console.warn('[NOTIFICATION_DB_ERROR]', {
+        workerId: this.workerId,
+        notificationId: notification.id,
+        channel: notification.channel ?? null,
+        eventType:
+          notification.event_type ?? notification.notification_type ?? null,
+        stage: 'update_notification_status',
+        errorCode: statusError?.code ?? null,
+        errorMessage: statusError?.message ?? 'unknown_error',
+      });
+      throw new BadRequestException('Unable to update notification status');
+    }
+
+    if (!updatedNotification) {
+      console.warn('[NOTIFICATION_FINISH_STALE_CLAIM]', {
+        workerId: this.workerId,
+        notificationId: notification.id,
+        channel: notification.channel ?? null,
+        attemptedStatus: status,
+      });
+      return {
+        notificationId: notification.id,
+        dispatched: false,
+        status: 'processing',
+        attemptedDeviceCount: 0,
+        sentCount: 0,
+        failedCount: 0,
+        reason: 'stale_claim',
+      };
+    }
+
+    console.log('[NOTIFICATION_IN_APP_DELIVERED]', {
+      workerId: this.workerId,
+      notificationId: notification.id,
+      channel: notification.channel ?? 'in_app',
+      eventType:
+        notification.event_type ?? notification.notification_type ?? null,
+      pushStatus: 'skipped',
+      pushReason: pushSkipReason,
+    });
+
+    return {
+      notificationId: notification.id,
+      dispatched: true,
+      status,
+      attemptedDeviceCount: 0,
+      sentCount: 0,
+      failedCount: 0,
+      reason: pushSkipReason,
+    };
+  }
+
   private async reconcileClaimedNotificationOnError(
-    notificationId: string,
+    notification: PersistedNotification,
     claimToken: string,
     sentCountSoFar: number,
   ): Promise<void> {
+    const notificationId = notification.id;
+    const isInApp = notification.channel === 'in_app';
     try {
       const { data: attemptsData, error: attemptsError } = await this.db()
         .from('notification_delivery_attempts')
@@ -921,14 +1100,28 @@ export class NotificationDispatcher implements OnModuleInit, OnModuleDestroy {
         .eq('notification_id', notificationId)
         .order('attempt_number', { ascending: false });
 
+      if (attemptsError) {
+        console.warn('[NOTIFICATION_DB_ERROR]', {
+          workerId: this.workerId,
+          notificationId,
+          channel: notification.channel ?? null,
+          eventType:
+            notification.event_type ?? notification.notification_type ?? null,
+          stage: 'reconcile_select_attempts',
+          errorCode: attemptsError?.code ?? null,
+          errorMessage: attemptsError?.message ?? 'unknown_error',
+        });
+      }
+
       const confirmedSuccessStatus =
         !attemptsError && Array.isArray(attemptsData)
           ? this.resolveConfirmedSuccessfulStatus(attemptsData)
           : null;
 
-      // Never blindly reset to queued; preserve confirmed/in-flight FCM success to avoid duplicate push.
+      // Never blindly reset to queued; preserve persisted in-app delivery and confirmed/in-flight FCM success.
       const targetStatus: NotificationStatus =
-        confirmedSuccessStatus ?? (sentCountSoFar > 0 ? 'sent' : 'failed');
+        confirmedSuccessStatus ??
+        (isInApp || sentCountSoFar > 0 ? 'sent' : 'failed');
 
       const { data: updated, error: updateError } = await this.db()
         .from('notifications')
@@ -943,6 +1136,9 @@ export class NotificationDispatcher implements OnModuleInit, OnModuleDestroy {
         console.warn('[NOTIFICATION_DISPATCH_RECONCILE_FAILED]', {
           workerId: this.workerId,
           notificationId,
+          channel: notification.channel ?? null,
+          eventType:
+            notification.event_type ?? notification.notification_type ?? null,
           targetStatus,
           errorCode: updateError?.code ?? null,
           errorMessage: updateError?.message ?? 'unknown_error',
@@ -962,12 +1158,14 @@ export class NotificationDispatcher implements OnModuleInit, OnModuleDestroy {
       console.log('[NOTIFICATION_DISPATCH_RECONCILED]', {
         workerId: this.workerId,
         notificationId,
+        channel: notification.channel ?? null,
         targetStatus,
       });
     } catch (reconcileErr) {
       console.warn('[NOTIFICATION_DISPATCH_RECONCILE_FAILED]', {
         workerId: this.workerId,
         notificationId,
+        channel: notification.channel ?? null,
         errorMessage:
           reconcileErr instanceof Error ? reconcileErr.message : 'unknown_error',
       });
@@ -980,6 +1178,7 @@ export class NotificationDispatcher implements OnModuleInit, OnModuleDestroy {
     status: NotificationStatus,
     results: DeviceDeliveryResult[],
     reason?: string,
+    attemptStatus: NotificationStatus = status,
   ): Promise<NotificationDispatchResult> {
     const { data: previousAttempt, error: attemptReadError } = await this.db()
       .from('notification_delivery_attempts')
@@ -990,6 +1189,16 @@ export class NotificationDispatcher implements OnModuleInit, OnModuleDestroy {
       .maybeSingle();
 
     if (attemptReadError) {
+      console.warn('[NOTIFICATION_DB_ERROR]', {
+        workerId: this.workerId,
+        notificationId: notification.id,
+        channel: notification.channel ?? null,
+        eventType:
+          notification.event_type ?? notification.notification_type ?? null,
+        stage: 'select_attempts',
+        errorCode: attemptReadError?.code ?? null,
+        errorMessage: attemptReadError?.message ?? 'unknown_error',
+      });
       throw new BadRequestException('Unable to inspect notification attempts');
     }
 
@@ -1013,10 +1222,20 @@ export class NotificationDispatcher implements OnModuleInit, OnModuleDestroy {
         notification_id: notification.id,
         attempt_number: Number(previousAttempt?.attempt_number ?? 0) + 1,
         provider_response: providerResponse,
-        status,
+        status: attemptStatus,
       });
 
     if (attemptError) {
+      console.warn('[NOTIFICATION_DB_ERROR]', {
+        workerId: this.workerId,
+        notificationId: notification.id,
+        channel: notification.channel ?? null,
+        eventType:
+          notification.event_type ?? notification.notification_type ?? null,
+        stage: 'insert_attempt',
+        errorCode: attemptError?.code ?? null,
+        errorMessage: attemptError?.message ?? 'unknown_error',
+      });
       throw new BadRequestException('Unable to record notification attempt');
     }
 
@@ -1030,6 +1249,16 @@ export class NotificationDispatcher implements OnModuleInit, OnModuleDestroy {
       .maybeSingle();
 
     if (statusError) {
+      console.warn('[NOTIFICATION_DB_ERROR]', {
+        workerId: this.workerId,
+        notificationId: notification.id,
+        channel: notification.channel ?? null,
+        eventType:
+          notification.event_type ?? notification.notification_type ?? null,
+        stage: 'update_notification_status',
+        errorCode: statusError?.code ?? null,
+        errorMessage: statusError?.message ?? 'unknown_error',
+      });
       throw new BadRequestException('Unable to update notification status');
     }
 
@@ -1037,6 +1266,7 @@ export class NotificationDispatcher implements OnModuleInit, OnModuleDestroy {
       console.warn('[NOTIFICATION_FINISH_STALE_CLAIM]', {
         workerId: this.workerId,
         notificationId: notification.id,
+        channel: notification.channel ?? null,
         attemptedStatus: status,
       });
       return {

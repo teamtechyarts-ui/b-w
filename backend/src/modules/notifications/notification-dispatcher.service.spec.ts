@@ -1724,4 +1724,455 @@ describe('NotificationDispatcher', () => {
       });
     });
   });
+
+  describe('in_app and FCM delivery decoupling', () => {
+    const inAppNotification = {
+      ...notification,
+      id: 'in-app-notif-id',
+      channel: 'in_app' as const,
+      event_type: 'order_created',
+    };
+
+    const pushNotification = {
+      ...notification,
+      id: 'push-notif-id',
+      channel: 'push' as const,
+      event_type: 'order_created',
+    };
+
+    it('marks in_app notification sent when recipient has no active devices without synthetic delivery attempts', async () => {
+      const claimToken = '2026-11-26T08:00:00.000000+00:00';
+      const f = serviceFixture([
+        {
+          table: 'notifications',
+          response: { data: inAppNotification, error: null },
+        },
+        {
+          table: 'notifications',
+          response: {
+            data: {
+              ...inAppNotification,
+              status: 'processing',
+              processing_started_at: claimToken,
+            },
+            error: null,
+          },
+        },
+        {
+          table: 'notification_preferences',
+          response: { data: { push_enabled: true }, error: null },
+        },
+        { table: 'device_tokens', response: { data: [], error: null } },
+        {
+          table: 'notifications',
+          response: { data: { id: inAppNotification.id }, error: null },
+        },
+      ]);
+
+      const result = await f.service.dispatchPersisted(inAppNotification.id);
+      expect(result).toEqual({
+        notificationId: inAppNotification.id,
+        dispatched: true,
+        status: 'sent',
+        attemptedDeviceCount: 0,
+        sentCount: 0,
+        failedCount: 0,
+        reason: 'no_active_devices',
+      });
+      expect(f.send).not.toHaveBeenCalled();
+      expect(f.calls.filter((c) => c.table === 'notification_delivery_attempts')).toHaveLength(0);
+      expect(f.calls[4].methods).toContainEqual({
+        name: 'update',
+        arguments: [{ status: 'sent', processing_started_at: null }],
+      });
+      expect(f.calls[4].methods).toContainEqual({
+        name: 'eq',
+        arguments: ['processing_started_at', claimToken],
+      });
+      expect(f.remaining).toEqual([]);
+    });
+
+    it('marks in_app notification sent when push is disabled without contacting FCM or inserting synthetic attempts', async () => {
+      const f = serviceFixture([
+        {
+          table: 'notifications',
+          response: { data: inAppNotification, error: null },
+        },
+        {
+          table: 'notifications',
+          response: {
+            data: { ...inAppNotification, status: 'processing' },
+            error: null,
+          },
+        },
+        {
+          table: 'notification_preferences',
+          response: { data: { push_enabled: false }, error: null },
+        },
+        {
+          table: 'notifications',
+          response: { data: { id: inAppNotification.id }, error: null },
+        },
+      ]);
+
+      const result = await f.service.dispatchPersisted(inAppNotification.id);
+      expect(result.status).toBe('sent');
+      expect(result.reason).toBe('push_disabled');
+      expect(f.send).not.toHaveBeenCalled();
+      expect(f.calls.filter((c) => c.table === 'notification_delivery_attempts')).toHaveLength(0);
+      expect(f.remaining).toEqual([]);
+    });
+
+    it('marks in_app notification sent when FCM provider is unavailable without synthetic attempts', async () => {
+      const f = serviceFixture(
+        [
+          {
+            table: 'notifications',
+            response: { data: inAppNotification, error: null },
+          },
+          {
+            table: 'notifications',
+            response: {
+              data: { ...inAppNotification, status: 'processing' },
+              error: null,
+            },
+          },
+          {
+            table: 'notifications',
+            response: { data: { id: inAppNotification.id }, error: null },
+          },
+        ],
+        jest.fn(),
+        false,
+      );
+
+      const result = await f.service.dispatchPersisted(inAppNotification.id);
+      expect(result.status).toBe('sent');
+      expect(result.reason).toBe('provider_not_configured');
+      expect(f.send).not.toHaveBeenCalled();
+      expect(f.calls.filter((c) => c.table === 'notification_delivery_attempts')).toHaveLength(0);
+      expect(f.remaining).toEqual([]);
+    });
+
+    it('marks in_app notification sent and records real sent attempt when FCM succeeds', async () => {
+      const f = serviceFixture([
+        {
+          table: 'notifications',
+          response: { data: inAppNotification, error: null },
+        },
+        {
+          table: 'notifications',
+          response: {
+            data: { ...inAppNotification, status: 'processing' },
+            error: null,
+          },
+        },
+        {
+          table: 'notification_preferences',
+          response: { data: { push_enabled: true }, error: null },
+        },
+        {
+          table: 'device_tokens',
+          response: {
+            data: [{ id: 'dev-1', push_token: 'tok-1' }],
+            error: null,
+          },
+        },
+        {
+          table: 'notification_delivery_attempts',
+          response: { data: null, error: null },
+        },
+        {
+          table: 'notification_delivery_attempts',
+          response: { data: null, error: null },
+        },
+        {
+          table: 'notifications',
+          response: { data: { id: inAppNotification.id }, error: null },
+        },
+      ]);
+
+      const result = await f.service.dispatchPersisted(inAppNotification.id);
+      expect(result).toMatchObject({
+        notificationId: inAppNotification.id,
+        dispatched: true,
+        status: 'sent',
+        sentCount: 1,
+        failedCount: 0,
+      });
+      expect(f.send).toHaveBeenCalledTimes(1);
+      const attemptInsert = f.calls[5].methods.find((m) => m.name === 'insert')
+        ?.arguments[0] as any;
+      expect(attemptInsert.status).toBe('sent');
+      expect(f.remaining).toEqual([]);
+    });
+
+    it('keeps in_app notification sent when optional FCM push fails while recording failed push attempt and diagnostics', async () => {
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        const f = serviceFixture(
+          [
+            {
+              table: 'notifications',
+              response: { data: inAppNotification, error: null },
+            },
+            {
+              table: 'notifications',
+              response: {
+                data: { ...inAppNotification, status: 'processing' },
+                error: null,
+              },
+            },
+            {
+              table: 'notification_preferences',
+              response: { data: { push_enabled: true }, error: null },
+            },
+            {
+              table: 'device_tokens',
+              response: {
+                data: [{ id: 'dev-1', push_token: 'tok-1' }],
+                error: null,
+              },
+            },
+            {
+              table: 'notification_delivery_attempts',
+              response: { data: null, error: null },
+            },
+            {
+              table: 'notification_delivery_attempts',
+              response: { data: null, error: null },
+            },
+            {
+              table: 'notifications',
+              response: { data: { id: inAppNotification.id }, error: null },
+            },
+          ],
+          jest.fn().mockResolvedValue({ ok: false, reason: 'provider_error' }),
+        );
+
+        const result = await f.service.dispatchPersisted(inAppNotification.id);
+        expect(result).toMatchObject({
+          notificationId: inAppNotification.id,
+          dispatched: true,
+          status: 'sent',
+          sentCount: 0,
+          failedCount: 1,
+          reason: 'push_delivery_failed',
+        });
+
+        // Real delivery attempt records actual failed FCM outcome
+        const attemptInsert = f.calls[5].methods.find((m) => m.name === 'insert')
+          ?.arguments[0] as any;
+        expect(attemptInsert.status).toBe('failed');
+        expect(attemptInsert.provider_response.reason).toBe('push_delivery_failed');
+
+        // Persisted inbox notification row transitions to sent with cleared processing_started_at
+        expect(f.calls[6].methods).toContainEqual({
+          name: 'update',
+          arguments: [{ status: 'sent', processing_started_at: null }],
+        });
+        expect(warnSpy).toHaveBeenCalledWith(
+          '[NOTIFICATION_IN_APP_PUSH_FAILED]',
+          expect.objectContaining({
+            notificationId: inAppNotification.id,
+            channel: 'in_app',
+            eventType: 'order_created',
+          }),
+        );
+        expect(f.remaining).toEqual([]);
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    it('preserves failed status for push channel when no active devices exist or FCM fails', async () => {
+      const noDevices = serviceFixture([
+        {
+          table: 'notifications',
+          response: { data: pushNotification, error: null },
+        },
+        {
+          table: 'notifications',
+          response: {
+            data: { ...pushNotification, status: 'processing' },
+            error: null,
+          },
+        },
+        {
+          table: 'notification_preferences',
+          response: { data: { push_enabled: true }, error: null },
+        },
+        { table: 'device_tokens', response: { data: [], error: null } },
+        {
+          table: 'notification_delivery_attempts',
+          response: { data: null, error: null },
+        },
+        {
+          table: 'notification_delivery_attempts',
+          response: { data: null, error: null },
+        },
+        {
+          table: 'notifications',
+          response: { data: { id: pushNotification.id }, error: null },
+        },
+      ]);
+
+      await expect(
+        noDevices.service.dispatchPersisted(pushNotification.id),
+      ).resolves.toMatchObject({
+        status: 'failed',
+        reason: 'no_active_devices',
+      });
+
+      const fcmFail = serviceFixture(
+        [
+          {
+            table: 'notifications',
+            response: { data: pushNotification, error: null },
+          },
+          {
+            table: 'notifications',
+            response: {
+              data: { ...pushNotification, status: 'processing' },
+              error: null,
+            },
+          },
+          {
+            table: 'notification_preferences',
+            response: { data: { push_enabled: true }, error: null },
+          },
+          {
+            table: 'device_tokens',
+            response: {
+              data: [{ id: 'dev-1', push_token: 'tok-1' }],
+              error: null,
+            },
+          },
+          {
+            table: 'notification_delivery_attempts',
+            response: { data: null, error: null },
+          },
+          {
+            table: 'notification_delivery_attempts',
+            response: { data: null, error: null },
+          },
+          {
+            table: 'notifications',
+            response: { data: { id: pushNotification.id }, error: null },
+          },
+        ],
+        jest.fn().mockResolvedValue({ ok: false, reason: 'provider_error' }),
+      );
+
+      await expect(
+        fcmFail.service.dispatchPersisted(pushNotification.id),
+      ).resolves.toMatchObject({
+        status: 'failed',
+        failedCount: 1,
+      });
+    });
+
+    it('logs sanitized structured DB error diagnostics when delivery-attempt insertion fails', async () => {
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        const f = serviceFixture([
+          {
+            table: 'notifications',
+            response: { data: inAppNotification, error: null },
+          },
+          {
+            table: 'notifications',
+            response: {
+              data: { ...inAppNotification, status: 'processing' },
+              error: null,
+            },
+          },
+          {
+            table: 'notification_preferences',
+            response: { data: { push_enabled: true }, error: null },
+          },
+          {
+            table: 'device_tokens',
+            response: {
+              data: [{ id: 'dev-1', push_token: 'tok-1' }],
+              error: null,
+            },
+          },
+          {
+            table: 'notification_delivery_attempts',
+            response: { data: null, error: null },
+          },
+          {
+            table: 'notification_delivery_attempts',
+            response: {
+              data: null,
+              error: { code: '42501', message: 'permission denied for table' },
+            },
+          },
+          // reconcileClaimedNotificationOnError
+          {
+            table: 'notification_delivery_attempts',
+            response: { data: [], error: null },
+          },
+          {
+            table: 'notifications',
+            response: { data: { id: inAppNotification.id }, error: null },
+          },
+        ]);
+
+        await expect(
+          f.service.dispatchPersisted(inAppNotification.id),
+        ).rejects.toThrow('Unable to record notification attempt');
+
+        expect(warnSpy).toHaveBeenCalledWith(
+          '[NOTIFICATION_DB_ERROR]',
+          expect.objectContaining({
+            notificationId: inAppNotification.id,
+            channel: 'in_app',
+            eventType: 'order_created',
+            stage: 'insert_attempt',
+            errorCode: '42501',
+            errorMessage: 'permission denied for table',
+          }),
+        );
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    it('enforces claim fencing when finalizing an in_app notification without provider attempt', async () => {
+      const staleClaimToken = '2026-11-26T08:00:00.000000+00:00';
+      const f = serviceFixture([
+        {
+          table: 'notifications',
+          response: { data: inAppNotification, error: null },
+        },
+        {
+          table: 'notifications',
+          response: {
+            data: {
+              ...inAppNotification,
+              status: 'processing',
+              processing_started_at: staleClaimToken,
+            },
+            error: null,
+          },
+        },
+        {
+          table: 'notification_preferences',
+          response: { data: { push_enabled: false }, error: null },
+        },
+        // 0 rows matched because a newer worker holds the claim
+        { table: 'notifications', response: { data: null, error: null } },
+      ]);
+
+      const result = await f.service.dispatchPersisted(inAppNotification.id);
+      expect(result.dispatched).toBe(false);
+      expect(result.reason).toBe('stale_claim');
+      expect(f.calls[3].methods).toContainEqual({
+        name: 'eq',
+        arguments: ['processing_started_at', staleClaimToken],
+      });
+    });
+  });
 });
